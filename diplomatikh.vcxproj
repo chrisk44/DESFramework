@@ -81,10 +81,10 @@
     <CudaCompile Include="model.cu" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="myclass.cpp" />
+    <CudaCompile Include="framework.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="myclass.h" />
+    <CudaCompile Include="framework.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
