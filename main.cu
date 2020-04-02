@@ -31,18 +31,15 @@ int main(){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.batchSize = 1;
+    parameters.batchSize = 5;
     parameters.computeBatchSize = 1;
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
     limits[0] = Limit { -10, 10, 10 };
     limits[1] = Limit { -10, 10, 20 };
-
-    // Declare the framework object
-    ParallelFramework framework;
      
     // Initialize the framework object
-    result = framework.init(limits, parameters, model);
+    ParallelFramework framework = ParallelFramework(limits, parameters, model);
     if (result != 0) {
         cout << "Error initializing framework: " << result << endl;
     }

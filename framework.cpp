@@ -14,28 +14,29 @@
 
 using namespace std;
 
-int ParallelFramework::init(Limit* limits, ParallelFrameworkParameters& parameters, Model& model) {
+ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters& parameters, Model& model) {
 	unsigned int i;
+	valid = false;
 
 	// TODO: Verify parameters
 	if (parameters.D == 0) {
 		cout << "[E] Dimension must be > 0";
-		return -1;
+		return;
 	}
 
 	for (i = 0; i < parameters.D; i++) {
 		if (limits[i].lowerLimit > limits[i].upperLimit) {
 			cout << "[E] Limits for dimension " << i << ": Lower limit can't be higher than upper limit";
-			return 1;
+			return;
 		}
 
 		if (limits[i].N == 0) {
 			cout << "[E] Limits for dimension " << i << ": N must be > 0";
-			return 2;
+			return;
 		}
 	}
 
-	idxSteps = (long*)malloc(sizeof(long) * parameters.D);
+	idxSteps = (unsigned long*)malloc(sizeof(long) * parameters.D);
 	idxSteps[0] = limits[0].N;
 	for (i = 1; i < parameters.D; i++) {
 		idxSteps[i] = idxSteps[i - 1] * limits[i-1].N;
@@ -49,78 +50,141 @@ int ParallelFramework::init(Limit* limits, ParallelFrameworkParameters& paramete
 	long totalElements = (long)idxSteps[parameters.D - 1] * (long)limits[parameters.D - 1].N;
 	results = (bool*)calloc(totalElements, sizeof(bool));
 
+	toSendVector = (unsigned long*)calloc(parameters.D, sizeof(long));
 
 	this->limits = limits;
 	this->parameters = &parameters;
 	this->model = &model;
 
-	return 0;
+	valid = true;
 }
 
 ParallelFramework::~ParallelFramework() {
-	//free(idxSteps);
-	//free(steps);
-	//free(results);
+	free(idxSteps);
+	free(steps);
+	free(results);
+	free(toSendVector);
+	valid = false;
+}
+
+bool ParallelFramework::isValid() {
+	return valid;
 }
 
 int ParallelFramework::run() {
-	/*
-		master{
-			for each batch_size{
-				MPI_recv('ready') from rank i
 
-				save results
+	int type;
 
-				cont?
+	// For each GPU, fork, set type = gpu
 
-				if cont{
-					MPI_send(batch) to rank i
-				}else{
-					MPI_send('done') to rank i
-				}
-			}
-		}
-		slave{
-			for each cpu,gpu,copr - 1 (inital process gets one processing unit){
-				fork
-				if child {
-					initialize MPI
-					break
-				}
-			}
-			//#cpu + #gpu + #copr processes continue here...
+	// Fork once for cpu (initial thread must be the master), set type = cpu
 
-			type = cpu|gpu|copr;
-			*validation_func = type &validate();
+	// Initialize MPI
 
-			MPI_send('ready') to master
-			MPI_receive() from master
-			while(received not 'done'){
-				split dataset
-				for each compute_batch_size datapoints{
-					results += validation_func(...)
-				}
-				MPI_receive() from master
-			}
-		}
-	*/
+	int rank = 0;
 
-	float* point = (float*)malloc(sizeof(float) * parameters->D);
+	if(rank == 0){
+		masterThread();
+	}else{
+		slaveThread(type);
+	}
 
-	// Start scanning from the last dimension
-	scanDimension(parameters->D - 1, point, results, 0);
-
-	free(point);
+	// Finalize MPI
 
 	return 0;
 }
 
+int ParallelFramework::masterThread() {
+
+	// While (finished_processes < total_processes)
+	while (true) {
+		// Receive from any slave
+		// If 'ready'
+			// getDataChunk
+			// If more data available
+				// send data
+			// else
+				// notify about finish
+				// finished_processes++
+
+		// else if 'results_ready'
+			// save received results in this->results
+	}
+
+
+	return 0;
+}
+int ParallelFramework::slaveThread(int type) {
+
+	while (true) {
+		// Send 'ready' signal to master
+
+		// Receive data to compute
+
+		// If received more data...
+
+			// Calculate the results
+
+			// Send the results to master
+
+		// No more data
+			// break
+	}
+
+	return 0;
+}
+
+void ParallelFramework::getDataChunk(long *toCalculate, int *numOfElements) {
+	// TODO: Eventually change it to assign parameters->batch_size elements, instead of limits[0].N
+
+	// toSendVector[0] is initially 0
+	// It becomes 1 when this function reaches the end of the rest of the dimensions
+	if (toSendVector[0] != 0) {
+		*numOfElements = 0;
+		return;
+	}
+
+	// Copy toSendVector to the output
+	memcpy(toCalculate, toSendVector, parameters->D * sizeof(long));
+
+	unsigned int i;
+	unsigned int carry = 1;
+	for (i = 1; i < parameters->D; i++) {
+		toSendVector += carry;
+
+		if (toSendVector[i] == limits[i].N) {
+			toSendVector[i] = 0;
+			carry = 1;
+		} else {
+			carry = 0;
+		}
+	}
+
+	if (carry != 0) {
+		*numOfElements = 0;
+		toSendVector[0] = 1;
+	} else {
+		*numOfElements = limits[0].N;
+	}
+
+	*numOfElements = carry == 1 ? 0 : limits[0].N;
+}
+
+/*
+float* point = (float*)malloc(sizeof(float) * parameters->D);
+
+// Start scanning from the last dimension
+scanDimension(parameters->D - 1, point, results, 0);
+
+free(point);
+*/
+/*
 void ParallelFramework::scanDimension(int d, float* point, bool* results, int startIdx) {
 	unsigned int i;
 	// Recursively reach dimension 0, where the actual computation will be done
 
 	if (d == 0) {
-		// Go through every point in dimension 0, using the pre-set values in 'point' for the smaller dimensions
+		// Go through every point in dimension 0, using the pre-set values in 'point' for the other dimensions
 		// Calculate the result for point[:, const, const, ...]
 		// Save in results[startIdx + 0:limits[d].N]
 
@@ -129,6 +193,7 @@ void ParallelFramework::scanDimension(int d, float* point, bool* results, int st
 #ifdef DEBUG
 		cout << "Calculating with startIdx: " << startIdx << endl;
 #endif
+
 		for (i = 0; i < limits[d].N; i++) {
 			// Set the point for this iteration
 			point[d] = limits[d].lowerLimit + i * steps[d];
@@ -170,11 +235,10 @@ void ParallelFramework::scanDimension(int d, float* point, bool* results, int st
 	}
 	
 }
-
+*/
 bool* ParallelFramework::getResults() {
 	return results;
 }
-
 bool ParallelFramework::getResultAt(float* point) {
 	unsigned int i;
 	int index = 0;
