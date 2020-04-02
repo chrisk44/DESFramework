@@ -21,7 +21,7 @@ public:
 };
 
 int main(){
-    int result;
+    int result = 0;
     MyModel model;
     ParallelFrameworkParameters parameters;
     Limit limits[2];
@@ -34,10 +34,9 @@ int main(){
     parameters.batchSize = 1;
     parameters.computeBatchSize = 1;
 
-    // Create the limits for each dimension (lower is inclusive, upper may be exclusive, depending on the step
-    // TODO: Change this to provide N instead of steps
-    limits[0] = Limit { -10, 10, 1 };
-    limits[1] = Limit { -10, 10, 2 };
+    // Create the limits for each dimension (lower is inclusive, upper is exclusive)
+    limits[0] = Limit { -10, 10, 10 };
+    limits[1] = Limit { -10, 10, 20 };
 
     // Declare the framework object
     ParallelFramework framework;
@@ -53,12 +52,15 @@ int main(){
     if (result != 0) {
         cout << "Error running the computation: " << result << endl;
     }
-
+    /*
     float point[2] = { -10, -10 };
     bool r1 = framework.getResultAt(point);
     point[0] = 9.8;
     point[1] = 9.8;
     bool r2 = framework.getResultAt(point);
 
+    // destroy framework
+    */
+    
     return 0;
 }
