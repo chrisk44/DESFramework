@@ -27,7 +27,7 @@ int main(){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.batchSize = 5;
+    parameters.batchSize = 1;
     parameters.computeBatchSize = 1;
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)

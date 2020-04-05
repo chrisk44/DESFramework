@@ -5,6 +5,9 @@
 #include <cuda.h>
 #include <iostream>
 
+#define MAX_DIMENSIONS 10
+#define DEBUG
+
 const int TYPE_CPU = 1;
 const int TYPE_GPU = 2;
 
@@ -46,13 +49,28 @@ __global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
 
 // CUDA kernel to run the computation
 template<class ImplementedModel>
-__global__ void validate_kernel(ImplementedModel** model, float* points, bool* results) {
-	int i = threadIdx.x;
+__global__ void validate_kernel(ImplementedModel** model, long* startingPointIdx, bool* results, Limit* limits, unsigned int D) {
+	float point[MAX_DIMENSIONS];
+	long myIndex[MAX_DIMENSIONS];
 
-	float point = points[i];
+	// Calculate myIndex = startingPointIdx + threadIdx.x
+	unsigned int i;
+	unsigned int carry = threadIdx.x;
+	for (i = 0; i < D; i++) {
+		myIndex[i] = (startingPointIdx[i] + carry) % limits[i].N;
+		carry = (startingPointIdx[i] + carry) / limits[i].N;
+	}
 
-	bool result = (*model)->validate_gpu(&point);
-	results[i] = result;
+	// Calculate the exact point
+	for (i = 0; i < D; i++) {
+		point[i] = limits[i].lowerLimit + myIndex[i] * abs(limits[i].lowerLimit - limits[i].upperLimit) / limits[i].N;
+	}
+
+	// Run the validation function
+	bool result = (*model)->validate_gpu(point);
+
+	// Save the result to global memory
+	results[threadIdx.x] = result;
 }
 
 class ParallelFramework {
@@ -78,7 +96,8 @@ public:
 	int run();
 
 	bool* getResults();
-	long getIndexForPoint(float* point);
+	void getIndicesFromPoint(float* point, long* dst);
+	long getIndexFromIndices(long* pointIdx);
 	bool isValid();
 
 public:
@@ -87,16 +106,16 @@ public:
 	template<class ImplementedModel>
 	int slaveThread(int type);
 
-	void scanDimension(int d, float* prevDims, bool* results, int startIdx);
 	void getDataChunk(long* toCalculate, int *numOfElements);
 
 };
 
 template<class ImplementedModel>
 int ParallelFramework::run() {
-	slaveThread<ImplementedModel>(0);
+	int type = TYPE_GPU;
 
-	int type;
+	slaveThread<ImplementedModel>(type);
+
 
 	// For each GPU, fork, set type = gpu
 
@@ -120,19 +139,32 @@ int ParallelFramework::run() {
 template<class ImplementedModel>
 int ParallelFramework::slaveThread(int type) {
 	long* startPointIdx = new long[parameters->D];
-	float* startPoint = new float[parameters->D];
+	bool* tmpResults = new bool[parameters->batchSize];
 	int numOfElements;
+	unsigned long linearStartIndex;
+
+	// Model to use if type==TYPE_CPU
+	ImplementedModel model = ImplementedModel();
 
 	// The device address where the device address of the model is saved
 	ImplementedModel** deviceModelAddress;
+	bool* deviceResults;
+	long* deviceStartingPointIdx;
+	Limit* deviceLimits;
 
 	// Initialize GPU (instantiate an ImplementedModel object on the device)
 	if (type == TYPE_GPU) {
-		// Allocate space for the model's address on the device
+		// Allocate memory on device
 		cudaMalloc(&deviceModelAddress, sizeof(ImplementedModel**));
+		cudaMalloc(&deviceResults, parameters->batchSize * sizeof(bool));
+		cudaMalloc(&deviceStartingPointIdx, parameters->D * sizeof(long));
+		cudaMalloc(&deviceLimits, parameters->D * sizeof(Limit));
 
 		// Create the model object on the device, and write its address in 'deviceModelAddress' on the device
-		create_model_kernel << < 1, 1 >> > (deviceModelAddress);
+		create_model_kernel<ImplementedModel> << < 1, 1 >> > (deviceModelAddress);
+
+		// Move limits to device
+		cudaMemcpy(deviceLimits, limits, parameters->D * sizeof(Limit), cudaMemcpyHostToDevice);
 	}
 
 	while (true) {
@@ -153,18 +185,39 @@ int ParallelFramework::slaveThread(int type) {
 
 			// Calculate the results
 			if (type == TYPE_GPU) {
-				//validate_kernel()
-			}
-			else if (type == TYPE_CPU) {
+
+				// Copy starting point indices to device
+				cudaMemcpy(deviceStartingPointIdx, startPointIdx, parameters->D * sizeof(long), cudaMemcpyHostToDevice);
+
+				// Call the kernel
+				validate_kernel<ImplementedModel> << <1, 1 >> > (deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D);
+
+				// Wait for kernel to finish
+				cudaDeviceSynchronize();
+
+				// Get results from device
+				cudaMemcpy(tmpResults, deviceResults, numOfElements * sizeof(bool), cudaMemcpyDeviceToHost);
+
+			}else if (type == TYPE_CPU) {
+
+				//model.validate_cpu();
 
 			}
 
 			// Send the results to master
 
+#ifdef DEBUG
+			// Print results
+			cout << "Results:";
+			for (unsigned int i = 0; i < numOfElements; i++) {
+				cout << " " << tmpResults[i];
+			}
+			cout << endl;
+#endif
 		}
 		else {
 			// No more data
-			cout << "End of data" << endl;
+			cout << "End of data" << endl << endl;
 			break;
 		}
 	}
@@ -172,14 +225,16 @@ int ParallelFramework::slaveThread(int type) {
 	// Finalize GPU
 	if (type == TYPE_GPU) {
 		// Delete the model object on the device
-		delete_model_kernel << < 1, 1 >> > (deviceModelAddress);
+		delete_model_kernel<ImplementedModel> << < 1, 1 >> > (deviceModelAddress);
 
 		// Free the space for the model's address on the device
 		cudaFree(&deviceModelAddress);
+		cudaFree(&deviceResults);
+		cudaFree(&deviceStartingPointIdx);
+		cudaFree(&deviceLimits);
 	}
 
 	delete[] startPointIdx;
-	delete[] startPoint;
 
 	return 0;
 }

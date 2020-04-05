@@ -16,19 +16,19 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 	valid = false;
 
 	// TODO: Verify parameters
-	if (parameters.D == 0) {
-		cout << "[E] Dimension must be > 0";
+	if (parameters.D == 0 || parameters.D>MAX_DIMENSIONS) {
+		cout << "[E] Dimension must be between 0 and " << MAX_DIMENSIONS << endl;;
 		return;
 	}
 
 	for (i = 0; i < parameters.D; i++) {
 		if (limits[i].lowerLimit > limits[i].upperLimit) {
-			cout << "[E] Limits for dimension " << i << ": Lower limit can't be higher than upper limit";
+			cout << "[E] Limits for dimension " << i << ": Lower limit can't be higher than upper limit" << endl;
 			return;
 		}
 
 		if (limits[i].N == 0) {
-			cout << "[E] Limits for dimension " << i << ": N must be > 0";
+			cout << "[E] Limits for dimension " << i << ": N must be > 0" << endl;
 			return;
 		}
 	}
@@ -45,7 +45,7 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 	}
 
 	totalSent = 0;
-	totalElements = (long)idxSteps[parameters.D - 1];
+	totalElements = (long)idxSteps[parameters.D - 1] * limits[parameters.D - 1].N;
 	results = new bool[totalElements];		// Uninitialized
 
 	toSendVector = new unsigned long[parameters.D];
@@ -210,28 +210,44 @@ void ParallelFramework::getDataChunk(long* toCalculate, int* numOfElements) {
 bool* ParallelFramework::getResults() {
 	return results;
 }
-long ParallelFramework::getIndexForPoint(float* point) {
+void ParallelFramework::getIndicesFromPoint(float* point, long* dst) {
 	unsigned int i;
-	long index = 0;
-	int dimSteps;
 
 	for (i = 0; i < parameters->D; i++) {
 		if (point[i] < limits[i].lowerLimit || point[i] >= limits[i].upperLimit) {
 			cout << "Result query for out-of-bounds point" << endl;
-			return false;
+			return;
 		}
 
 		// Calculate the steps for dimension i
-		dimSteps = (int) floor(abs(limits[i].lowerLimit - point[i]) / steps[i] );
-
-		// Increase index by i*(index-steps for this dimension)
-		index += dimSteps * idxSteps[i];
+		dst[i] = (int)floor(abs(limits[i].lowerLimit - point[i]) / steps[i]);
 	}
 
 #ifdef DEBUG
 	cout << "Index for point ( ";
-	for (int j = 0; j < parameters->D; j++)
-		cout << point[j] << " ";
+	for (i = 0; i < parameters->D; i++)
+		cout << point[i] << " ";
+	cout << "): ";
+
+	for (i = 0; i < parameters->D; i++) {
+		cout << dst[i] << " ";
+	}
+	cout << endl;
+#endif
+}
+long ParallelFramework::getIndexFromIndices(long* pointIdx) {
+	unsigned int i;
+	long index = 0;
+
+	for (i = 0; i < parameters->D; i++) {
+		// Increase index by i*(index-steps for this dimension)
+		index += pointIdx[i] * idxSteps[i];
+	}
+
+#ifdef DEBUG
+	cout << "Index for point ( ";
+	for (i = 0; i < parameters->D; i++)
+		cout << pointIdx[i] << " ";
 	cout << "): " << index << endl;
 #endif
 
