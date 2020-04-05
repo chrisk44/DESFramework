@@ -79,7 +79,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <CudaCompile Include="main.cu" />
-    <CudaCompile Include="model.cu" />
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="framework.cpp" />

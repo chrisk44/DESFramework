@@ -2,7 +2,7 @@
 
 #include <iostream>
 #include <cstdlib>
-#include "model.cu"
+
 #include "framework.h"
 
 using namespace std;
@@ -22,12 +22,8 @@ public:
 
 int main(){
     int result = 0;
-    MyModel model;
     ParallelFrameworkParameters parameters;
     Limit limits[2];
-
-    // Create a model object
-    model = MyModel();
 
     // Create the parameters struct
     parameters.D = 2;
@@ -39,13 +35,13 @@ int main(){
     limits[1] = Limit { -10, 10, 20 };
      
     // Initialize the framework object
-    ParallelFramework framework = ParallelFramework(limits, parameters, model);
+    ParallelFramework framework = ParallelFramework(limits, parameters);
     if (result != 0) {
         cout << "Error initializing framework: " << result << endl;
     }
 
     // Start the computation
-    result = framework.run();
+    result = framework.run<MyModel>();
     if (result != 0) {
         cout << "Error running the computation: " << result << endl;
     }
