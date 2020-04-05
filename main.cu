@@ -49,14 +49,25 @@ int main(){
     if (result != 0) {
         cout << "Error running the computation: " << result << endl;
     }
-    /*
-    float point[2] = { -10, -10 };
-    bool r1 = framework.getResultAt(point);
-    point[0] = 9.8;
-    point[1] = 9.8;
-    bool r2 = framework.getResultAt(point);
 
-    // destroy framework
+    /*
+    float point[2];
+    float step[2] = {
+        abs(limits[0].lowerLimit - limits[0].upperLimit) / limits[0].N,
+        abs(limits[1].lowerLimit - limits[1].upperLimit) / limits[1].N
+    };
+    for (int i = 0; i < limits[0].N; i++) {
+        for (int j = 0; j < limits[1].N; j++) {
+            point[0] = limits[0].lowerLimit + i * step[0];
+            point[1] = limits[1].lowerLimit + j * step[1];
+            
+            bool result = framework.getResults[framework.getIndexForPoint(point)];
+            bool expected = model.validate_cpu(point);
+
+            if (result != expected)
+                cout << "ERROR: Point (" << point[0] << "," << point[1] << ") returned " << result << ", expected " << expected << endl;
+        }
+    }
     */
     
     return 0;

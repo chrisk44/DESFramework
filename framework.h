@@ -23,11 +23,12 @@ private:
 
 	// Runtime variables
 	unsigned long* idxSteps = NULL;			// Index steps for each dimension
-	float* steps = NULL;			// Step for each dimension
-	bool* results = NULL;			// An array of N0 * N1 * ... * ND
+	float* steps = NULL;					// Real step for each dimension
+	bool* results = NULL;					// An array of N0 * N1 * ... * ND
 	bool valid = false;
 	unsigned long* toSendVector = NULL;		// An array of D elements, where every entry shows the next element of that dimension to be dispatched
-	unsigned long* toSendVectorTmp = NULL;
+	unsigned long totalSent = 0;			// Total elements that have been sent for processing
+	unsigned long totalElements = 0;		// Total elements
 
 public:
 	ParallelFramework(Limit* limits, ParallelFrameworkParameters& parameters, Model& model);
@@ -35,10 +36,10 @@ public:
 
 	int run();
 	bool* getResults();
-	bool getResultAt(float* point);
+	long getIndexForPoint(float* point);
 	bool isValid();
 
-private:
+public:
 	int masterThread();
 	int slaveThread(int type);
 

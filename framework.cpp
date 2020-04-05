@@ -11,7 +11,6 @@
 
 //#define DEBUG
 
-
 using namespace std;
 
 ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters& parameters, Model& model) {
@@ -37,7 +36,7 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 	}
 
 	idxSteps = (unsigned long*)malloc(sizeof(long) * parameters.D);
-	idxSteps[0] = limits[0].N;
+	idxSteps[0] = 1;
 	for (i = 1; i < parameters.D; i++) {
 		idxSteps[i] = idxSteps[i - 1] * limits[i-1].N;
 	}
@@ -47,7 +46,8 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 		steps[i] = abs(limits[i].upperLimit - limits[i].lowerLimit) / limits[i].N;
 	}
 
-	long totalElements = (long)idxSteps[parameters.D - 1] * (long)limits[parameters.D - 1].N;
+	totalSent = 0;
+	totalElements = (long)idxSteps[parameters.D - 1];
 	results = (bool*)calloc(totalElements, sizeof(bool));
 
 	toSendVector = (unsigned long*)calloc(parameters.D, sizeof(long));
@@ -72,6 +72,7 @@ bool ParallelFramework::isValid() {
 }
 
 int ParallelFramework::run() {
+	slaveThread(0);
 
 	int type;
 
@@ -80,7 +81,7 @@ int ParallelFramework::run() {
 	// Fork once for cpu (initial thread must be the master), set type = cpu
 
 	// Initialize MPI
-
+	/*
 	int rank = 0;
 
 	if(rank == 0){
@@ -88,7 +89,7 @@ int ParallelFramework::run() {
 	}else{
 		slaveThread(type);
 	}
-
+	*/
 	// Finalize MPI
 
 	return 0;
@@ -115,59 +116,65 @@ int ParallelFramework::masterThread() {
 	return 0;
 }
 int ParallelFramework::slaveThread(int type) {
+	long* startPointIdx = (long*)malloc(sizeof(long) * parameters->D);
+	float* startPoint = (float*)malloc(sizeof(float) * parameters->D);
+	int numOfElements;
 
 	while (true) {
 		// Send 'ready' signal to master
 
 		// Receive data to compute
+		getDataChunk(startPointIdx, &numOfElements);
 
 		// If received more data...
+		if (numOfElements > 0) {
+#ifdef DEBUG
+			cout << "Got " << numOfElements << " elements: [";
+			for (unsigned int i = 0; i < parameters->D; i++)
+				cout << startPointIdx[i] << " ";
+			cout << "]" << endl;
+#endif
 
 			// Calculate the results
 
 			// Send the results to master
 
-		// No more data
-			// break
+		}else {
+			// No more data
+			cout << "End of data" << endl;
+			break;
+		}
 	}
 
 	return 0;
 }
 
-void ParallelFramework::getDataChunk(long *toCalculate, int *numOfElements) {
-	// TODO: Eventually change it to assign parameters->batch_size elements, instead of limits[0].N
-
-	// toSendVector[0] is initially 0
-	// It becomes 1 when this function reaches the end of the rest of the dimensions
-	if (toSendVector[0] != 0) {
+void ParallelFramework::getDataChunk(long* toCalculate, int* numOfElements) {
+	if (totalSent >= totalElements) {
 		*numOfElements = 0;
 		return;
 	}
 
+	unsigned int adjustedBatchSize = parameters->batchSize;
+	if (totalElements - totalSent < adjustedBatchSize)
+		adjustedBatchSize = totalElements - totalSent;
+
 	// Copy toSendVector to the output
 	memcpy(toCalculate, toSendVector, parameters->D * sizeof(long));
+	*numOfElements = adjustedBatchSize;
 
 	unsigned int i;
-	unsigned int carry = 1;
-	for (i = 1; i < parameters->D; i++) {
-		toSendVector += carry;
+	unsigned int newIndex;
+	unsigned int carry = parameters->batchSize;
 
-		if (toSendVector[i] == limits[i].N) {
-			toSendVector[i] = 0;
-			carry = 1;
-		} else {
-			carry = 0;
-		}
+	for (i = 0; i < parameters->D; i++) {
+		newIndex = (toSendVector[i] + carry) % limits[i].N;
+		carry = (toSendVector[i] + carry) / limits[i].N;
+
+		toSendVector[i] = newIndex;
 	}
 
-	if (carry != 0) {
-		*numOfElements = 0;
-		toSendVector[0] = 1;
-	} else {
-		*numOfElements = limits[0].N;
-	}
-
-	*numOfElements = carry == 1 ? 0 : limits[0].N;
+	totalSent += adjustedBatchSize;
 }
 
 /*
@@ -239,9 +246,9 @@ void ParallelFramework::scanDimension(int d, float* point, bool* results, int st
 bool* ParallelFramework::getResults() {
 	return results;
 }
-bool ParallelFramework::getResultAt(float* point) {
+long ParallelFramework::getIndexForPoint(float* point) {
 	unsigned int i;
-	int index = 0;
+	long index = 0;
 	int dimSteps;
 
 	for (i = 0; i < parameters->D; i++) {
@@ -253,8 +260,8 @@ bool ParallelFramework::getResultAt(float* point) {
 		// Calculate the steps for dimension i
 		dimSteps = (int) floor(abs(limits[i].lowerLimit - point[i]) / steps[i] );
 
-		// Increase index by i*(index-steps for previous dimension)
-		index += dimSteps * (i > 0 ? idxSteps[i - 1] : 1);
+		// Increase index by i*(index-steps for this dimension)
+		index += dimSteps * idxSteps[i];
 	}
 
 #ifdef DEBUG
@@ -264,7 +271,7 @@ bool ParallelFramework::getResultAt(float* point) {
 	cout << "): " << index << endl;
 #endif
 
-	return results[index];
+	return index;
 }
 
 __global__ void validate_kernel(Model* model, float* points, bool* results) {
