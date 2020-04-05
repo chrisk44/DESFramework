@@ -53,8 +53,8 @@ int main(){
         abs(limits[0].lowerLimit - limits[0].upperLimit) / limits[0].N,
         abs(limits[1].lowerLimit - limits[1].upperLimit) / limits[1].N
     };
-    for (int i = 0; i < limits[0].N; i++) {
-        for (int j = 0; j < limits[1].N; j++) {
+    for (unsigned int i = 0; i < limits[0].N; i++) {
+        for (unsigned int j = 0; j < limits[1].N; j++) {
             point[0] = limits[0].lowerLimit + i * step[0];
             point[1] = limits[1].lowerLimit + j * step[1];
             

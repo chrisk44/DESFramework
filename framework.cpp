@@ -7,8 +7,6 @@
 #include "framework.h"
 #include "device_launch_parameters.h"
 
-//#define DEBUG
-
 using namespace std;
 
 ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters& parameters) {
@@ -70,32 +68,7 @@ ParallelFramework::~ParallelFramework() {
 bool ParallelFramework::isValid() {
 	return valid;
 }
-/*
-template<class ImplementedModel>
-int ParallelFramework::run<ImplementedModel>() {
-	slaveThread<ImplementedModel>(0);
 
-	int type;
-
-	// For each GPU, fork, set type = gpu
-
-	// Fork once for cpu (initial thread must be the master), set type = cpu
-
-	// Initialize MPI
-	/*
-	int rank = 0;
-
-	if(rank == 0){
-		masterThread();
-	}else{
-		slaveThread(type);
-	}
-	* /
-	// Finalize MPI
-
-	return 0;
-}
-*/
 int ParallelFramework::masterThread() {
 
 	// While (finished_processes < total_processes)
@@ -116,69 +89,7 @@ int ParallelFramework::masterThread() {
 
 	return 0;
 }
-/*
-template<class ImplementedModel>
-int ParallelFramework::slaveThread(int type) {
-	long* startPointIdx = new long[parameters->D];
-	float* startPoint = new float[parameters->D];
-	int numOfElements;
 
-	// The device address where the device address of the model is saved
-	ImplementedModel** deviceModelAddress;
-
-	if (type == TYPE_GPU) {
-		// Allocate space for the model's address on the device
-		cudaMalloc(&deviceModelAddress, sizeof(ImplementedModel**));
-
-		// Create the model object on the device, and write its address in 'deviceModelAddress' on the device
-		create_model_kernel<<< 1, 1 >>> (deviceModelAddress);
-	}
-
-	while (true) {
-		// Send 'ready' signal to master
-
-		// Receive data to compute
-		getDataChunk(startPointIdx, &numOfElements);
-
-		// If received more data...
-		if (numOfElements > 0) {
-#ifdef DEBUG
-			cout << "Got " << numOfElements << " elements: [";
-			for (unsigned int i = 0; i < parameters->D; i++)
-				cout << startPointIdx[i] << " ";
-			cout << "]" << endl;
-#endif
-
-			// Calculate the results
-			if (type == TYPE_GPU) {
-				//validate_kernel()
-			}else if (type == TYPE_CPU) {
-
-			}
-
-			// Send the results to master
-
-		}else {
-			// No more data
-			cout << "End of data" << endl;
-			break;
-		}
-	}
-
-	delete [] startPointIdx;
-	delete [] startPoint;
-
-	if (type == TYPE_GPU) {
-		// Allocate space for the model's address on the device
-		cudaFree(&deviceModelAddress);
-
-		// Create the model object on the device, and write its address in 'deviceModelAddress' on the device
-		delete_model_kernel << < 1, 1 >> > (deviceModelAddress);
-	}
-
-	return 0;
-}
-*/
 void ParallelFramework::getDataChunk(long* toCalculate, int* numOfElements) {
 	if (totalSent >= totalElements) {
 		*numOfElements = 0;

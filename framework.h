@@ -1,45 +1,15 @@
 #ifndef PARALLELFRAMEWORK_H
 #define PARALLELFRAMEWORK_H
 
-#define cce() {                               \
-  cudaError_t e = cudaGetLastError();                    \
-  if (e != cudaSuccess) {                                \
-    printf("CUDA error %s:%d: %s\n", __FILE__, __LINE__, \
-            cudaGetErrorString(e));                      \
-    exit(1);                                             \
-  }                                                      \
-}
-
-#define BLOCK_SIZE 1024
-#define min(X, Y)  ((X) < (Y) ? (X) : (Y))
-#define max(X, Y)  ((X) > (Y) ? (X) : (Y))
 
 #include "cuda_runtime.h"
 #include <cuda.h>
 #include <iostream>
+#include "utilities.h"
+#include "kernels.cpp"
 
-#define MAX_DIMENSIONS 10
-//#define DEBUG
-
-const int TYPE_CPU = 1;
-const int TYPE_GPU = 2;
 
 using namespace std;
-
-class Model {
-public:
-	// float* point will be a D-dimension vector
-	__host__   virtual bool validate_cpu(float* point) = 0;
-	__device__ virtual bool validate_gpu(float point[]) = 0;
-
-	virtual bool toBool() = 0;
-};
-
-struct Limit {
-	float lowerLimit;
-	float upperLimit;
-	unsigned long N;
-};
 
 struct ParallelFrameworkParameters {
 	unsigned int D;
@@ -47,44 +17,6 @@ struct ParallelFrameworkParameters {
 	unsigned int batchSize;
 	// ...
 };
-
-// CUDA kernel to create the 'Model' object on device
-template<class ImplementedModel>
-__global__ void create_model_kernel(ImplementedModel** deviceModelAddress) {
-	(*deviceModelAddress) = new ImplementedModel();
-}
-
-// CUDA kernel to delete the 'Model' object on device
-template<class ImplementedModel>
-__global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
-	delete (*deviceModelAddress);
-}
-
-// CUDA kernel to run the computation
-template<class ImplementedModel>
-__global__ void validate_kernel(ImplementedModel** model, long* startingPointIdx, bool* results, Limit* limits, unsigned int D) {
-	float point[MAX_DIMENSIONS];
-	long myIndex[MAX_DIMENSIONS];
-
-	// Calculate myIndex = startingPointIdx + threadIdx.x
-	unsigned int i;
-	unsigned int carry = threadIdx.x;
-	for (i = 0; i < D; i++) {
-		myIndex[i] = (startingPointIdx[i] + carry) % limits[i].N;
-		carry = (startingPointIdx[i] + carry) / limits[i].N;
-	}
-
-	// Calculate the exact point
-	for (i = 0; i < D; i++) {
-		point[i] = limits[i].lowerLimit + myIndex[i] * abs(limits[i].lowerLimit - limits[i].upperLimit) / limits[i].N;
-	}
-
-	// Run the validation function
-	bool result = (*model)->validate_gpu(point);
-
-	// Save the result to global memory
-	results[threadIdx.x] = result;
-}
 
 class ParallelFramework {
 private:
@@ -125,7 +57,7 @@ public:
 
 template<class ImplementedModel>
 int ParallelFramework::run() {
-	int type = TYPE_GPU;
+	int type = TYPE_CPU;
 
 	slaveThread<ImplementedModel>(type);
 
@@ -156,9 +88,6 @@ int ParallelFramework::slaveThread(int type) {
 	int numOfElements;
 	int blockSize;
 	int numOfBlocks;
-
-	// Model to use if type==TYPE_CPU
-	ImplementedModel model = ImplementedModel();
 
 	// The device address where the device address of the model is saved
 	ImplementedModel** deviceModelAddress;
@@ -220,7 +149,7 @@ int ParallelFramework::slaveThread(int type) {
 
 			}else if (type == TYPE_CPU) {
 
-				//model.validate_cpu();
+				cpu_kernel<ImplementedModel>(startPointIdx, tmpResults, limits, parameters->D, numOfElements);
 
 			}
 
@@ -253,7 +182,7 @@ int ParallelFramework::slaveThread(int type) {
 		cudaFree(deviceModelAddress);		cce();
 		cudaFree(deviceResults);			cce();
 		cudaFree(deviceStartingPointIdx);	cce();
-		cudaFree(deviceLimits);			cce();
+		cudaFree(deviceLimits);				cce();
 	}
 
 	delete[] startPointIdx;

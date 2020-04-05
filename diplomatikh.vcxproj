@@ -78,13 +78,21 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CudaCompile Include="main.cu" />
+    <CudaCompile Include="main.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="framework.cpp" />
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="framework.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="kernels.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="utilities.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
