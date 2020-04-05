@@ -27,7 +27,7 @@ int main(){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.batchSize = 1;
+    parameters.batchSize = 199;
     parameters.computeBatchSize = 1;
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
@@ -46,7 +46,8 @@ int main(){
         cout << "Error running the computation: " << result << endl;
     }
 
-    /*
+    long linearIndex;
+    long indices[2];
     float point[2];
     float step[2] = {
         abs(limits[0].lowerLimit - limits[0].upperLimit) / limits[0].N,
@@ -57,14 +58,17 @@ int main(){
             point[0] = limits[0].lowerLimit + i * step[0];
             point[1] = limits[1].lowerLimit + j * step[1];
             
-            bool result = framework.getResults[framework.getIndexForPoint(point)];
-            bool expected = model.validate_cpu(point);
+            framework.getIndicesFromPoint(point, indices);
+            linearIndex = framework.getIndexFromIndices(indices);
 
-            if (result != expected)
+            bool result = framework.getResults()[linearIndex];
+            bool expected = MyModel().validate_cpu(point);
+
+            if ((!result && expected) || (result && !expected)) {
                 cout << "ERROR: Point (" << point[0] << "," << point[1] << ") returned " << result << ", expected " << expected << endl;
+            }
         }
     }
-    */
     
     return 0;
 }

@@ -1,12 +1,25 @@
 #ifndef PARALLELFRAMEWORK_H
 #define PARALLELFRAMEWORK_H
 
+#define cce() {                               \
+  cudaError_t e = cudaGetLastError();                    \
+  if (e != cudaSuccess) {                                \
+    printf("CUDA error %s:%d: %s\n", __FILE__, __LINE__, \
+            cudaGetErrorString(e));                      \
+    exit(1);                                             \
+  }                                                      \
+}
+
+#define BLOCK_SIZE 1024
+#define min(X, Y)  ((X) < (Y) ? (X) : (Y))
+#define max(X, Y)  ((X) > (Y) ? (X) : (Y))
+
 #include "cuda_runtime.h"
 #include <cuda.h>
 #include <iostream>
 
 #define MAX_DIMENSIONS 10
-#define DEBUG
+//#define DEBUG
 
 const int TYPE_CPU = 1;
 const int TYPE_GPU = 2;
@@ -141,7 +154,8 @@ int ParallelFramework::slaveThread(int type) {
 	long* startPointIdx = new long[parameters->D];
 	bool* tmpResults = new bool[parameters->batchSize];
 	int numOfElements;
-	unsigned long linearStartIndex;
+	int blockSize;
+	int numOfBlocks;
 
 	// Model to use if type==TYPE_CPU
 	ImplementedModel model = ImplementedModel();
@@ -155,16 +169,16 @@ int ParallelFramework::slaveThread(int type) {
 	// Initialize GPU (instantiate an ImplementedModel object on the device)
 	if (type == TYPE_GPU) {
 		// Allocate memory on device
-		cudaMalloc(&deviceModelAddress, sizeof(ImplementedModel**));
-		cudaMalloc(&deviceResults, parameters->batchSize * sizeof(bool));
-		cudaMalloc(&deviceStartingPointIdx, parameters->D * sizeof(long));
-		cudaMalloc(&deviceLimits, parameters->D * sizeof(Limit));
+		cudaMalloc(&deviceModelAddress, sizeof(ImplementedModel**));		cce();
+		cudaMalloc(&deviceResults, parameters->batchSize * sizeof(bool));	cce();
+		cudaMalloc(&deviceStartingPointIdx, parameters->D * sizeof(long));	cce();
+		cudaMalloc(&deviceLimits, parameters->D * sizeof(Limit));			cce();
 
 		// Create the model object on the device, and write its address in 'deviceModelAddress' on the device
-		create_model_kernel<ImplementedModel> << < 1, 1 >> > (deviceModelAddress);
+		create_model_kernel<ImplementedModel> << < 1, 1 >> > (deviceModelAddress);	cce();
 
 		// Move limits to device
-		cudaMemcpy(deviceLimits, limits, parameters->D * sizeof(Limit), cudaMemcpyHostToDevice);
+		cudaMemcpy(deviceLimits, limits, parameters->D * sizeof(Limit), cudaMemcpyHostToDevice);	cce();
 	}
 
 	while (true) {
@@ -188,15 +202,21 @@ int ParallelFramework::slaveThread(int type) {
 
 				// Copy starting point indices to device
 				cudaMemcpy(deviceStartingPointIdx, startPointIdx, parameters->D * sizeof(long), cudaMemcpyHostToDevice);
+				cce();
 
 				// Call the kernel
-				validate_kernel<ImplementedModel> << <1, 1 >> > (deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D);
+				blockSize = min(BLOCK_SIZE, numOfElements);
+				numOfBlocks = (numOfElements + blockSize - 1) / blockSize;
+				validate_kernel<ImplementedModel><<<numOfBlocks, blockSize>>>(deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D);
+				cce();
 
 				// Wait for kernel to finish
 				cudaDeviceSynchronize();
+				cce();
 
 				// Get results from device
 				cudaMemcpy(tmpResults, deviceResults, numOfElements * sizeof(bool), cudaMemcpyDeviceToHost);
+				cce();
 
 			}else if (type == TYPE_CPU) {
 
@@ -205,6 +225,7 @@ int ParallelFramework::slaveThread(int type) {
 			}
 
 			// Send the results to master
+			memcpy(&results[getIndexFromIndices(startPointIdx)], tmpResults, numOfElements * sizeof(bool));	// TODO: This will be done by masterThread
 
 #ifdef DEBUG
 			// Print results
@@ -226,15 +247,17 @@ int ParallelFramework::slaveThread(int type) {
 	if (type == TYPE_GPU) {
 		// Delete the model object on the device
 		delete_model_kernel<ImplementedModel> << < 1, 1 >> > (deviceModelAddress);
+		cce();
 
 		// Free the space for the model's address on the device
-		cudaFree(&deviceModelAddress);
-		cudaFree(&deviceResults);
-		cudaFree(&deviceStartingPointIdx);
-		cudaFree(&deviceLimits);
+		cudaFree(deviceModelAddress);		cce();
+		cudaFree(deviceResults);			cce();
+		cudaFree(deviceStartingPointIdx);	cce();
+		cudaFree(deviceLimits);			cce();
 	}
 
 	delete[] startPointIdx;
+	delete[] tmpResults;
 
 	return 0;
 }
