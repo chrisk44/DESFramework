@@ -1,13 +1,13 @@
 #ifndef PARALLELFRAMEWORK_H
 #define PARALLELFRAMEWORK_H
 
-
-#include "cuda_runtime.h"
+#include <cuda_runtime.h>
 #include <cuda.h>
 #include <iostream>
+#include <mpi.h>
+
 #include "utilities.h"
 #include "kernels.cpp"
-
 
 using namespace std;
 
@@ -27,7 +27,7 @@ private:
 	// Runtime variables
 	unsigned long* idxSteps = NULL;			// Index steps for each dimension
 	float* steps = NULL;					// Real step for each dimension
-	bool* results = NULL;					// An array of N0 * N1 * ... * ND
+	bool* results = NULL;					// An array of N0 * N1 * ... * N(D-1)
 	bool valid = false;
 	unsigned long* toSendVector = NULL;		// An array of D elements, where every entry shows the next element of that dimension to be dispatched
 	unsigned long totalSent = 0;			// Total elements that have been sent for processing

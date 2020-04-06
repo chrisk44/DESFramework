@@ -1,11 +1,9 @@
 #pragma once
 
-#include <cuda.h>
 #include <cmath>
 #include <iostream>
 
 #include "framework.h"
-#include "device_launch_parameters.h"
 
 using namespace std;
 
