@@ -67,23 +67,53 @@ bool ParallelFramework::isValid() {
 	return valid;
 }
 
-int ParallelFramework::masterThread() {
+int ParallelFramework::masterThread(MPI_Comm& comm) {
+	int numOfProcesses;
+	int finished = 0;
 
-	// While (finished_processes < total_processes)
-	while (true) {
-		// Receive from any slave
-		// If 'ready'
-			// getDataChunk
-			// If more data available
-				// send data
-			// else
-				// notify about finish
-				// finished_processes++
+	MPI_Comm_size(comm, &numOfProcesses);
 
-		// else if 'results_ready'
-			// save received results in this->results
+	MPI_Status status;
+	int mpiSource;
+	long* startingIndices = new long[numOfProcesses];				// TODO: numOfProcesses might change, this should be allocated dynamically
+
+	bool* tmpResults = new bool[parameters->batchSize];
+	long* tmpToCalculate = new long[parameters->D];
+	int tmpNumOfElements;
+
+	while (finished < numOfProcesses) {
+		// Receive request from any worker thread
+		cout << " Master: Waiting for request..." << endl;
+		MPI_Recv(tmpResults, parameters->batchSize, MPI_CXX_BOOL, MPI_ANY_SOURCE, TAG_READY, comm, &status);
+		mpiSource = status.MPI_SOURCE;
+
+		if (status.MPI_TAG == TAG_READY) {
+			// Get next data batch to calculate
+			getDataChunk(tmpToCalculate, &tmpNumOfElements);
+			startingIndices[mpiSource] = getIndexFromIndices(tmpToCalculate);
+
+			// Send data
+			cout << " Master: Sending " << tmpNumOfElements << " elements to " << mpiSource << endl;
+			MPI_Send(&tmpNumOfElements, 1, MPI_INT, mpiSource, TAG_DATA_COUNT, comm);
+			MPI_Send(&tmpToCalculate, parameters->D, MPI_LONG, mpiSource, TAG_DATA, comm);
+
+			// If no more data available, source will finish
+			if (tmpNumOfElements == 0)
+				finished++;
+
+		}else if (status.MPI_TAG == TAG_RESULTS) {
+			// Save received results in this->results
+			MPI_Get_count(&status, MPI_CHAR, &tmpNumOfElements);
+			memcpy(&results[startingIndices[mpiSource]], tmpResults, tmpNumOfElements);
+		}
+
+		// Update numOfProcesses, in case someone else joined in (TODO: is this even possible?)
+		MPI_Comm_size(comm, &numOfProcesses);
 	}
 
+	delete[] tmpResults;
+	delete[] tmpToCalculate;
+	delete[] startingIndices;
 
 	return 0;
 }

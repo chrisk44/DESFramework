@@ -5,6 +5,7 @@
 #include <cuda.h>
 #include <iostream>
 #include <mpi.h>
+#include <omp.h>
 
 #include "utilities.h"
 #include "kernels.cpp"
@@ -38,7 +39,7 @@ public:
 	~ParallelFramework();
 
 	template<class ImplementedModel>
-	int run();
+	int run(char* argv0);
 
 	bool* getResults();
 	void getIndicesFromPoint(float* point, long* dst);
@@ -46,57 +47,102 @@ public:
 	bool isValid();
 
 public:
-	int masterThread();
+	int masterThread(MPI_Comm& comm);
 
 	template<class ImplementedModel>
-	int slaveThread(int type);
+	int slaveThread(int rank, MPI_Comm& comm);
 
 	void getDataChunk(long* toCalculate, int *numOfElements);
 
 };
 
 template<class ImplementedModel>
-int ParallelFramework::run() {
-	int type = TYPE_CPU;
-
-	slaveThread<ImplementedModel>(type);
-
-
-	// For each GPU, fork, set type = gpu
-
-	// Fork once for cpu (initial thread must be the master), set type = cpu
+int ParallelFramework::run(char* argv0) {
+	int numOfProcesses, tmp;
+	char* programName;
+	// MPI variables
+	int rank;
+	int* errcodes;
+	MPI_Comm parentcomm, intercomm;
 
 	// Initialize MPI
-	/*
-	int rank = 0;
+	MPI_Init(nullptr, nullptr);
+	MPI_Comm_get_parent(&parentcomm);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-	if(rank == 0){
-		masterThread();
-	}else{
-		slaveThread(type);
+	// Calculate number of processes (#GPUs + 1CPU)
+	numOfProcesses = 0;
+	//cudaGetDeviceCount(&numOfProcesses);
+	numOfProcesses++;
+
+	// Allocate errcodes now that numOfProcesses is known
+	errcodes = new int[numOfProcesses];
+
+	// Isolate the program's name from argv0
+	tmp = strlen(argv0) - 1;
+	while (argv0[tmp] != '/' && argv0[tmp] != '\\') {
+		tmp--;
 	}
-	*/
-	// Finalize MPI
+	programName = &argv0[tmp];
+
+	// If this is the parent process, spawn children and run masterThread, else run slaveThread
+	if (parentcomm == MPI_COMM_NULL) {
+		cout << "Master: Spawning " << numOfProcesses << " processes" << endl;
+
+		MPI_Comm_spawn(programName, MPI_ARGV_NULL, numOfProcesses, MPI_INFO_NULL, 0, MPI_COMM_WORLD, &intercomm, errcodes);
+
+		// Check errorcodes
+		for (int i = 0; i < numOfProcesses; i++) {
+			if (errcodes[i] != MPI_SUCCESS) {
+				cout << "Error starting process " << i << ", error: " << errcodes[i] << endl;
+
+				// TBD: Terminate everyone (?)
+				//totalSent = totalElements;
+			}
+		}
+
+		printf("parentcomm:%p intercomm:%p\n", parentcomm, intercomm);
+
+		masterThread(intercomm);
+		cout << "Master finished" << endl;
+	} else {
+		cout << "Slave " << rank << " starting" << endl;
+		slaveThread<ImplementedModel>(rank, parentcomm);
+		cout << "Slave " << rank << " finished" << endl;
+	}
+
+	MPI_Finalize();
+
+	delete[] errcodes;
 
 	return 0;
 }
 
 template<class ImplementedModel>
-int ParallelFramework::slaveThread(int type) {
+int ParallelFramework::slaveThread(int rank, MPI_Comm& comm) {
+	// Rank 0 is cpu, 1+ are gpus
+
+	int gpuId = rank - 1;
+
 	long* startPointIdx = new long[parameters->D];
 	bool* tmpResults = new bool[parameters->batchSize];
 	int numOfElements;
 	int blockSize;
 	int numOfBlocks;
+	MPI_Status status;
 
-	// The device address where the device address of the model is saved
+	// deviceModelAddress is where the device address of the model is saved
 	ImplementedModel** deviceModelAddress;
+
 	bool* deviceResults;
 	long* deviceStartingPointIdx;
 	Limit* deviceLimits;
 
 	// Initialize GPU (instantiate an ImplementedModel object on the device)
-	if (type == TYPE_GPU) {
+	if (gpuId != -1) {
+		// Select GPU with 'id'
+		cudaSetDevice(gpuId);
+
 		// Allocate memory on device
 		cudaMalloc(&deviceModelAddress, sizeof(ImplementedModel**));		cce();
 		cudaMalloc(&deviceResults, parameters->batchSize * sizeof(bool));	cce();
@@ -112,10 +158,14 @@ int ParallelFramework::slaveThread(int type) {
 
 	while (true) {
 		// Send 'ready' signal to master
+		MPI_Send(nullptr, 0, MPI_INT, 0, TAG_READY, comm);
 
-		// Receive data to compute
-		// TODO: Receive from MPI
-		getDataChunk(startPointIdx, &numOfElements);		// TODO: This will eventually be called by masterThread()
+		// Receive data (length and starting point) to compute
+		cout << "  Slave " << rank << ": Sending READY..." << endl;
+		MPI_Recv(&numOfElements, 1, MPI_LONG, 0, TAG_DATA_COUNT, comm, &status);
+		MPI_Recv(startPointIdx, parameters->D, MPI_LONG, 0, TAG_DATA, comm, &status);
+
+		cout << "  Slave " << rank << ": Received " << numOfElements << " elements" << endl;
 
 		// If received more data...
 		if (numOfElements > 0) {
@@ -125,9 +175,9 @@ int ParallelFramework::slaveThread(int type) {
 				cout << startPointIdx[i] << " ";
 			cout << "]" << endl;
 #endif
-
+				
 			// Calculate the results
-			if (type == TYPE_GPU) {
+			if (gpuId != -1) {
 
 				// Copy starting point indices to device
 				cudaMemcpy(deviceStartingPointIdx, startPointIdx, parameters->D * sizeof(long), cudaMemcpyHostToDevice);
@@ -136,7 +186,7 @@ int ParallelFramework::slaveThread(int type) {
 				// Call the kernel
 				blockSize = min(BLOCK_SIZE, numOfElements);
 				numOfBlocks = (numOfElements + blockSize - 1) / blockSize;
-				validate_kernel<ImplementedModel><<<numOfBlocks, blockSize>>>(deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D);
+				validate_kernel<ImplementedModel> << <numOfBlocks, blockSize >> > (deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D);
 				cce();
 
 				// Wait for kernel to finish
@@ -147,33 +197,33 @@ int ParallelFramework::slaveThread(int type) {
 				cudaMemcpy(tmpResults, deviceResults, numOfElements * sizeof(bool), cudaMemcpyDeviceToHost);
 				cce();
 
-			}else if (type == TYPE_CPU) {
+			} else {
 
 				cpu_kernel<ImplementedModel>(startPointIdx, tmpResults, limits, parameters->D, numOfElements);
 
 			}
 
 			// Send the results to master
-			memcpy(&results[getIndexFromIndices(startPointIdx)], tmpResults, numOfElements * sizeof(bool));	// TODO: This will be done by masterThread
+			cout << "  Slave " << rank << ": Sending RESULTS..." << endl;
+			MPI_Send(tmpResults, numOfElements, MPI_CXX_BOOL, 0, TAG_RESULTS, comm);
 
 #ifdef DEBUG
-			// Print results
+		// Print results
 			cout << "Results:";
 			for (unsigned int i = 0; i < numOfElements; i++) {
 				cout << " " << tmpResults[i];
 			}
 			cout << endl;
 #endif
-		}
-		else {
+		} else {
 			// No more data
-			cout << "End of data" << endl << endl;
+			cout << "  Slave " << rank << ": End of data" << endl;
 			break;
 		}
 	}
 
 	// Finalize GPU
-	if (type == TYPE_GPU) {
+	if (gpuId != -1) {
 		// Delete the model object on the device
 		delete_model_kernel<ImplementedModel> << < 1, 1 >> > (deviceModelAddress);
 		cce();

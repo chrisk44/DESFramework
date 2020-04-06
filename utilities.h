@@ -20,9 +20,11 @@
 
 //#define DEBUG
 
-
-const int TYPE_CPU = 1;
-const int TYPE_GPU = 2;
+#define TAG_READY 0
+#define TAG_DATA_COUNT 1
+#define TAG_DATA 2
+#define TAG_RESULTS 3
+#define TAG_ID 4
 
 class Model {
 public:
