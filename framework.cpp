@@ -67,24 +67,34 @@ bool ParallelFramework::isValid() {
 	return valid;
 }
 
-int ParallelFramework::masterThread(MPI_Comm& comm) {
-	int numOfProcesses;
+int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 	int finished = 0;
 
-	MPI_Comm_size(comm, &numOfProcesses);
+	//MPI_Comm_size(comm, &numOfProcesses);
 
 	MPI_Status status;
 	int mpiSource;
-	long* startingIndices = new long[numOfProcesses];				// TODO: numOfProcesses might change, this should be allocated dynamically
+	long* startingIndices = new long[100];				// TODO: numOfProcesses might change, this should be allocated dynamically (numOfProcesses might also not be valid)
 
 	bool* tmpResults = new bool[parameters->batchSize];
 	long* tmpToCalculate = new long[parameters->D];
 	int tmpNumOfElements;
 
+	printf("\nstartingIndices: %x\n", startingIndices);
+	printf("tmpResults: %x\n", tmpResults);
+	printf("tmpToCalculate: %x\n", tmpToCalculate);
+	printf("&numOfProcesses: %x\n", &numOfProcesses);
+	printf("numOfProcesses: %d\n", numOfProcesses);
+	printf("&tmpNumOfElements: %x\n", &tmpNumOfElements);
+	printf("idxSteps: %x\n", idxSteps);
+	printf("steps: %x\n", steps);
+	printf("results: %x\n", results);
+	printf("toSendVector: %x\n\n", toSendVector);
+
 	while (finished < numOfProcesses) {
 		// Receive request from any worker thread
-		cout << " Master: Waiting for request..." << endl;
-		MPI_Recv(tmpResults, parameters->batchSize, MPI_CXX_BOOL, MPI_ANY_SOURCE, TAG_READY, comm, &status);
+		MPI_Recv(tmpResults, parameters->batchSize, MPI_CXX_BOOL, MPI_ANY_SOURCE, MPI_ANY_TAG, comm, &status);
+		cout << "[] Master: Received " << status.MPI_TAG << " from " << status.MPI_SOURCE << endl;
 		mpiSource = status.MPI_SOURCE;
 
 		if (status.MPI_TAG == TAG_READY) {
@@ -93,13 +103,15 @@ int ParallelFramework::masterThread(MPI_Comm& comm) {
 			startingIndices[mpiSource] = getIndexFromIndices(tmpToCalculate);
 
 			// Send data
-			cout << " Master: Sending " << tmpNumOfElements << " elements to " << mpiSource << endl;
+			cout << " Master: Sending " << tmpNumOfElements << " elements to " << mpiSource << " with index " << startingIndices[mpiSource] << endl;
 			MPI_Send(&tmpNumOfElements, 1, MPI_INT, mpiSource, TAG_DATA_COUNT, comm);
-			MPI_Send(&tmpToCalculate, parameters->D, MPI_LONG, mpiSource, TAG_DATA, comm);
+			MPI_Send(tmpToCalculate, parameters->D, MPI_LONG, mpiSource, TAG_DATA, comm);
 
 			// If no more data available, source will finish
-			if (tmpNumOfElements == 0)
+			if (tmpNumOfElements == 0) {
 				finished++;
+				startingIndices[mpiSource] = -1;
+			}
 
 		}else if (status.MPI_TAG == TAG_RESULTS) {
 			// Save received results in this->results
@@ -108,7 +120,7 @@ int ParallelFramework::masterThread(MPI_Comm& comm) {
 		}
 
 		// Update numOfProcesses, in case someone else joined in (TODO: is this even possible?)
-		MPI_Comm_size(comm, &numOfProcesses);
+		//MPI_Comm_size(comm, &numOfProcesses);
 	}
 
 	delete[] tmpResults;

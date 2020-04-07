@@ -47,7 +47,7 @@ public:
 	bool isValid();
 
 public:
-	int masterThread(MPI_Comm& comm);
+	int masterThread(MPI_Comm& comm, int numOfProcesses);
 
 	template<class ImplementedModel>
 	int slaveThread(int rank, MPI_Comm& comm);
@@ -72,7 +72,7 @@ int ParallelFramework::run(char* argv0) {
 
 	// Calculate number of processes (#GPUs + 1CPU)
 	numOfProcesses = 0;
-	//cudaGetDeviceCount(&numOfProcesses);
+	cudaGetDeviceCount(&numOfProcesses);
 	numOfProcesses++;
 
 	// Allocate errcodes now that numOfProcesses is known
@@ -94,23 +94,25 @@ int ParallelFramework::run(char* argv0) {
 		// Check errorcodes
 		for (int i = 0; i < numOfProcesses; i++) {
 			if (errcodes[i] != MPI_SUCCESS) {
-				cout << "Error starting process " << i << ", error: " << errcodes[i] << endl;
+				cout << "[E] Error starting process " << i << ", error: " << errcodes[i] << endl;
 
 				// TBD: Terminate everyone (?)
 				//totalSent = totalElements;
 			}
 		}
 
-		printf("parentcomm:%p intercomm:%p\n", parentcomm, intercomm);
-
-		masterThread(intercomm);
+		masterThread(intercomm, numOfProcesses);
 		cout << "Master finished" << endl;
 	} else {
 		cout << "Slave " << rank << " starting" << endl;
 		slaveThread<ImplementedModel>(rank, parentcomm);
 		cout << "Slave " << rank << " finished" << endl;
+
+		MPI_Finalize();
+		exit(0);
 	}
 
+	// Only master continues here
 	MPI_Finalize();
 
 	delete[] errcodes;
@@ -122,7 +124,7 @@ template<class ImplementedModel>
 int ParallelFramework::slaveThread(int rank, MPI_Comm& comm) {
 	// Rank 0 is cpu, 1+ are gpus
 
-	int gpuId = rank - 1;
+	int gpuId = rank - 10;		// TODO: This must be rank - 1
 
 	long* startPointIdx = new long[parameters->D];
 	bool* tmpResults = new bool[parameters->batchSize];
@@ -139,7 +141,7 @@ int ParallelFramework::slaveThread(int rank, MPI_Comm& comm) {
 	Limit* deviceLimits;
 
 	// Initialize GPU (instantiate an ImplementedModel object on the device)
-	if (gpuId != -1) {
+	if (gpuId > -1) {
 		// Select GPU with 'id'
 		cudaSetDevice(gpuId);
 
@@ -157,15 +159,13 @@ int ParallelFramework::slaveThread(int rank, MPI_Comm& comm) {
 	}
 
 	while (true) {
+
 		// Send 'ready' signal to master
 		MPI_Send(nullptr, 0, MPI_INT, 0, TAG_READY, comm);
 
 		// Receive data (length and starting point) to compute
-		cout << "  Slave " << rank << ": Sending READY..." << endl;
 		MPI_Recv(&numOfElements, 1, MPI_LONG, 0, TAG_DATA_COUNT, comm, &status);
 		MPI_Recv(startPointIdx, parameters->D, MPI_LONG, 0, TAG_DATA, comm, &status);
-
-		cout << "  Slave " << rank << ": Received " << numOfElements << " elements" << endl;
 
 		// If received more data...
 		if (numOfElements > 0) {
@@ -177,7 +177,7 @@ int ParallelFramework::slaveThread(int rank, MPI_Comm& comm) {
 #endif
 				
 			// Calculate the results
-			if (gpuId != -1) {
+			if (gpuId > -1) {
 
 				// Copy starting point indices to device
 				cudaMemcpy(deviceStartingPointIdx, startPointIdx, parameters->D * sizeof(long), cudaMemcpyHostToDevice);
@@ -204,7 +204,6 @@ int ParallelFramework::slaveThread(int rank, MPI_Comm& comm) {
 			}
 
 			// Send the results to master
-			cout << "  Slave " << rank << ": Sending RESULTS..." << endl;
 			MPI_Send(tmpResults, numOfElements, MPI_CXX_BOOL, 0, TAG_RESULTS, comm);
 
 #ifdef DEBUG
@@ -217,13 +216,12 @@ int ParallelFramework::slaveThread(int rank, MPI_Comm& comm) {
 #endif
 		} else {
 			// No more data
-			cout << "  Slave " << rank << ": End of data" << endl;
 			break;
 		}
 	}
 
 	// Finalize GPU
-	if (gpuId != -1) {
+	if (gpuId > -1) {
 		// Delete the model object on the device
 		delete_model_kernel<ImplementedModel> << < 1, 1 >> > (deviceModelAddress);
 		cce();

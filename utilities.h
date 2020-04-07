@@ -24,7 +24,6 @@
 #define TAG_DATA_COUNT 1
 #define TAG_DATA 2
 #define TAG_RESULTS 3
-#define TAG_ID 4
 
 class Model {
 public:
