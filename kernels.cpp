@@ -3,6 +3,9 @@
 
 #include "utilities.h"
 
+#include <iostream>
+using namespace std;
+
 // CUDA kernel to create the 'Model' object on device
 template<class ImplementedModel>
 __global__ void create_model_kernel(ImplementedModel** deviceModelAddress) {
@@ -58,6 +61,9 @@ void cpu_kernel(long* startingPointIdx, bool* results, Limit* limits, unsigned i
 
 		// Run the validation function
 		results[j] = model.validate_cpu(point);
+#if DEBUG >=4
+		cout << "Point (" << point[0] << "," << point[1] << ") returned " << results[j] << endl;
+#endif
 	}
 
 	delete[] point;

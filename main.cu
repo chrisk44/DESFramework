@@ -12,11 +12,11 @@ using namespace std;
 class MyModel : public Model{
 public:
     __host__ bool validate_cpu(float *point){
-        return point[0] >= 0 && ((int)point[1] % 2) == 0;
+        return (point[0] >= 0 || point[0] <= 5) && (point[1] >= 5 || point[1] <= 7.8);
     }
 
     __device__ bool validate_gpu(float *point){
-        return point[0] >= 0 && ((int)point[1] % 2) == 0;
+        return (point[0] >= 0 || point[0] <= 5) && (point[1] >= 5 || point[1] <= 7.8);
     }
 
     bool toBool(){ return true; }
@@ -30,12 +30,14 @@ int main(int argc, char** argv){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.batchSize = 10000;
-    parameters.computeBatchSize = 1;
+    parameters.batchSize = 100000;
+    parameters.computeBatchSize = 0;
+    parameters.cpuOnly = true;
+    parameters.dynamicBatchSize = true;
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
-    limits[0] = Limit { -10, 10, 2000 };
-    limits[1] = Limit { 0, 19, 1700};
+    limits[0] = Limit { -10, 10, 20 };
+    limits[1] = Limit { 0, 20, 20};
      
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);
@@ -49,7 +51,7 @@ int main(int argc, char** argv){
         cout << "Error running the computation: " << result << endl;
     }
 
-    Sleep(3000);
+    Sleep(1000);
 
     // Test the outputs
     long linearIndex;
@@ -59,6 +61,9 @@ int main(int argc, char** argv){
         abs(limits[0].lowerLimit - limits[0].upperLimit) / limits[0].N,
         abs(limits[1].lowerLimit - limits[1].upperLimit) / limits[1].N
     };
+    int errors = 0;
+
+    cout << endl << "Verifying results..." << endl;
     for (unsigned int i = 0; i < limits[0].N; i++) {
         for (unsigned int j = 0; j < limits[1].N; j++) {
             point[0] = limits[0].lowerLimit + i * step[0];
@@ -72,9 +77,11 @@ int main(int argc, char** argv){
 
             if ((!result && expected) || (result && !expected)) {
                 cout << "ERROR: Point (" << point[0] << "," << point[1] << ") returned " << result << ", expected " << expected << endl;
+                errors++;
             }
         }
     }
+    cout << "Done. Errors: " << errors << "/" << limits[0].N * limits[1].N << endl;
     
     return 0;
 }

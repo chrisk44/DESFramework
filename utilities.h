@@ -18,7 +18,12 @@
 #define min(X, Y)  ((X) < (Y) ? (X) : (Y))
 #define max(X, Y)  ((X) > (Y) ? (X) : (Y))
 
-//#define DEBUG
+// 0: Only errors
+// 1: Processes start/stop
+// 2: Processes steps
+// 3: Data transfers
+// 4: Data calculations
+#define DEBUG 1
 
 #define TAG_READY 0
 #define TAG_DATA_COUNT 1
@@ -38,6 +43,27 @@ struct Limit {
 	float lowerLimit;
 	float upperLimit;
 	unsigned long N;
+};
+
+struct ParallelFrameworkParameters {
+	unsigned int D;
+	unsigned int computeBatchSize;
+	unsigned int batchSize;
+	bool cpuOnly;
+	bool dynamicBatchSize;
+	// ...
+};
+
+struct ComputeProcessDetails {
+	unsigned long computingIndex = 0;
+	unsigned long currentBatchSize;		// Initialized by masterThread()
+	unsigned int jobsCompleted = 0;
+	unsigned elementsCalculated = 0;
+	bool finished = false;
+	bool initialized = false;
+
+	time_t computeStartTime;
+	time_t lastTimePerElement;
 };
 
 #endif

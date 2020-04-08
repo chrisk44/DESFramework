@@ -12,13 +12,6 @@
 
 using namespace std;
 
-struct ParallelFrameworkParameters {
-	unsigned int D;
-	unsigned int computeBatchSize;
-	unsigned int batchSize;
-	// ...
-};
-
 class ParallelFramework {
 private:
 	// Parameters
@@ -52,7 +45,7 @@ public:
 	template<class ImplementedModel>
 	int slaveThread(int rank, MPI_Comm& comm);
 
-	void getDataChunk(long* toCalculate, int *numOfElements);
+	void getDataChunk(long maxBatchSize, long* toCalculate, int *numOfElements);
 
 };
 
@@ -72,14 +65,15 @@ int ParallelFramework::run(char* argv0) {
 
 	// Calculate number of processes (#GPUs + 1CPU)
 	numOfProcesses = 0;
-	cudaGetDeviceCount(&numOfProcesses);
+	if(! (parameters->cpuOnly))
+		cudaGetDeviceCount(&numOfProcesses);
 	numOfProcesses++;
 
 	// Allocate errcodes now that numOfProcesses is known
 	errcodes = new int[numOfProcesses];
 
 	// Isolate the program's name from argv0
-	tmp = strlen(argv0) - 1;
+	tmp = (int)strlen(argv0) - 1;
 	while (argv0[tmp] != '/' && argv0[tmp] != '\\') {
 		tmp--;
 	}
@@ -87,7 +81,9 @@ int ParallelFramework::run(char* argv0) {
 
 	// If this is the parent process, spawn children and run masterThread, else run slaveThread
 	if (parentcomm == MPI_COMM_NULL) {
+#if DEBUG >=1
 		cout << "Master: Spawning " << numOfProcesses << " processes" << endl;
+#endif
 
 		MPI_Comm_spawn(programName, MPI_ARGV_NULL, numOfProcesses, MPI_INFO_NULL, 0, MPI_COMM_WORLD, &intercomm, errcodes);
 
@@ -102,17 +98,23 @@ int ParallelFramework::run(char* argv0) {
 		}
 
 		masterThread(intercomm, numOfProcesses);
+#if DEBUG >=1
 		cout << "Master finished" << endl;
+#endif
 	} else {
+#if DEBUG >=1
 		cout << "Slave " << rank << " starting" << endl;
+#endif
 		slaveThread<ImplementedModel>(rank, parentcomm);
+#if DEBUG >=1
 		cout << "Slave " << rank << " finished" << endl;
+#endif
 
 		MPI_Finalize();
 		exit(0);
 	}
 
-	// Only master continues here
+	// Only parent (master) continues here
 	MPI_Finalize();
 
 	delete[] errcodes;
@@ -124,7 +126,7 @@ template<class ImplementedModel>
 int ParallelFramework::slaveThread(int rank, MPI_Comm& comm) {
 	// Rank 0 is cpu, 1+ are gpus
 
-	int gpuId = rank - 10;		// TODO: This must be rank - 1
+	int gpuId = rank - 1;
 
 	long* startPointIdx = new long[parameters->D];
 	bool* tmpResults = new bool[parameters->batchSize];
@@ -161,19 +163,25 @@ int ParallelFramework::slaveThread(int rank, MPI_Comm& comm) {
 	while (true) {
 
 		// Send 'ready' signal to master
+#if DEBUG >= 2
+		cout << "  Slave " << rank << " sending READY..." << endl;
+#endif
 		MPI_Send(nullptr, 0, MPI_INT, 0, TAG_READY, comm);
 
 		// Receive data (length and starting point) to compute
+#if DEBUG >= 2
+		cout << "  Slave " << rank << " waiting for data..." << endl;
+#endif
 		MPI_Recv(&numOfElements, 1, MPI_LONG, 0, TAG_DATA_COUNT, comm, &status);
 		MPI_Recv(startPointIdx, parameters->D, MPI_LONG, 0, TAG_DATA, comm, &status);
 
 		// If received more data...
 		if (numOfElements > 0) {
-#ifdef DEBUG
-			cout << "Got " << numOfElements << " elements: [";
+#if DEBUG >= 3
+			cout << "Got " << numOfElements << " elements: ";
 			for (unsigned int i = 0; i < parameters->D; i++)
 				cout << startPointIdx[i] << " ";
-			cout << "]" << endl;
+			cout << endl;
 #endif
 				
 			// Calculate the results
@@ -204,10 +212,13 @@ int ParallelFramework::slaveThread(int rank, MPI_Comm& comm) {
 			}
 
 			// Send the results to master
+#if DEBUG >= 2
+			cout << "  Slave " << rank << " sending RESULTS..." << endl;
+#endif
 			MPI_Send(tmpResults, numOfElements, MPI_CXX_BOOL, 0, TAG_RESULTS, comm);
 
-#ifdef DEBUG
-		// Print results
+#if DEBUG >= 4
+			// Print results
 			cout << "Results:";
 			for (unsigned int i = 0; i < numOfElements; i++) {
 				cout << " " << tmpResults[i];
@@ -216,6 +227,9 @@ int ParallelFramework::slaveThread(int rank, MPI_Comm& comm) {
 #endif
 		} else {
 			// No more data
+#if DEBUG >= 2
+			cout << "  Slave " << rank << " got 0 data..." << endl;
+#endif
 			break;
 		}
 	}
