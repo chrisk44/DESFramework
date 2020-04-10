@@ -7,16 +7,24 @@
 
 #include "framework.h"
 
+#define RESULTS_THRESHOLD 1e-15
+
 using namespace std;
 
 class MyModel : public Model{
 public:
-    __host__ bool validate_cpu(float *point){
-        return (point[0] >= 0 || point[0] <= 5) && (point[1] >= 5 || point[1] <= 7.8);
+    __host__ RESULT_TYPE validate_cpu(DATA_TYPE* point){
+        DATA_TYPE x = point[0];
+        DATA_TYPE y = point[1];
+        return sin(x) * sin(y) + pow(x, 2) + pow(y, 2) + x + y;
+        //return x + y;
     }
 
-    __device__ bool validate_gpu(float *point){
-        return (point[0] >= 0 || point[0] <= 5) && (point[1] >= 5 || point[1] <= 7.8);
+    __device__ RESULT_TYPE validate_gpu(DATA_TYPE* point){
+        DATA_TYPE x = point[0];
+        DATA_TYPE y = point[1];
+        return sin(x) * sin(y) + pow(x, 2) + pow(y, 2) + x + y;
+        //return x + y;
     }
 
     bool toBool(){ return true; }
@@ -30,18 +38,18 @@ int main(int argc, char** argv){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.batchSize = 100000;
+    parameters.batchSize = 1000000;
     parameters.computeBatchSize = 0;
-    parameters.cpuOnly = true;
+    parameters.processingType = TYPE_BOTH;
     parameters.dynamicBatchSize = true;
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
-    limits[0] = Limit { -10, 10, 20 };
-    limits[1] = Limit { 0, 20, 20};
+    limits[0] = Limit { 0, 10, 11000 };
+    limits[1] = Limit { -1e05, 1e05, 11089 };
      
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);
-    if (result != 0) {
+    if (! framework.isValid()) {
         cout << "Error initializing framework: " << result << endl;
     }
 
@@ -54,34 +62,67 @@ int main(int argc, char** argv){
     Sleep(1000);
 
     // Test the outputs
-    long linearIndex;
-    long indices[2];
-    float point[2];
-    float step[2] = {
+#if DEBUG >= 4
+    // Print outputs
+    printf("final results: ");
+    for (unsigned int i = 0; i < framework.totalElements; i++) {
+        printf("%f ", framework.getResults()[i]);
+    }
+    printf("\n");
+#endif
+
+    unsigned long linearIndex;
+    unsigned long indices[2];
+    DATA_TYPE point[2];
+    DATA_TYPE step[2] = {
         abs(limits[0].lowerLimit - limits[0].upperLimit) / limits[0].N,
         abs(limits[1].lowerLimit - limits[1].upperLimit) / limits[1].N
     };
-    int errors = 0;
+    DATA_TYPE returned, expected, absError, relError;
+    DATA_TYPE absErrorSum = 0, relErrorSum = 0;
+    DATA_TYPE absMaxError = 0, relMaxError = 0;
+    long skippedInf = 0, skippedNan = 0;
 
     cout << endl << "Verifying results..." << endl;
     for (unsigned int i = 0; i < limits[0].N; i++) {
+        point[0] = limits[0].lowerLimit + i * step[0];
+
         for (unsigned int j = 0; j < limits[1].N; j++) {
-            point[0] = limits[0].lowerLimit + i * step[0];
             point[1] = limits[1].lowerLimit + j * step[1];
 
             framework.getIndicesFromPoint(point, indices);
             linearIndex = framework.getIndexFromIndices(indices);
 
-            bool result = framework.getResults()[linearIndex];
-            bool expected = MyModel().validate_cpu(point);
+            returned = framework.getResults()[linearIndex];
+            expected = MyModel().validate_cpu(point);
 
-            if ((!result && expected) || (result && !expected)) {
-                cout << "ERROR: Point (" << point[0] << "," << point[1] << ") returned " << result << ", expected " << expected << endl;
-                errors++;
+            absError = abs(returned - expected);
+            relError = absError==0 ? 0 : abs(absError / max(abs(expected), abs(returned)));
+
+            if (isinf(absError) || isinf(relError)) {
+                printf("(%f, %f): result=%f, expected=%f, absError=%f, relError=%f\n", point[0], point[1], returned, expected, absError, relError);
+                skippedInf++;
+            } else if (isnan(absError) || isnan(relError)) {
+                printf("(%f, %f): result=%f, expected=%f, absError=%f, relError=%f\n", point[0], point[1], returned, expected, absError, relError);
+                skippedNan++;
+            }else{
+                if (absError > RESULTS_THRESHOLD) {
+                    printf("(%f, %f): result=%f, expected=%f, absError=%f, relError=%f\n", point[0], point[1], returned, expected, absError, relError);
+                }
+                absErrorSum += absError;
+                relErrorSum += relError;
+                absMaxError = max(absMaxError, absError);
+                relMaxError = max(relMaxError, relError);
             }
         }
+
     }
-    cout << "Done. Errors: " << errors << "/" << limits[0].N * limits[1].N << endl;
+    //printf("errorSum=%lf, limits[0].N=%ld, limits[1].N=%ld\n", errorSum, limits[0].N, limits[1].N);
+    printf("Average absolute error: %f\n", absErrorSum / (limits[0].N * limits[1].N));
+    printf("Max absolute error: %f\n", absMaxError);
+    printf("Average relative error: %f\n", relErrorSum / (limits[0].N * limits[1].N));
+    printf("Max relative error: %f\n", relMaxError);
+    printf("Skipped elements: Inf=%ld, NaN=%ld\n", skippedInf, skippedNan);
     
     return 0;
 }

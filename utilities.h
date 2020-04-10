@@ -13,6 +13,12 @@
   }                                                      \
 }
 
+#define RESULT_TYPE float
+#define RESULT_MPI_TYPE MPI_FLOAT
+
+#define DATA_TYPE double
+
+
 #define BLOCK_SIZE 1024
 #define MAX_DIMENSIONS 10
 #define min(X, Y)  ((X) < (Y) ? (X) : (Y))
@@ -23,7 +29,7 @@
 // 2: Processes steps
 // 3: Data transfers
 // 4: Data calculations
-#define DEBUG 1
+#define DEBUG 3
 
 #define TAG_READY 0
 #define TAG_DATA_COUNT 1
@@ -33,23 +39,29 @@
 class Model {
 public:
 	// float* point will be a D-dimension vector
-	__host__   virtual bool validate_cpu(float* point) = 0;
-	__device__ virtual bool validate_gpu(float point[]) = 0;
+	__host__   virtual RESULT_TYPE validate_cpu(DATA_TYPE* point) = 0;
+	__device__ virtual RESULT_TYPE validate_gpu(DATA_TYPE* point) = 0;
 
 	virtual bool toBool() = 0;
 };
 
 struct Limit {
-	float lowerLimit;
-	float upperLimit;
+	DATA_TYPE lowerLimit;
+	DATA_TYPE upperLimit;
 	unsigned long N;
+};
+
+enum ProcessingType {
+	TYPE_CPU,
+	TYPE_GPU,
+	TYPE_BOTH
 };
 
 struct ParallelFrameworkParameters {
 	unsigned int D;
 	unsigned int computeBatchSize;
 	unsigned int batchSize;
-	bool cpuOnly;
+	ProcessingType processingType;
 	bool dynamicBatchSize;
 	// ...
 };

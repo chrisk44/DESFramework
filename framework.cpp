@@ -12,9 +12,9 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 	unsigned int i;
 	valid = false;
 
-	// TODO: Verify parameters
+	// Verify parameters
 	if (parameters.D == 0 || parameters.D>MAX_DIMENSIONS) {
-		cout << "[E] Dimension must be between 0 and " << MAX_DIMENSIONS << endl;;
+		cout << "[E] Dimension must be between 1 and " << MAX_DIMENSIONS << endl;
 		return;
 	}
 
@@ -36,14 +36,15 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 		idxSteps[i] = idxSteps[i - 1] * limits[i-1].N;
 	}
 
-	steps = new float[parameters.D];
+	steps = new DATA_TYPE[parameters.D];
 	for (i = 0; i < parameters.D; i++) {
 		steps[i] = abs(limits[i].upperLimit - limits[i].lowerLimit) / limits[i].N;
 	}
 
 	totalSent = 0;
 	totalElements = (long)idxSteps[parameters.D - 1] * limits[parameters.D - 1].N;
-	results = new bool[totalElements];		// Uninitialized
+	results = new RESULT_TYPE[totalElements];		// Uninitialized
+	// TODO: ^^ This really is a long story (memorywise)
 
 	toSendVector = new unsigned long[parameters.D];
 	for (i = 0; i < parameters.D; i++) {
@@ -53,8 +54,10 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 	this->limits = limits;
 	this->parameters = &parameters;
 
-	if (this->parameters->batchSize == 0)
-		this->parameters->batchSize = LONG_MAX;
+	if (this->parameters->batchSize == 0) {
+		// TODO: This really is a long story (memorywise)
+		this->parameters->batchSize = totalElements;
+	}
 
 	valid = true;
 }
@@ -81,35 +84,36 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 	int mpiSource;
 	ComputeProcessDetails* pDetails = new ComputeProcessDetails[100];	// TODO: numOfProcesses might change, this should be allocated dynamically (numOfProcesses might also not be valid)
 
-	bool* tmpResults = new bool[parameters->batchSize];
-	long* tmpToCalculate = new long[parameters->D];
-	int tmpNumOfElements;
+	RESULT_TYPE* tmpResults = new RESULT_TYPE[parameters->batchSize];	// TODO: batchSize might become larger, need to allocate more memory
+	unsigned long* tmpToCalculate = new unsigned long[parameters->D];
+	int tmpNumOfElements;	// This needs to be int because of MPI
 
 #if DEBUG > 2
-	printf("\nstartingIndices: %x\n", startingIndices);
-	printf("tmpResults: %x\n", tmpResults);
-	printf("tmpToCalculate: %x\n", tmpToCalculate);
-	printf("&numOfProcesses: %x\n", &numOfProcesses);
+	printf("\npDetails: 0x%x\n", (void*) pDetails);
+	printf("tmpResults: 0x%x\n", (void*) tmpResults);
+	printf("tmpToCalculate: 0x%x\n", (void*) tmpToCalculate);
+	printf("&numOfProcesses: 0x%x\n", (void*) &numOfProcesses);
 	printf("numOfProcesses: %d\n", numOfProcesses);
-	printf("&tmpNumOfElements: %x\n", &tmpNumOfElements);
-	printf("idxSteps: %x\n", idxSteps);
-	printf("steps: %x\n", steps);
-	printf("results: %x\n", results);
-	printf("toSendVector: %x\n\n", toSendVector);
+	printf("&tmpNumOfElements: 0x%x\n", &tmpNumOfElements);
+	printf("idxSteps: 0x%x\n", (void*)idxSteps);
+	printf("steps: 0x%x\n", (void*) steps);
+	printf("results: 0x%x\n", (void*) results);
+	printf("toSendVector: 0x%x\n\n", (void*)toSendVector);
 #endif
 
 	while (finished < numOfProcesses) {
 		// Receive request from any worker thread
-		MPI_Recv(tmpResults, parameters->batchSize, MPI_CXX_BOOL, MPI_ANY_SOURCE, MPI_ANY_TAG, comm, &status);
+		MPI_Recv(tmpResults, parameters->batchSize, RESULT_MPI_TYPE, MPI_ANY_SOURCE, MPI_ANY_TAG, comm, &status);		// TODO: batchSize is variable
 		mpiSource = status.MPI_SOURCE;
 #if DEBUG >= 2
-		cout << "[] Master: Received " << status.MPI_TAG << " from " << status.MPI_SOURCE << endl;
+		cout << " Master: Received " << status.MPI_TAG << " from " << status.MPI_SOURCE << endl;
 #endif
 
 		// Initialize process details if not initialized
 		if (! (pDetails[mpiSource].initialized)) {
 			// TODO: Add any more initializations
 			pDetails[mpiSource].currentBatchSize = parameters->batchSize;
+			pDetails[mpiSource].initialized = true;
 		}
 
 		if (status.MPI_TAG == TAG_READY) {
@@ -119,7 +123,7 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 
 			// Send data
 #if DEBUG >= 2
-			cout << " Master: Sending " << tmpNumOfElements << " elements to " << mpiSource << " with index " << startingIndices[mpiSource] << endl;
+			cout << " Master: Sending " << tmpNumOfElements << " elements to " << mpiSource << " with index " << pDetails[mpiSource].computingIndex << endl;
 #endif
 #if DEBUG >= 3
 			cout << " Master: Sending data to " << mpiSource << ": ";
@@ -129,7 +133,7 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 			cout << endl;
 #endif
 			MPI_Send(&tmpNumOfElements, 1, MPI_INT, mpiSource, TAG_DATA_COUNT, comm);
-			MPI_Send(tmpToCalculate, parameters->D, MPI_LONG, mpiSource, TAG_DATA, comm);
+			MPI_Send(tmpToCalculate, parameters->D, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, comm);
 
 			// Update details for process
 			GetSystemTime(&st);
@@ -147,16 +151,17 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 
 		}else if (status.MPI_TAG == TAG_RESULTS) {
 			// Save received results in this->results
-			MPI_Get_count(&status, MPI_CHAR, &tmpNumOfElements);
+			MPI_Get_count(&status, RESULT_MPI_TYPE, &tmpNumOfElements);
 #if DEBUG >= 2
-			printf(" Master: Saving results from slave %d to results[%ld]...\n", mpiSource, startingIndices[mpiSource]);
+			printf(" Master: Saving %ld results from slave %d to results[%ld]...\n", tmpNumOfElements, mpiSource, pDetails[mpiSource].computingIndex);
 #endif
 #if DEBUG >= 4
-			printf(" Master: Saving results: ");
-			for (unsigned int i = 0; i < tmpNumOfElements; i++) {
-				printf("%d", min(tmpResults[i], 1));
+			printf(" Master: Saving tmpResults: ");
+			for (int i = 0; i < tmpNumOfElements; i++) {
+				//printf("%d", min(tmpResults[i], 1));
+				printf("%f ", tmpResults[i]);
 			}
-			printf(" at %d\n", startingIndices[mpiSource]);
+			printf(" at %d\n", pDetails[mpiSource].computingIndex);
 #endif
 
 			// Update details for process
@@ -170,8 +175,16 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 				// TODO: Adjust pDetails[mpiSource].currentBatchSize
 			}
 			pDetails[mpiSource].lastTimePerElement = newTimePerElement;
+			memcpy(&results[pDetails[mpiSource].computingIndex], tmpResults, tmpNumOfElements*sizeof(RESULT_TYPE));
 
-			memcpy(&results[pDetails[mpiSource].computingIndex], tmpResults, tmpNumOfElements);
+
+//#if DEBUG >= 4
+//			printf(" Master: results after memcpy: ");
+//			for (int i = 0; i < totalElements; i++) {
+//				printf("%f ", results[i]);
+//			}
+//			printf("\n");
+//#endif
 		}
 
 		// Update numOfProcesses, in case someone else joined in (TODO: is this even possible?)
@@ -185,7 +198,7 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 	return 0;
 }
 
-void ParallelFramework::getDataChunk(long maxBatchSize, long* toCalculate, int* numOfElements) {
+void ParallelFramework::getDataChunk(unsigned long maxBatchSize, unsigned long* toCalculate, int* numOfElements) {
 	if (totalSent >= totalElements) {
 		*numOfElements = 0;
 		return;
@@ -213,10 +226,10 @@ void ParallelFramework::getDataChunk(long maxBatchSize, long* toCalculate, int* 
 	totalSent += adjustedBatchSize;
 }
 
-bool* ParallelFramework::getResults() {
+RESULT_TYPE* ParallelFramework::getResults() {
 	return results;
 }
-void ParallelFramework::getIndicesFromPoint(float* point, long* dst) {
+void ParallelFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst) {
 	unsigned int i;
 
 	for (i = 0; i < parameters->D; i++) {
@@ -226,22 +239,22 @@ void ParallelFramework::getIndicesFromPoint(float* point, long* dst) {
 		}
 
 		// Calculate the steps for dimension i
-		dst[i] = (int)floor(abs(limits[i].lowerLimit - point[i]) / steps[i]);
+		dst[i] = (int) round(abs(limits[i].lowerLimit - point[i]) / steps[i]);		// TODO: 1.9999997 will round to 2, verify correctness
 	}
 
-#if DEBUG >= 4
-	cout << "Index for point ( ";
-	for (i = 0; i < parameters->D; i++)
-		cout << point[i] << " ";
-	cout << "): ";
-
-	for (i = 0; i < parameters->D; i++) {
-		cout << dst[i] << " ";
-	}
-	cout << endl;
-#endif
+//#if DEBUG >= 4
+//	cout << "Index for point ( ";
+//	for (i = 0; i < parameters->D; i++)
+//		cout << point[i] << " ";
+//	cout << "): ";
+//
+//	for (i = 0; i < parameters->D; i++) {
+//		cout << dst[i] << " ";
+//	}
+//	cout << endl;
+//#endif
 }
-long ParallelFramework::getIndexFromIndices(long* pointIdx) {
+long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) {
 	unsigned int i;
 	long index = 0;
 
@@ -250,12 +263,12 @@ long ParallelFramework::getIndexFromIndices(long* pointIdx) {
 		index += pointIdx[i] * idxSteps[i];
 	}
 
-#if DEBUG >= 4
-	cout << "Index for point ( ";
-	for (i = 0; i < parameters->D; i++)
-		cout << pointIdx[i] << " ";
-	cout << "): " << index << endl;
-#endif
+//#if DEBUG >= 4
+//	cout << "Index for point ( ";
+//	for (i = 0; i < parameters->D; i++)
+//		cout << pointIdx[i] << " ";
+//	cout << "): " << index << endl;
+//#endif
 
 	return index;
 }
