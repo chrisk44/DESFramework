@@ -4,12 +4,12 @@
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include <iostream>
+#include <string.h>
 #include <mpi.h>
 #include <omp.h>
-#include <Windows.h>
 
 #include "utilities.h"
-#include "kernels.cpp"
+#include "kernels.cu"
 
 using namespace std;
 
@@ -53,8 +53,7 @@ public:
 
 template<class ImplementedModel>
 int ParallelFramework::run(char* argv0) {
-	int numOfProcesses, tmp;
-	char* programName;
+	int numOfProcesses;
 	// MPI variables
 	int rank;
 	int* errcodes;
@@ -77,20 +76,13 @@ int ParallelFramework::run(char* argv0) {
 	// Allocate errcodes now that numOfProcesses is known
 	errcodes = new int[numOfProcesses];
 
-	// Isolate the program's name from argv0
-	tmp = (int)strlen(argv0) - 1;
-	while (argv0[tmp] != '/' && argv0[tmp] != '\\') {
-		tmp--;
-	}
-	programName = &argv0[tmp+1];
-
 	// If this is the parent process, spawn children and run masterThread, else run slaveThread
 	if (parentcomm == MPI_COMM_NULL) {
 		#if DEBUG >=1
 		cout << "Master: Spawning " << numOfProcesses << " processes" << endl;
 		#endif
 
-		MPI_Comm_spawn(programName, MPI_ARGV_NULL, numOfProcesses, MPI_INFO_NULL, 0, MPI_COMM_WORLD, &intercomm, errcodes);
+		MPI_Comm_spawn(argv0, MPI_ARGV_NULL, numOfProcesses, MPI_INFO_NULL, 0, MPI_COMM_WORLD, &intercomm, errcodes);
 
 		// Check errorcodes
 		for (int i = 0; i < numOfProcesses; i++) {
@@ -200,7 +192,7 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 		cudaMalloc(&deviceLimits, parameters->D * sizeof(Limit));					cce();
 
 		// Instantiate the model object on the device, and write its address in 'deviceModelAddress' on the device
-		create_model_kernel<ImplementedModel> << < 1, 1 >> > (deviceModelAddress);	cce();
+		create_model_kernel<ImplementedModel><<< 1, 1 >>>(deviceModelAddress);	cce();
 
 		// Copy limits to device
 		cudaMemcpy(deviceLimits, limits, parameters->D * sizeof(Limit), cudaMemcpyHostToDevice);	cce();
@@ -212,11 +204,12 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 		printf("  Slave %d: deviceLimits: 0x%x\n", rank, (void*) deviceLimits);
 #endif
 	} else {
-		MEMORYSTATUSEX status;
-		status.dwLength = sizeof(status);
-		GlobalMemoryStatusEx(&status);
+		//MEMORYSTATUSEX status;
+		//status.dwLength = sizeof(status);
+		//GlobalMemoryStatusEx(&status);
 
-		maxBatchSize = (status.ullAvailPageFile - MEM_CPU_SPARE_BYTES) / sizeof(RESULT_TYPE);
+		//maxBatchSize = (status.ullAvailPageFile - MEM_CPU_SPARE_BYTES) / sizeof(RESULT_TYPE); TODO: Fix this
+		maxBatchSize = 10000;
 	}
 #if DEBUG >= 2
 	printf("  Slave %d: maxBatchSize = %d (%ld MB)\n", rank, maxBatchSize, maxBatchSize*sizeof(RESULT_TYPE) / (1024 * 1024));
@@ -250,7 +243,7 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 			cout << endl;
 #endif
 			fflush(stdout);
-			
+
 			// If batchSize was increased, allocate more memory for the results
 			if (allocatedElements < numOfElements) {
 #if DEBUG >=2
@@ -290,9 +283,9 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 
 				// Call the kernel
 				//QueryPerformanceCounter(&nStartTime);
-				blockSize = min(BLOCK_SIZE, numOfElements);
+				blockSize = BLOCK_SIZE < numOfElements ? BLOCK_SIZE : numOfElements;
 				numOfBlocks = (numOfElements + blockSize - 1) / blockSize;
-				validate_kernel<ImplementedModel> << <numOfBlocks, blockSize >> > (deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, numOfElements);
+				validate_kernel<ImplementedModel><<<numOfBlocks, blockSize>>>(deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, numOfElements);
 				cce();
 
 				// Wait for kernel to finish
@@ -341,7 +334,7 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 	// Finalize GPU
 	if (gpuId > -1) {
 		// Delete the model object on the device
-		delete_model_kernel<ImplementedModel> << < 1, 1 >> > (deviceModelAddress);
+		delete_model_kernel<ImplementedModel><<<1, 1 >>>(deviceModelAddress);
 		cce();
 
 		// Free the space for the model's address on the device

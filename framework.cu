@@ -1,8 +1,5 @@
-#pragma once
-
 #include <cmath>
 #include <iostream>
-#include <Windows.h>
 
 #include "framework.h"
 
@@ -78,7 +75,7 @@ bool ParallelFramework::isValid() {
 
 void ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 	int finished = 0;
-	SYSTEMTIME st;
+	//SYSTEMTIME st;
 
 	//MPI_Comm_size(comm, &numOfProcesses);
 
@@ -141,8 +138,8 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 			#endif
 
 			// Update details for process
-			GetSystemTime(&st);
-			pstatus.computeStartTime = st.wMilliseconds;
+			//GetSystemTime(&st);
+			//pstatus.computeStartTime = st.wMilliseconds;
 
 			MPI_Send(&tmpNumOfElements, 1, MPI_INT, mpiSource, TAG_DATA_COUNT, comm);
 			MPI_Send(tmpToCalculate, parameters->D, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, comm);
@@ -176,28 +173,28 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 			pstatus.jobsCompleted++;
 			pstatus.elementsCalculated += tmpNumOfElements;
 
-			GetSystemTime(&st);
-			time_t completionTime = st.wMilliseconds - pstatus.computeStartTime;
-			time_t newTimePerElement = completionTime / tmpNumOfElements;
+			//GetSystemTime(&st);
+			//time_t completionTime = st.wMilliseconds - pstatus.computeStartTime;
+			//time_t newTimePerElement = completionTime / tmpNumOfElements;
 
 			if (parameters->benchmark) {
-				printf("Slave %d: Benchmark: %ld elements, %ld msec, %f msec/element\n", mpiSource, tmpNumOfElements, completionTime, newTimePerElement);
+				//printf("Slave %d: Benchmark: %ld elements, %ld msec, %f msec/element\n", mpiSource, tmpNumOfElements, completionTime, newTimePerElement);
 				fflush(stdout);
 			}
 
 			if (parameters->dynamicBatchSize) {
 				// Increase batch size until we hit the max
-				
+
 				// Adjust pstatus.currentBatchSize: Double until SS_THRESHOLD, then increse by SS_STEP
 				if (pstatus.currentBatchSize < SS_THRESHOLD) {
-					pstatus.currentBatchSize = min(2*pstatus.currentBatchSize, SS_THRESHOLD);
+					pstatus.currentBatchSize = std::min((int)(2*pstatus.currentBatchSize), (int)SS_THRESHOLD);
 				} else {
 					pstatus.currentBatchSize += SS_STEP;
 				}
 
 				// Make sure we haven't exceded the maximum batch size set by the process
 				pstatus.currentBatchSize = min(pstatus.currentBatchSize, pstatus.maxBatchSize);
-				
+
 				if (allocatedElements < pstatus.currentBatchSize) {
 					#if DEBUG >= 2
 					printf("Master: Allocating more memory (%d -> %d elements, %ld MB)\n", allocatedElements, pstatus.currentBatchSize, pstatus.currentBatchSize*sizeof(RESULT_TYPE)/(1024*1024));
@@ -211,7 +208,7 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 					#endif
 				}
 			}
-			pstatus.lastTimePerElement = newTimePerElement;
+			//pstatus.lastTimePerElement = newTimePerElement;
 
 			if(! (parameters->benchmark))
 				memcpy(&results[pstatus.computingIndex], tmpResults, tmpNumOfElements*sizeof(RESULT_TYPE));

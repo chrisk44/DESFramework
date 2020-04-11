@@ -1,5 +1,7 @@
-#ifndef KERNELS_H
-#define KERNELS_H
+#ifndef KERNELS_CU
+#define KERNELS_CU
+
+#include <cuda.h>
 
 #include "utilities.h"
 

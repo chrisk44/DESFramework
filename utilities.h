@@ -1,7 +1,7 @@
 #ifndef UTILITIES_H
 #define UTILITIES_H
 
-#include "cuda_runtime.h"
+#include <cuda_runtime.h>
 #include <cuda.h>
 #include <string>
 
@@ -28,8 +28,8 @@
 // Computing parameters
 #define BLOCK_SIZE 1024
 #define MAX_DIMENSIONS 10
-#define min(X, Y)  ((X) < (Y) ? (X) : (Y))
-#define max(X, Y)  ((X) > (Y) ? (X) : (Y))
+//#define min(X, Y)  ((X) < (Y) ? (X) : (Y))
+//#define max(X, Y)  ((X) > (Y) ? (X) : (Y))
 
 #define RESULT_TYPE float
 #define DATA_TYPE double

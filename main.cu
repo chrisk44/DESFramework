@@ -3,7 +3,6 @@
 #include <iostream>
 #include <cstdlib>
 #include <mpi.h>
-#include <Windows.h>
 
 #include "framework.h"
 
@@ -38,7 +37,7 @@ int main(int argc, char** argv){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.batchSize = 100000;
+    parameters.batchSize = 1000000;
     parameters.processingType = TYPE_BOTH;
     parameters.dynamicBatchSize = true;
     parameters.benchmark = false;
@@ -46,9 +45,9 @@ int main(int argc, char** argv){
     parameters.serverName = "localhost";
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
-    limits[0] = Limit { 0, 10, 1190 };
-    limits[1] = Limit { -1e05, 1e05, 800 };
-     
+    limits[0] = Limit { 0, 10, 11900 };
+    limits[1] = Limit { -1e05, 1e05, 8000 };
+
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);
     if (! framework.isValid()) {
@@ -62,7 +61,7 @@ int main(int argc, char** argv){
     }
 
     if (!parameters.benchmark) {
-        Sleep(1000);
+        //sleep(1000);
 
         // Test the outputs
 #if DEBUG >= 4
@@ -127,6 +126,6 @@ int main(int argc, char** argv){
         printf("Max relative error: %f\n", relMaxError);
         printf("Skipped elements: Inf=%ld, NaN=%ld\n", skippedInf, skippedNan);
     }
-    
+
     return 0;
 }
