@@ -4,6 +4,8 @@
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include <string>
+#include <sys/time.h>
+#include <unistd.h>
 
 #define cce() {                               \
   cudaError_t e = cudaGetLastError();                    \
@@ -18,7 +20,7 @@
 #define DEFAULT_PORT "9000"
 
 // Slow start parameters for batch size increment
-#define SS_THRESHOLD 50000000
+#define SS_THRESHOLD 200000000
 #define SS_STEP 1000
 
 // Memory parameters
@@ -40,7 +42,7 @@
 // 2: Processes steps
 // 3: Data transfers
 // 4: Data calculations
-#define DEBUG 1
+#define DEBUG 2
 
 #define TAG_READY 0
 #define TAG_DATA_COUNT 1
@@ -56,6 +58,21 @@ public:
 
 	virtual bool toBool() = 0;
 };
+
+class Stopwatch{
+    // Measures time is nano seconds
+private:
+    struct timespec t1, t2;
+
+public:
+    void start();
+    void stop();
+    float getNsec();
+    float getMsec();
+};
+
+long getDefaultCPUBatchSize();
+long getDefaultGPUBatchSize();
 
 struct Limit {
 	DATA_TYPE lowerLimit;
@@ -89,8 +106,7 @@ struct ComputeProcessStatus {
 	bool finished = false;
 	bool initialized = false;
 
-	time_t computeStartTime;
-	time_t lastTimePerElement;
+	Stopwatch stopwatch;
 };
 
 #endif

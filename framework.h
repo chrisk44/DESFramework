@@ -5,6 +5,7 @@
 #include <cuda.h>
 #include <iostream>
 #include <string.h>
+#include <stdlib.h>
 #include <mpi.h>
 #include <omp.h>
 
@@ -57,7 +58,7 @@ int ParallelFramework::run(char* argv0) {
 	// MPI variables
 	int rank;
 	int* errcodes;
-	MPI_Comm parentcomm, intercomm;
+	MPI_Comm parentcomm, finalcomm;
 
 	// Initialize MPI
 	MPI_Init(nullptr, nullptr);
@@ -82,6 +83,7 @@ int ParallelFramework::run(char* argv0) {
 		cout << "Master: Spawning " << numOfProcesses << " processes" << endl;
 		#endif
 
+		MPI_Comm intercomm;
 		MPI_Comm_spawn(argv0, MPI_ARGV_NULL, numOfProcesses, MPI_INFO_NULL, 0, MPI_COMM_WORLD, &intercomm, errcodes);
 
 		// Check errorcodes
@@ -94,13 +96,15 @@ int ParallelFramework::run(char* argv0) {
 			}
 		}
 
+		MPI_Intercomm_merge(intercomm, 0, &finalcomm);
+
 		if (!parameters->remote) {
 			#pragma omp parallel num_threads(2)
 			{
 				if (omp_get_thread_num() == 0) {
-					masterThread(intercomm, numOfProcesses);
+					masterThread(finalcomm, numOfProcesses);
 				} else {
-					listenerThread(&intercomm);
+					listenerThread(&finalcomm);
 				}
 			}
 		}
@@ -122,10 +126,12 @@ int ParallelFramework::run(char* argv0) {
 			// Join the host
 			MPI_Comm joinedComm;
 			MPI_Comm_join(socket, &joinedComm);
-			MPI_Intercomm_merge(joinedComm, 1, &parentcomm);
+			MPI_Intercomm_merge(joinedComm, 1, &finalcomm);
+		}else{
+			MPI_Intercomm_merge(parentcomm, 1, &finalcomm);
 		}
 
-		slaveThread<ImplementedModel>(parentcomm, rank);
+		slaveThread<ImplementedModel>(finalcomm, rank);
 
 		#if DEBUG >=1
 		cout << "Slave " << rank << " finished" << endl;
@@ -159,7 +165,7 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 	unsigned long* startPointIdx = new unsigned long[parameters->D];								// Memory to store the start point indices
 
 	unsigned long maxBatchSize;				// Max batch size
-	unsigned long numOfElements;			// Number of elements to process
+	int numOfElements;						// Number of elements to process
 	MPI_Status status;						// Structure to save the status of MPI communications
 
 	// GPU parameters
@@ -187,7 +193,7 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 
 		// Allocate memory on device
 		cudaMalloc(&deviceModelAddress, sizeof(ImplementedModel**));				cce();
-		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));		cce();	// TODO: batchSize might become larger, need to allocate more memory
+		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));		cce();
 		cudaMalloc(&deviceStartingPointIdx, parameters->D * sizeof(unsigned long));	cce();
 		cudaMalloc(&deviceLimits, parameters->D * sizeof(Limit));					cce();
 
@@ -203,14 +209,16 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 		printf("  Slave %d: deviceStartingPointIdx: 0x%x\n", rank, (void*) deviceStartingPointIdx);
 		printf("  Slave %d: deviceLimits: 0x%x\n", rank, (void*) deviceLimits);
 #endif
+
 	} else {
 		//MEMORYSTATUSEX status;
 		//status.dwLength = sizeof(status);
 		//GlobalMemoryStatusEx(&status);
 
 		//maxBatchSize = (status.ullAvailPageFile - MEM_CPU_SPARE_BYTES) / sizeof(RESULT_TYPE); TODO: Fix this
-		maxBatchSize = 10000;
+		maxBatchSize = getDefaultCPUBatchSize();
 	}
+
 #if DEBUG >= 2
 	printf("  Slave %d: maxBatchSize = %d (%ld MB)\n", rank, maxBatchSize, maxBatchSize*sizeof(RESULT_TYPE) / (1024 * 1024));
 #endif
@@ -218,37 +226,38 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 	while (true) {
 
 		// Send 'ready' signal to master
-#if DEBUG >= 2
+		#if DEBUG >= 2
 		printf("  Slave %d: Sending READY...\n", rank);
-#endif
+		#endif
 		MPI_Send(nullptr, 0, MPI_INT, 0, TAG_READY, comm);
 		MPI_Send(&maxBatchSize, 1, MPI_UNSIGNED_LONG, 0, TAG_MAX_DATA_COUNT, comm);
 
 		// Receive data (length and starting point) to compute
-#if DEBUG >= 2
+		#if DEBUG >= 2
 		printf("  Slave %d: Waiting for data...\n", rank);
-#endif
-		MPI_Recv(&numOfElements, 1, MPI_UNSIGNED_LONG, 0, TAG_DATA_COUNT, comm, &status);
+		#endif
+		MPI_Recv(&numOfElements, 1, MPI_INT, 0, TAG_DATA_COUNT, comm, &status);
 		MPI_Recv(startPointIdx, parameters->D, MPI_UNSIGNED_LONG, 0, TAG_DATA, comm, &status);
 
 		// If received more data...
 		if (numOfElements > 0) {
-#if DEBUG >= 1
+			#if DEBUG >= 1
 			printf("  Slave %d: Running for %d elements...\n", rank, numOfElements);
-#endif
-#if DEBUG >= 3
+			#endif
+			#if DEBUG >= 3
 			printf("  Slave %d: Got %d elements starting from  ", rank, numOfElements);
 			for (unsigned int i = 0; i < parameters->D; i++)
 				cout << startPointIdx[i] << " ";
 			cout << endl;
-#endif
+			#endif
 			fflush(stdout);
 
 			// If batchSize was increased, allocate more memory for the results
 			if (allocatedElements < numOfElements) {
-#if DEBUG >=2
-				printf("  Slave %d: Allocating more memory (%d -> %d elements, %ld MB)\n", rank, allocatedElements, numOfElements, numOfElements*sizeof(RESULT_TYPE) / (1024 * 1024));
-#endif
+				#if DEBUG >= 2
+				printf("  Slave %d: Allocating more memory (%d -> %d elements, %ld MB)\n", rank, allocatedElements, numOfElements, (numOfElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
+				fflush(stdout);
+				#endif
 				allocatedElements = numOfElements;
 
 				tmpResults = (RESULT_TYPE*)realloc(tmpResults, allocatedElements * sizeof(RESULT_TYPE));
@@ -262,27 +271,25 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 					cce();
 				}
 
-#if DEBUG >=2
+				#if DEBUG >=2
+
 				printf("  Slave %d: tmpResults = 0x%x\n", rank, tmpResults);
 				if(gpuId > -1)
 					printf("  Slave %d: deviceResults = 0x%x\n", rank, deviceResults);
-#endif
+
+				#endif
 			}
 
 			// Calculate the results
 			if (gpuId > -1) {
-				/*LARGE_INTEGER nStartTime;
-				LARGE_INTEGER nStopTime;
-				LARGE_INTEGER nElapsed;
-				LARGE_INTEGER nFrequency;
-				QueryPerformanceFrequency(&nFrequency);*/
+				Stopwatch sw;
 
 				// Copy starting point indices to device
 				cudaMemcpy(deviceStartingPointIdx, startPointIdx, parameters->D * sizeof(unsigned long), cudaMemcpyHostToDevice);
 				cce();
 
 				// Call the kernel
-				//QueryPerformanceCounter(&nStartTime);
+				sw.start();
 				blockSize = BLOCK_SIZE < numOfElements ? BLOCK_SIZE : numOfElements;
 				numOfBlocks = (numOfElements + blockSize - 1) / blockSize;
 				validate_kernel<ImplementedModel><<<numOfBlocks, blockSize>>>(deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, numOfElements);
@@ -292,19 +299,18 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 				cudaDeviceSynchronize();
 				cce();
 
-				/*QueryPerformanceCounter(&nStopTime);
-				nElapsed.QuadPart = (nStopTime.QuadPart - nStartTime.QuadPart) * 1000000;
-				nElapsed.QuadPart /= nFrequency.QuadPart;
-				printf("Kernel run in %0.6lfs\n", nElapsed);*/
+				sw.stop();
+				if(parameters->benchmark)
+					printf("Kernel run in %f ms\n", sw.getMsec());
 
 				// Get results from device
-				//QueryPerformanceCounter(&nStartTime);
+				sw.start();
 				cudaMemcpy(tmpResults, deviceResults, numOfElements * sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost);
 				cce();
-				/*QueryPerformanceCounter(&nStopTime);
-				nElapsed.QuadPart = (nStopTime.QuadPart - nStartTime.QuadPart) * 1000000;
-				nElapsed.QuadPart /= nFrequency.QuadPart;
-				printf("Collected results in %0.6lfs\n", nElapsed);*/
+
+				sw.stop();
+				if(parameters->benchmark)
+					printf("Collected results in %f ms\n", sw.getMsec());
 			} else {
 
 				cpu_kernel<ImplementedModel>(startPointIdx, tmpResults, limits, parameters->D, numOfElements);
@@ -312,17 +318,17 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 			}
 
 			// Send the results to master
-#if DEBUG >= 2
+			#if DEBUG >= 2
 			printf("  Slave %d: Sending %d RESULTS...\n", rank, numOfElements);
-#endif
-#if DEBUG >= 4
+			#endif
+			#if DEBUG >= 4
 			// Print results
 			printf("  Slave %d results: ", rank);
 			for (int i = 0; i < numOfElements; i++) {
 				printf("%f ", tmpResults[i]);
 			}
 			printf("\n");
-#endif
+			#endif
 			MPI_Send(tmpResults, numOfElements, RESULT_MPI_TYPE, 0, TAG_RESULTS, comm);
 
 		} else {

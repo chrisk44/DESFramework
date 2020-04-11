@@ -3,6 +3,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <mpi.h>
+#include <sys/time.h>
 
 #include "framework.h"
 
@@ -37,16 +38,16 @@ int main(int argc, char** argv){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.batchSize = 1000000;
+    parameters.batchSize = 2000;
     parameters.processingType = TYPE_BOTH;
-    parameters.dynamicBatchSize = true;
+    parameters.dynamicBatchSize = false;
     parameters.benchmark = false;
     parameters.remote = argc > 1;
     parameters.serverName = "localhost";
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
-    limits[0] = Limit { 0, 10, 11900 };
-    limits[1] = Limit { -1e05, 1e05, 8000 };
+    limits[0] = Limit { 0, 10, 5000 };
+    limits[1] = Limit { -1e05, 1e05, 3000 };
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);
@@ -60,18 +61,19 @@ int main(int argc, char** argv){
         cout << "Error running the computation: " << result << endl;
     }
 
+    fflush(stdout);
     if (!parameters.benchmark) {
         //sleep(1000);
 
         // Test the outputs
-#if DEBUG >= 4
-    // Print outputs
+        #if DEBUG >= 4
+        // Print outputs
         printf("final results: ");
         for (unsigned int i = 0; i < framework.totalElements; i++) {
             printf("%f ", framework.getResults()[i]);
         }
         printf("\n");
-#endif
+        #endif
 
         unsigned long linearIndex;
         unsigned long indices[2];
@@ -108,7 +110,7 @@ int main(int argc, char** argv){
                     printf("(%f, %f): result=%f, expected=%f, absError=%f, relError=%f\n", point[0], point[1], returned, expected, absError, relError);
                     skippedNan++;
                 } else {
-                    if (absError > RESULTS_THRESHOLD) {
+                    if (relError > RESULTS_THRESHOLD) {
                         printf("(%f, %f): result=%f, expected=%f, absError=%f, relError=%f\n", point[0], point[1], returned, expected, absError, relError);
                     }
                     absErrorSum += absError;
