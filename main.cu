@@ -42,10 +42,12 @@ int main(int argc, char** argv){
     parameters.processingType = TYPE_BOTH;
     parameters.dynamicBatchSize = true;
     parameters.benchmark = false;
+    parameters.remote = argc > 1;
+    parameters.serverName = "localhost";
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
-    limits[0] = Limit { 0, 10, 11090 };
-    limits[1] = Limit { -1e05, 1e05, 8000 };
+    limits[0] = Limit { 0, 10, 1190 };
+    limits[1] = Limit { -1e05, 1e05, 800 };
      
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);

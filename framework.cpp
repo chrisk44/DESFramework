@@ -6,6 +6,7 @@
 
 #include "framework.h"
 
+
 using namespace std;
 
 ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters& parameters) {
@@ -75,7 +76,7 @@ bool ParallelFramework::isValid() {
 	return valid;
 }
 
-int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
+void ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 	int finished = 0;
 	SYSTEMTIME st;
 
@@ -91,7 +92,7 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 	unsigned long* tmpToCalculate = new unsigned long[parameters->D];
 	int tmpNumOfElements;	// This needs to be int because of MPI
 
-#if DEBUG > 2
+	#if DEBUG > 2
 	printf("\nMaster: processStatus: 0x%x\n", (void*) processStatus);
 	printf("Master: tmpResults: 0x%x\n", (void*) tmpResults);
 	printf("Master: tmpToCalculate: 0x%x\n", (void*) tmpToCalculate);
@@ -102,15 +103,15 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 	printf("Master: steps: 0x%x\n", (void*) steps);
 	printf("Master: results: 0x%x\n", (void*) results);
 	printf("Master: toSendVector: 0x%x\n\n", (void*)toSendVector);
-#endif
+	#endif
 
 	while (finished < numOfProcesses) {
 		// Receive request from any worker thread
 		MPI_Recv(tmpResults, allocatedElements, RESULT_MPI_TYPE, MPI_ANY_SOURCE, MPI_ANY_TAG, comm, &status);
 		mpiSource = status.MPI_SOURCE;
-#if DEBUG >= 2
+		#if DEBUG >= 2
 		cout << " Master: Received " << status.MPI_TAG << " from " << status.MPI_SOURCE << endl;
-#endif
+		#endif
 
 		// Initialize process details if not initialized
 		if (! (pstatus.initialized)) {
@@ -128,16 +129,16 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 			pstatus.computingIndex = getIndexFromIndices(tmpToCalculate);
 
 			// Send data
-#if DEBUG >= 2
+			#if DEBUG >= 2
 			cout << " Master: Sending " << tmpNumOfElements << " elements to " << mpiSource << " with index " << pstatus.computingIndex << endl;
-#endif
-#if DEBUG >= 3
+			#endif
+			#if DEBUG >= 3
 			cout << " Master: Sending data to " << mpiSource << ": ";
 			for (unsigned int i = 0; i < parameters->D; i++) {
 				cout << tmpToCalculate[i] << " ";
 			}
 			cout << endl;
-#endif
+			#endif
 
 			// Update details for process
 			GetSystemTime(&st);
@@ -148,9 +149,9 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 
 			// If no more data available, source will finish
 			if (tmpNumOfElements == 0) {
-#if DEBUG >= 2
+				#if DEBUG >= 2
 				cout << " Master: Slave " << mpiSource << " finishing..." << endl;
-#endif
+				#endif
 				finished++;
 				pstatus.computingIndex = totalElements;
 				pstatus.finished = true;
@@ -159,17 +160,17 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 		}else if (status.MPI_TAG == TAG_RESULTS) {
 			// Save received results in this->results
 			MPI_Get_count(&status, RESULT_MPI_TYPE, &tmpNumOfElements);
-#if DEBUG >= 2
+				#if DEBUG >= 2
 			printf(" Master: Saving %ld results from slave %d to results[%ld]...\n", tmpNumOfElements, mpiSource, pstatus.computingIndex);
-#endif
-#if DEBUG >= 4
+				#endif
+				#if DEBUG >= 4
 			printf(" Master: Saving tmpResults: ");
 			for (int i = 0; i < tmpNumOfElements; i++) {
 				//printf("%d", min(tmpResults[i], 1));
 				printf("%f ", tmpResults[i]);
 			}
 			printf(" at %d\n", pstatus.computingIndex);
-#endif
+				#endif
 
 			// Update details for process
 			pstatus.jobsCompleted++;
@@ -232,8 +233,30 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 	delete[] tmpResults;
 	delete[] tmpToCalculate;
 	delete[] processStatus;
+}
 
-	return 0;
+void ParallelFramework::listenerThread(MPI_Comm* parentcomm) {
+	// Receive connections from other processes on the network,
+	// Merge them with parentcomm
+	#if DEBUG >=1
+	printf("Join: joinThread started\n");
+	#endif
+	/*
+	// TODO: Open server socket at DEFAULT_PORT
+
+	while (true) {
+		// TODO: Accept a client socket
+		int clientSocket;
+
+		MPI_Comm joinedComm;
+		MPI_Comm_join(clientSocket, &joinedComm);
+
+		MPI_Intercomm_merge(joinedComm, 0, parentcomm);
+	}
+	*/
+	#if DEBUG >=1
+	printf("Join: joinThread stopped\n");
+	#endif
 }
 
 void ParallelFramework::getDataChunk(unsigned long batchSize, unsigned long* toCalculate, int* numOfElements) {

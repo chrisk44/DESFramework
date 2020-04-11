@@ -3,6 +3,7 @@
 
 #include "cuda_runtime.h"
 #include <cuda.h>
+#include <string>
 
 #define cce() {                               \
   cudaError_t e = cudaGetLastError();                    \
@@ -13,10 +14,8 @@
   }                                                      \
 }
 
-#define RESULT_TYPE float
-#define RESULT_MPI_TYPE MPI_FLOAT
-
-#define DATA_TYPE double
+// Server parameters
+#define DEFAULT_PORT "9000"
 
 // Slow start parameters for batch size increment
 #define SS_THRESHOLD 50000000
@@ -26,10 +25,15 @@
 #define MEM_CPU_SPARE_BYTES 100*1024*1024
 #define MEM_GPU_SPARE_BYTES 100*1024*1024
 
+// Computing parameters
 #define BLOCK_SIZE 1024
 #define MAX_DIMENSIONS 10
 #define min(X, Y)  ((X) < (Y) ? (X) : (Y))
 #define max(X, Y)  ((X) > (Y) ? (X) : (Y))
+
+#define RESULT_TYPE float
+#define DATA_TYPE double
+#define RESULT_MPI_TYPE MPI_FLOAT
 
 // 0: Only errors
 // 1: Processes start/stop
@@ -71,6 +75,8 @@ struct ParallelFrameworkParameters {
 	ProcessingType processingType = TYPE_BOTH;
 	bool dynamicBatchSize = true;
 	bool benchmark = false;
+	bool remote = false;
+	std::string serverName;
 	// ...
 };
 

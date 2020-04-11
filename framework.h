@@ -41,10 +41,11 @@ public:
 	bool isValid();
 
 public:
-	int masterThread(MPI_Comm& comm, int numOfProcesses);
+	void masterThread(MPI_Comm& comm, int numOfProcesses);
+	void listenerThread(MPI_Comm* parentcomm);
 
 	template<class ImplementedModel>
-	int slaveThread(MPI_Comm& comm, int rank);
+	void slaveThread(MPI_Comm& comm, int rank);
 
 	void getDataChunk(unsigned long maxBatchSize, unsigned long* toCalculate, int *numOfElements);
 
@@ -85,9 +86,9 @@ int ParallelFramework::run(char* argv0) {
 
 	// If this is the parent process, spawn children and run masterThread, else run slaveThread
 	if (parentcomm == MPI_COMM_NULL) {
-#if DEBUG >=1
+		#if DEBUG >=1
 		cout << "Master: Spawning " << numOfProcesses << " processes" << endl;
-#endif
+		#endif
 
 		MPI_Comm_spawn(programName, MPI_ARGV_NULL, numOfProcesses, MPI_INFO_NULL, 0, MPI_COMM_WORLD, &intercomm, errcodes);
 
@@ -101,22 +102,49 @@ int ParallelFramework::run(char* argv0) {
 			}
 		}
 
-		masterThread(intercomm, numOfProcesses);
-#if DEBUG >=1
+		if (!parameters->remote) {
+			#pragma omp parallel num_threads(2)
+			{
+				if (omp_get_thread_num() == 0) {
+					masterThread(intercomm, numOfProcesses);
+				} else {
+					listenerThread(&intercomm);
+				}
+			}
+		}
+
+		#if DEBUG >=1
 		cout << "Master finished" << endl;
-#endif
+		#endif
 
 	} else {
 
-#if DEBUG >=1
+		#if DEBUG >=1
 		cout << "Slave " << rank << " starting" << endl;
-#endif
+		#endif
+
+		int socket = -1;
+		if (parameters->remote) {
+			// Connect to host at parameters->serverName : DEFAULT_PORT
+
+			// Join the host
+			MPI_Comm joinedComm;
+			MPI_Comm_join(socket, &joinedComm);
+			MPI_Intercomm_merge(joinedComm, 1, &parentcomm);
+		}
+
 		slaveThread<ImplementedModel>(parentcomm, rank);
-#if DEBUG >=1
+
+		#if DEBUG >=1
 		cout << "Slave " << rank << " finished" << endl;
-#endif
+		#endif
 
 		MPI_Finalize();
+
+		if (socket != -1) {
+			// close socket
+		}
+
 		exit(0);
 
 	}
@@ -130,7 +158,7 @@ int ParallelFramework::run(char* argv0) {
 }
 
 template<class ImplementedModel>
-int ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
+void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 	// If gpuId==-1, use CPU, otherwise use GPU with id = gpuId
 	int gpuId = parameters->processingType == TYPE_GPU ? rank : rank - 1;
 
@@ -325,8 +353,6 @@ int ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 
 	delete[] startPointIdx;
 	free(tmpResults);
-
-	return 0;
 }
 
 #endif
