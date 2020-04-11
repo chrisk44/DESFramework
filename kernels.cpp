@@ -24,11 +24,15 @@ __global__ void validate_kernel(ImplementedModel** model, unsigned long* startin
 	unsigned int threadX = (blockIdx.x * BLOCK_SIZE) + threadIdx.x;
 	if (threadX < numOfElements) {
 		DATA_TYPE point[MAX_DIMENSIONS];
-		unsigned long tmpIndex;
+		unsigned long tmpIndex, carry;
+		unsigned int i;
+		/*DATA_TYPE step[MAX_DIMENSINS];
+		for (i = 0; i < D; i++) {
+			step[i] = abs(limits[i].lowerLimit - limits[i].upperLimit) / limits[i].N;
+		}*/
 
 		// Calculate 'myIndex = startingPointIdx + threadIdx.x' and then the exact point
-		unsigned int i;
-		unsigned long carry = threadX;
+		carry = threadX;
 		for (i = 0; i < D; i++) {
 			tmpIndex = (startingPointIdx[i] + carry) % limits[i].N;
 			carry = (startingPointIdx[i] + carry) / limits[i].N;

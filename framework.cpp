@@ -43,8 +43,9 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 
 	totalSent = 0;
 	totalElements = (long)idxSteps[parameters.D - 1] * limits[parameters.D - 1].N;
-	results = new RESULT_TYPE[totalElements];		// Uninitialized
-	// TODO: ^^ This really is a long story (memorywise)
+	if(! (parameters.benchmark))
+		results = new RESULT_TYPE[totalElements];		// Uninitialized
+		// TODO: ^^ This really is a long story (memorywise)
 
 	toSendVector = new unsigned long[parameters.D];
 	for (i = 0; i < parameters.D; i++) {
@@ -82,48 +83,53 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 
 	MPI_Status status;
 	int mpiSource;
-	ComputeProcessDetails* pDetails = new ComputeProcessDetails[100];	// TODO: numOfProcesses might change, this should be allocated dynamically (numOfProcesses might also not be valid)
+	ComputeProcessStatus* processStatus = new ComputeProcessStatus[100];	// TODO: numOfProcesses might change, this should be allocated dynamically (numOfProcesses might also not be valid)
+#define pstatus (processStatus[mpiSource])
 
-	RESULT_TYPE* tmpResults = new RESULT_TYPE[parameters->batchSize];	// TODO: batchSize might become larger, need to allocate more memory
+	unsigned long allocatedElements = parameters->batchSize;			// Number of allocated elements for results
+	RESULT_TYPE* tmpResults = new RESULT_TYPE[allocatedElements];
 	unsigned long* tmpToCalculate = new unsigned long[parameters->D];
 	int tmpNumOfElements;	// This needs to be int because of MPI
 
 #if DEBUG > 2
-	printf("\npDetails: 0x%x\n", (void*) pDetails);
-	printf("tmpResults: 0x%x\n", (void*) tmpResults);
-	printf("tmpToCalculate: 0x%x\n", (void*) tmpToCalculate);
-	printf("&numOfProcesses: 0x%x\n", (void*) &numOfProcesses);
-	printf("numOfProcesses: %d\n", numOfProcesses);
-	printf("&tmpNumOfElements: 0x%x\n", &tmpNumOfElements);
-	printf("idxSteps: 0x%x\n", (void*)idxSteps);
-	printf("steps: 0x%x\n", (void*) steps);
-	printf("results: 0x%x\n", (void*) results);
-	printf("toSendVector: 0x%x\n\n", (void*)toSendVector);
+	printf("\nMaster: processStatus: 0x%x\n", (void*) processStatus);
+	printf("Master: tmpResults: 0x%x\n", (void*) tmpResults);
+	printf("Master: tmpToCalculate: 0x%x\n", (void*) tmpToCalculate);
+	printf("Master: &numOfProcesses: 0x%x\n", (void*) &numOfProcesses);
+	printf("Master: numOfProcesses: %d\n", numOfProcesses);
+	printf("Master: &tmpNumOfElements: 0x%x\n", &tmpNumOfElements);
+	printf("Master: idxSteps: 0x%x\n", (void*)idxSteps);
+	printf("Master: steps: 0x%x\n", (void*) steps);
+	printf("Master: results: 0x%x\n", (void*) results);
+	printf("Master: toSendVector: 0x%x\n\n", (void*)toSendVector);
 #endif
 
 	while (finished < numOfProcesses) {
 		// Receive request from any worker thread
-		MPI_Recv(tmpResults, parameters->batchSize, RESULT_MPI_TYPE, MPI_ANY_SOURCE, MPI_ANY_TAG, comm, &status);		// TODO: batchSize is variable
+		MPI_Recv(tmpResults, allocatedElements, RESULT_MPI_TYPE, MPI_ANY_SOURCE, MPI_ANY_TAG, comm, &status);
 		mpiSource = status.MPI_SOURCE;
 #if DEBUG >= 2
 		cout << " Master: Received " << status.MPI_TAG << " from " << status.MPI_SOURCE << endl;
 #endif
 
 		// Initialize process details if not initialized
-		if (! (pDetails[mpiSource].initialized)) {
+		if (! (pstatus.initialized)) {
 			// TODO: Add any more initializations
-			pDetails[mpiSource].currentBatchSize = parameters->batchSize;
-			pDetails[mpiSource].initialized = true;
+			pstatus.currentBatchSize = parameters->batchSize;
+			pstatus.initialized = true;
 		}
 
 		if (status.MPI_TAG == TAG_READY) {
+			// Receive the maximum batch size reported by the slave process
+			MPI_Recv(&pstatus.maxBatchSize, 1, MPI_UNSIGNED_LONG, MPI_ANY_SOURCE, TAG_MAX_DATA_COUNT, comm, &status);
+
 			// Get next data batch to calculate
-			getDataChunk(pDetails[mpiSource].currentBatchSize, tmpToCalculate, &tmpNumOfElements);
-			pDetails[mpiSource].computingIndex = getIndexFromIndices(tmpToCalculate);
+			getDataChunk(pstatus.currentBatchSize, tmpToCalculate, &tmpNumOfElements);
+			pstatus.computingIndex = getIndexFromIndices(tmpToCalculate);
 
 			// Send data
 #if DEBUG >= 2
-			cout << " Master: Sending " << tmpNumOfElements << " elements to " << mpiSource << " with index " << pDetails[mpiSource].computingIndex << endl;
+			cout << " Master: Sending " << tmpNumOfElements << " elements to " << mpiSource << " with index " << pstatus.computingIndex << endl;
 #endif
 #if DEBUG >= 3
 			cout << " Master: Sending data to " << mpiSource << ": ";
@@ -132,12 +138,13 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 			}
 			cout << endl;
 #endif
-			MPI_Send(&tmpNumOfElements, 1, MPI_INT, mpiSource, TAG_DATA_COUNT, comm);
-			MPI_Send(tmpToCalculate, parameters->D, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, comm);
 
 			// Update details for process
 			GetSystemTime(&st);
-			pDetails[mpiSource].computeStartTime = st.wMilliseconds;
+			pstatus.computeStartTime = st.wMilliseconds;
+
+			MPI_Send(&tmpNumOfElements, 1, MPI_INT, mpiSource, TAG_DATA_COUNT, comm);
+			MPI_Send(tmpToCalculate, parameters->D, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, comm);
 
 			// If no more data available, source will finish
 			if (tmpNumOfElements == 0) {
@@ -145,15 +152,15 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 				cout << " Master: Slave " << mpiSource << " finishing..." << endl;
 #endif
 				finished++;
-				pDetails[mpiSource].computingIndex = totalElements;
-				pDetails[mpiSource].finished = true;
+				pstatus.computingIndex = totalElements;
+				pstatus.finished = true;
 			}
 
 		}else if (status.MPI_TAG == TAG_RESULTS) {
 			// Save received results in this->results
 			MPI_Get_count(&status, RESULT_MPI_TYPE, &tmpNumOfElements);
 #if DEBUG >= 2
-			printf(" Master: Saving %ld results from slave %d to results[%ld]...\n", tmpNumOfElements, mpiSource, pDetails[mpiSource].computingIndex);
+			printf(" Master: Saving %ld results from slave %d to results[%ld]...\n", tmpNumOfElements, mpiSource, pstatus.computingIndex);
 #endif
 #if DEBUG >= 4
 			printf(" Master: Saving tmpResults: ");
@@ -161,21 +168,52 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 				//printf("%d", min(tmpResults[i], 1));
 				printf("%f ", tmpResults[i]);
 			}
-			printf(" at %d\n", pDetails[mpiSource].computingIndex);
+			printf(" at %d\n", pstatus.computingIndex);
 #endif
 
 			// Update details for process
-			pDetails[mpiSource].jobsCompleted++;
-			pDetails[mpiSource].elementsCalculated += tmpNumOfElements;
+			pstatus.jobsCompleted++;
+			pstatus.elementsCalculated += tmpNumOfElements;
 
 			GetSystemTime(&st);
-			time_t completionTime = st.wMilliseconds - pDetails[mpiSource].computeStartTime;
+			time_t completionTime = st.wMilliseconds - pstatus.computeStartTime;
 			time_t newTimePerElement = completionTime / tmpNumOfElements;
-			if (parameters->dynamicBatchSize) {
-				// TODO: Adjust pDetails[mpiSource].currentBatchSize
+
+			if (parameters->benchmark) {
+				printf("Slave %d: Benchmark: %ld elements, %ld msec, %f msec/element\n", mpiSource, tmpNumOfElements, completionTime, newTimePerElement);
+				fflush(stdout);
 			}
-			pDetails[mpiSource].lastTimePerElement = newTimePerElement;
-			memcpy(&results[pDetails[mpiSource].computingIndex], tmpResults, tmpNumOfElements*sizeof(RESULT_TYPE));
+
+			if (parameters->dynamicBatchSize) {
+				// Increase batch size until we hit the max
+				
+				// Adjust pstatus.currentBatchSize: Double until SS_THRESHOLD, then increse by SS_STEP
+				if (pstatus.currentBatchSize < SS_THRESHOLD) {
+					pstatus.currentBatchSize = min(2*pstatus.currentBatchSize, SS_THRESHOLD);
+				} else {
+					pstatus.currentBatchSize += SS_STEP;
+				}
+
+				// Make sure we haven't exceded the maximum batch size set by the process
+				pstatus.currentBatchSize = min(pstatus.currentBatchSize, pstatus.maxBatchSize);
+				
+				if (allocatedElements < pstatus.currentBatchSize) {
+					#if DEBUG >= 2
+					printf("Master: Allocating more memory (%d -> %d elements, %ld MB)\n", allocatedElements, pstatus.currentBatchSize, pstatus.currentBatchSize*sizeof(RESULT_TYPE)/(1024*1024));
+					#endif
+
+					allocatedElements = pstatus.currentBatchSize;
+					tmpResults = (RESULT_TYPE*)realloc(tmpResults, allocatedElements * sizeof(RESULT_TYPE));
+
+					#if DEBUG >= 2
+					printf("Master: tmpResults: 0x%x\n", (void*)tmpResults);
+					#endif
+				}
+			}
+			pstatus.lastTimePerElement = newTimePerElement;
+
+			if(! (parameters->benchmark))
+				memcpy(&results[pstatus.computingIndex], tmpResults, tmpNumOfElements*sizeof(RESULT_TYPE));
 
 
 //#if DEBUG >= 4
@@ -193,28 +231,27 @@ int ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 
 	delete[] tmpResults;
 	delete[] tmpToCalculate;
-	delete[] pDetails;
+	delete[] processStatus;
 
 	return 0;
 }
 
-void ParallelFramework::getDataChunk(unsigned long maxBatchSize, unsigned long* toCalculate, int* numOfElements) {
+void ParallelFramework::getDataChunk(unsigned long batchSize, unsigned long* toCalculate, int* numOfElements) {
 	if (totalSent >= totalElements) {
 		*numOfElements = 0;
 		return;
 	}
 
-	unsigned int adjustedBatchSize = maxBatchSize;
-	if (totalElements - totalSent < adjustedBatchSize)
-		adjustedBatchSize = totalElements - totalSent;
+	if (totalElements - totalSent < batchSize)
+		batchSize = totalElements - totalSent;
 
 	// Copy toSendVector to the output
 	memcpy(toCalculate, toSendVector, parameters->D * sizeof(long));
-	*numOfElements = adjustedBatchSize;
+	*numOfElements = batchSize;
 
 	unsigned int i;
 	unsigned int newIndex;
-	unsigned int carry = adjustedBatchSize;
+	unsigned int carry = batchSize;
 
 	for (i = 0; i < parameters->D; i++) {
 		newIndex = (toSendVector[i] + carry) % limits[i].N;
@@ -223,7 +260,7 @@ void ParallelFramework::getDataChunk(unsigned long maxBatchSize, unsigned long* 
 		toSendVector[i] = newIndex;
 	}
 
-	totalSent += adjustedBatchSize;
+	totalSent += batchSize;
 }
 
 RESULT_TYPE* ParallelFramework::getResults() {

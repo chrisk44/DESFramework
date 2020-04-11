@@ -18,6 +18,13 @@
 
 #define DATA_TYPE double
 
+// Slow start parameters for batch size increment
+#define SS_THRESHOLD 50000000
+#define SS_STEP 1000
+
+// Memory parameters
+#define MEM_CPU_SPARE_BYTES 100*1024*1024
+#define MEM_GPU_SPARE_BYTES 100*1024*1024
 
 #define BLOCK_SIZE 1024
 #define MAX_DIMENSIONS 10
@@ -29,12 +36,13 @@
 // 2: Processes steps
 // 3: Data transfers
 // 4: Data calculations
-#define DEBUG 3
+#define DEBUG 1
 
 #define TAG_READY 0
 #define TAG_DATA_COUNT 1
 #define TAG_DATA 2
 #define TAG_RESULTS 3
+#define TAG_MAX_DATA_COUNT 4
 
 class Model {
 public:
@@ -59,15 +67,16 @@ enum ProcessingType {
 
 struct ParallelFrameworkParameters {
 	unsigned int D;
-	unsigned int computeBatchSize;
 	unsigned int batchSize;
-	ProcessingType processingType;
-	bool dynamicBatchSize;
+	ProcessingType processingType = TYPE_BOTH;
+	bool dynamicBatchSize = true;
+	bool benchmark = false;
 	// ...
 };
 
-struct ComputeProcessDetails {
+struct ComputeProcessStatus {
 	unsigned long computingIndex = 0;
+	unsigned long maxBatchSize;
 	unsigned long currentBatchSize;		// Initialized by masterThread()
 	unsigned int jobsCompleted = 0;
 	unsigned elementsCalculated = 0;
