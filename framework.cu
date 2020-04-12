@@ -72,15 +72,15 @@ bool ParallelFramework::isValid() {
 	return valid;
 }
 
-void ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
+void ParallelFramework::masterThread(MPI_Comm& comm, int* numOfProcesses) {
 	int finished = 0;
-
-	//MPI_Comm_size(comm, &numOfProcesses);
 
 	MPI_Status status;
 	int mpiSource;
-	ComputeProcessStatus* processStatus = new ComputeProcessStatus[100];	// TODO: numOfProcesses might change, this should be allocated dynamically (numOfProcesses might also not be valid)
-#define pstatus (processStatus[mpiSource])
+	ComputeProcessStatus* processStatus = (ComputeProcessStatus*) malloc(*numOfProcesses * sizeof(ComputeProcessStatus));
+	int pstatusAllocated = *numOfProcesses;
+
+	#define pstatus (processStatus[mpiSource])
 
 	unsigned long allocatedElements = parameters->batchSize;				// Number of allocated elements for results
 	RESULT_TYPE* tmpResults = new RESULT_TYPE[allocatedElements];
@@ -91,8 +91,8 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 	printf("\nMaster: processStatus: 0x%x\n", (void*) processStatus);
 	printf("Master: tmpResults: 0x%x\n", (void*) tmpResults);
 	printf("Master: tmpToCalculate: 0x%x\n", (void*) tmpToCalculate);
-	printf("Master: &numOfProcesses: 0x%x\n", (void*) &numOfProcesses);
-	printf("Master: numOfProcesses: %d\n", numOfProcesses);
+	printf("Master: &numOfProcesses: 0x%x\n", (void*) numOfProcesses);
+	printf("Master: numOfProcesses: %d\n", *numOfProcesses);
 	printf("Master: &tmpNumOfElements: 0x%x\n", &tmpNumOfElements);
 	printf("Master: idxSteps: 0x%x\n", (void*)idxSteps);
 	printf("Master: steps: 0x%x\n", (void*) steps);
@@ -100,13 +100,19 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 	printf("Master: toSendVector: 0x%x\n\n", (void*)toSendVector);
 	#endif
 
-	while (finished < numOfProcesses) {
+	while (finished < *numOfProcesses) {
 		// Receive request from any worker thread
 		MPI_Recv(tmpResults, allocatedElements, RESULT_MPI_TYPE, MPI_ANY_SOURCE, MPI_ANY_TAG, comm, &status);
 		mpiSource = status.MPI_SOURCE;
 		#if DEBUG >= 2
 		cout << " Master: Received " << status.MPI_TAG << " from " << status.MPI_SOURCE << endl;
 		#endif
+
+		if(mpiSource+1 > pstatusAllocated){
+			// Process joined in, allocate more memory
+			pstatusAllocated = mpiSource+1;
+			processStatus = (ComputeProcessStatus*) realloc(processStatus, pstatusAllocated * sizeof(ComputeProcessStatus));
+		}
 
 		// Initialize process details if not initialized
 		if (! (pstatus.initialized)) {
@@ -217,35 +223,36 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int numOfProcesses) {
 //			printf("\n");
 //#endif
 		}
-
-		// Update numOfProcesses, in case someone else joined in (TODO: is this even possible?)
-		//MPI_Comm_size(comm, &numOfProcesses);
 	}
 
 	delete[] tmpResults;
 	delete[] tmpToCalculate;
-	delete[] processStatus;
+	free(processStatus);
 }
 
-void ParallelFramework::listenerThread(MPI_Comm* parentcomm) {
-	// Receive connections from other processes on the network,
-	// Merge them with parentcomm
+void ParallelFramework::listenerThread(MPI_Comm* finalcomm, int* numOfProcesses, bool* stopFlag) {
+	// Receive connections from other processes on the network, and merge them with finalcomm
 	#if DEBUG >=1
 	printf("Join: joinThread started\n");
 	#endif
-	/*
+
 	// TODO: Open server socket at DEFAULT_PORT
 
-	while (true) {
-		// TODO: Accept a client socket
-		int clientSocket;
+	while (! (*stopFlag)) {
+		usleep(100000);
 
-		MPI_Comm joinedComm;
-		MPI_Comm_join(clientSocket, &joinedComm);
+		// TODO: Accept a client socket (non blocking)
+		int clientSocket = -1;
 
-		MPI_Intercomm_merge(joinedComm, 0, parentcomm);
+		if(clientSocket > 0){
+			*numOfProcesses += 1;
+			MPI_Comm joinedComm;
+			MPI_Comm_join(clientSocket, &joinedComm);
+
+			MPI_Intercomm_merge(joinedComm, 0, finalcomm);
+		}
 	}
-	*/
+
 	#if DEBUG >=1
 	printf("Join: joinThread stopped\n");
 	#endif

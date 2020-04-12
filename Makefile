@@ -19,7 +19,7 @@ out: $(SRC)
 run: out
 	mpiexec $(MPI_ARGS) $(TARGET)
 
-run-remote: $(TARGET)
+run-remote: out
 	mpiexec $(MPI_ARGS) $(TARGET) remote
 
 clean:

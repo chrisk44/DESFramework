@@ -42,8 +42,8 @@ public:
 	bool isValid();
 
 public:
-	void masterThread(MPI_Comm& comm, int numOfProcesses);
-	void listenerThread(MPI_Comm* parentcomm);
+	void masterThread(MPI_Comm& comm, int* numOfProcesses);
+	void listenerThread(MPI_Comm* finalcomm, int* numOfProcesses, bool* stopFlag);
 
 	template<class ImplementedModel>
 	void slaveThread(MPI_Comm& comm, int rank);
@@ -85,29 +85,28 @@ int ParallelFramework::run(char* argv0) {
 
 		MPI_Comm intercomm;
 		MPI_Comm_spawn(argv0, MPI_ARGV_NULL, numOfProcesses, MPI_INFO_NULL, 0, MPI_COMM_WORLD, &intercomm, errcodes);
-
-		// Check errorcodes
-		for (int i = 0; i < numOfProcesses; i++) {
-			if (errcodes[i] != MPI_SUCCESS) {
-				cout << "[E] Error starting process " << i << ", error: " << errcodes[i] << endl;
-
-				// TBD: Terminate everyone (?)
-				//totalSent = totalElements;
-			}
-		}
-
 		MPI_Intercomm_merge(intercomm, 0, &finalcomm);
 
+		// Check errorcodes
+		for (int i = 0; i < numOfProcesses; i++)
+			if (errcodes[i] != MPI_SUCCESS)
+				cout << "[E] Error starting process " << i << ", error: " << errcodes[i] << endl;
+
+
 		if (!parameters->remote) {
-			#pragma omp parallel num_threads(2)
+			bool stopFlag = false;
+			#pragma omp parallel num_threads(2) shared(stopFlag)
 			{
 				if (omp_get_thread_num() == 0) {
-					masterThread(finalcomm, numOfProcesses);
+					masterThread(finalcomm, &numOfProcesses);
+					stopFlag = true;
 				} else {
-					listenerThread(&finalcomm);
+					listenerThread(&finalcomm, &numOfProcesses, &stopFlag);
 				}
 			}
 		}
+
+		MPI_Comm_free(&finalcomm);
 
 		#if DEBUG >=1
 		cout << "Master finished" << endl;
@@ -132,6 +131,9 @@ int ParallelFramework::run(char* argv0) {
 		}
 
 		slaveThread<ImplementedModel>(finalcomm, rank);
+
+		// Free the instracommunicator
+		MPI_Comm_free(&finalcomm);
 
 		#if DEBUG >=1
 		cout << "Slave " << rank << " finished" << endl;
@@ -211,11 +213,6 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 #endif
 
 	} else {
-		//MEMORYSTATUSEX status;
-		//status.dwLength = sizeof(status);
-		//GlobalMemoryStatusEx(&status);
-
-		//maxBatchSize = (status.ullAvailPageFile - MEM_CPU_SPARE_BYTES) / sizeof(RESULT_TYPE); TODO: Fix this
 		maxBatchSize = getDefaultCPUBatchSize();
 	}
 
