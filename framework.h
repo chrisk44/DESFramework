@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <mpi.h>
 #include <omp.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 #include "utilities.h"
 #include "kernels.cu"
@@ -27,6 +30,7 @@ public:
 	bool valid = false;
 	unsigned long* toSendVector = NULL;		// An array of D elements, where every entry shows the next element of that dimension to be dispatched
 	unsigned long totalSent = 0;			// Total elements that have been sent for processing
+	unsigned long totalReceived = 0;		// TOtal elements that have been calculated and returned
 	unsigned long totalElements = 0;		// Total elements
 
 public:
@@ -54,10 +58,8 @@ public:
 
 template<class ImplementedModel>
 int ParallelFramework::run(char* argv0) {
-	int numOfProcesses;
 	// MPI variables
 	int rank;
-	int* errcodes;
 	MPI_Comm parentcomm, finalcomm;
 
 	// Initialize MPI
@@ -65,26 +67,34 @@ int ParallelFramework::run(char* argv0) {
 	MPI_Comm_get_parent(&parentcomm);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-	// Calculate number of processes (#GPUs + 1CPU)
-	numOfProcesses = 0;
-
-	if(parameters->processingType != TYPE_CPU)
-		cudaGetDeviceCount(&numOfProcesses);
-
-	if(parameters->processingType != TYPE_GPU)
-		numOfProcesses++;
-
-	// Allocate errcodes now that numOfProcesses is known
-	errcodes = new int[numOfProcesses];
-
 	// If this is the parent process, spawn children and run masterThread, else run slaveThread
 	if (parentcomm == MPI_COMM_NULL) {
+		int* errcodes;
+		int numOfProcesses;
+		MPI_Comm intercomm;
+
+		// Calculate number of processes (#GPUs + 1CPU)
+		numOfProcesses = 0;
+
+		if(parameters->processingType != TYPE_CPU)
+			cudaGetDeviceCount(&numOfProcesses);
+
+		if(parameters->processingType != TYPE_GPU)
+			numOfProcesses++;
+
 		#if DEBUG >=1
-		cout << "Master: Spawning " << numOfProcesses << " processes" << endl;
+			cout << "Master: Spawning " << numOfProcesses << " processes" << endl;
 		#endif
 
-		MPI_Comm intercomm;
-		MPI_Comm_spawn(argv0, MPI_ARGV_NULL, numOfProcesses, MPI_INFO_NULL, 0, MPI_COMM_WORLD, &intercomm, errcodes);
+		// Allocate errcodes now that numOfProcesses is known
+		errcodes = new int[numOfProcesses];
+
+		char* argv[] = {
+			"remote",
+			nullptr
+		};
+
+		MPI_Comm_spawn(argv0, parameters->remote ? argv : MPI_ARGV_NULL, numOfProcesses, MPI_INFO_NULL, 0, MPI_COMM_WORLD, &intercomm, errcodes);
 		MPI_Intercomm_merge(intercomm, 0, &finalcomm);
 
 		// Check errorcodes
@@ -93,7 +103,9 @@ int ParallelFramework::run(char* argv0) {
 				cout << "[E] Error starting process " << i << ", error: " << errcodes[i] << endl;
 
 
-		if (!parameters->remote) {
+		delete[] errcodes;
+
+		if (! (parameters->remote)) {
 			bool stopFlag = false;
 			#pragma omp parallel num_threads(2) shared(stopFlag)
 			{
@@ -118,13 +130,35 @@ int ParallelFramework::run(char* argv0) {
 		cout << "Slave " << rank << " starting" << endl;
 		#endif
 
-		int socket = -1;
+		int sock = -1;
 		if (parameters->remote) {
 			// Connect to host at parameters->serverName : DEFAULT_PORT
+			struct sockaddr_in serv_addr;
+
+			// Create the socket
+			sock = socket(AF_INET, SOCK_STREAM, 0);
+			if( socket < 0 ){
+		        printf("[E] Slave %d: Can't create socket\n", rank);
+				goto finished;
+		    }
+
+			// Set serv_addr attributes
+			// Convert IPv4 and IPv6 addresses from text to binary form
+		    if( inet_pton(AF_INET, parameters->serverName.c_str(), &serv_addr.sin_addr) <= 0){
+				printf("[E] Slave %d: Invalid server address or address not supported\n", rank);
+				goto finished;
+		    }
+		    serv_addr.sin_family = AF_INET;
+		    serv_addr.sin_port = htons(DEFAULT_PORT);
+
+			if( connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0 ){
+				printf("[E] Slave %d: Connection failed\n", rank);
+				goto finished;
+		    }
 
 			// Join the host
 			MPI_Comm joinedComm;
-			MPI_Comm_join(socket, &joinedComm);
+			MPI_Comm_join(sock, &joinedComm);
 			MPI_Intercomm_merge(joinedComm, 1, &finalcomm);
 		}else{
 			MPI_Intercomm_merge(parentcomm, 1, &finalcomm);
@@ -135,14 +169,16 @@ int ParallelFramework::run(char* argv0) {
 		// Free the instracommunicator
 		MPI_Comm_free(&finalcomm);
 
+		finished:
+
 		#if DEBUG >=1
 		cout << "Slave " << rank << " finished" << endl;
 		#endif
 
 		MPI_Finalize();
 
-		if (socket != -1) {
-			// close socket
+		if (sock != -1) {
+			close(sock);
 		}
 
 		exit(0);
@@ -152,7 +188,11 @@ int ParallelFramework::run(char* argv0) {
 	// Only parent (master) continues here
 	MPI_Finalize();
 
-	delete[] errcodes;
+	// If we are running in remote mode, master should stop here
+	if(parameters->remote){
+		printf("Master exiting\n");
+		exit(0);
+	}
 
 	return 0;
 }
@@ -160,7 +200,8 @@ int ParallelFramework::run(char* argv0) {
 template<class ImplementedModel>
 void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 	// If gpuId==-1, use CPU, otherwise use GPU with id = gpuId
-	int gpuId = parameters->processingType == TYPE_GPU ? rank : rank - 1;
+	// Local ranks are >= 0
+	int gpuId = rank - (parameters->processingType == TYPE_GPU ? 0 : 1);
 
 	unsigned long allocatedElements = parameters->batchSize;										// Number of allocated elements for results
 	RESULT_TYPE* tmpResults = (RESULT_TYPE*)malloc(allocatedElements * sizeof(RESULT_TYPE));		// Memory to save the results
@@ -220,7 +261,8 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 	printf("  Slave %d: maxBatchSize = %d (%ld MB)\n", rank, maxBatchSize, maxBatchSize*sizeof(RESULT_TYPE) / (1024 * 1024));
 #endif
 
-	while (true) {
+	//while (parameters->remote) {				// TODO: Swap these for remote configuration
+	while(true){
 
 		// Send 'ready' signal to master
 		#if DEBUG >= 2
@@ -279,14 +321,12 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 
 			// Calculate the results
 			if (gpuId > -1) {
-				Stopwatch sw;
 
 				// Copy starting point indices to device
 				cudaMemcpy(deviceStartingPointIdx, startPointIdx, parameters->D * sizeof(unsigned long), cudaMemcpyHostToDevice);
 				cce();
 
 				// Call the kernel
-				sw.start();
 				blockSize = BLOCK_SIZE < numOfElements ? BLOCK_SIZE : numOfElements;
 				numOfBlocks = (numOfElements + blockSize - 1) / blockSize;
 				validate_kernel<ImplementedModel><<<numOfBlocks, blockSize>>>(deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, numOfElements);
@@ -296,18 +336,12 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 				cudaDeviceSynchronize();
 				cce();
 
-				sw.stop();
-				if(parameters->benchmark)
-					printf("Kernel run in %f ms\n", sw.getMsec());
+				if(! parameters->benchmark){
+					// Get results from device
+					cudaMemcpy(tmpResults, deviceResults, numOfElements * sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost);
+					cce();
+				}
 
-				// Get results from device
-				sw.start();
-				cudaMemcpy(tmpResults, deviceResults, numOfElements * sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost);
-				cce();
-
-				sw.stop();
-				if(parameters->benchmark)
-					printf("Collected results in %f ms\n", sw.getMsec());
 			} else {
 
 				cpu_kernel<ImplementedModel>(startPointIdx, tmpResults, limits, parameters->D, numOfElements);
@@ -326,13 +360,16 @@ void ParallelFramework::slaveThread(MPI_Comm& comm, int rank) {
 			}
 			printf("\n");
 			#endif
-			MPI_Send(tmpResults, numOfElements, RESULT_MPI_TYPE, 0, TAG_RESULTS, comm);
+			MPI_Send(tmpResults, parameters->benchmark ? 0 : numOfElements, RESULT_MPI_TYPE, 0, TAG_RESULTS, comm);
 
 		} else {
 			// No more data
 			break;
 		}
 	}
+
+	// Notify master about exiting
+	MPI_Send(nullptr, 0, MPI_INT, 0, TAG_EXITING, comm);
 
 	// Finalize GPU
 	if (gpuId > -1) {

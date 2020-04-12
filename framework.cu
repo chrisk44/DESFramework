@@ -1,5 +1,9 @@
 #include <cmath>
 #include <iostream>
+#include <sys/socket.h>
+#include <stdlib.h>
+#include <netinet/in.h>
+#include <fcntl.h>
 
 #include "framework.h"
 
@@ -77,8 +81,8 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int* numOfProcesses) {
 
 	MPI_Status status;
 	int mpiSource;
+	int pstatusAllocated = 0;
 	ComputeProcessStatus* processStatus = (ComputeProcessStatus*) malloc(*numOfProcesses * sizeof(ComputeProcessStatus));
-	int pstatusAllocated = *numOfProcesses;
 
 	#define pstatus (processStatus[mpiSource])
 
@@ -100,7 +104,14 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int* numOfProcesses) {
 	printf("Master: toSendVector: 0x%x\n\n", (void*)toSendVector);
 	#endif
 
-	while (finished < *numOfProcesses) {
+/*
+	!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	When this loop is 'while(totalReceived < totalElements)' it will exit on the last RESULTS call
+	and any running slaves (that haven't received the '0 elements to calculate' message) will hang
+	!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+*/
+	//while (totalReceived < totalElements) {			// TODO: Swap these for remote configuration
+	while(finished < *numOfProcesses){
 		// Receive request from any worker thread
 		MPI_Recv(tmpResults, allocatedElements, RESULT_MPI_TYPE, MPI_ANY_SOURCE, MPI_ANY_TAG, comm, &status);
 		mpiSource = status.MPI_SOURCE;
@@ -110,15 +121,22 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int* numOfProcesses) {
 
 		if(mpiSource+1 > pstatusAllocated){
 			// Process joined in, allocate more memory
-			pstatusAllocated = mpiSource+1;
-			processStatus = (ComputeProcessStatus*) realloc(processStatus, pstatusAllocated * sizeof(ComputeProcessStatus));
-		}
+			processStatus = (ComputeProcessStatus*) realloc(processStatus, (mpiSource+1) * sizeof(ComputeProcessStatus));
 
-		// Initialize process details if not initialized
-		if (! (pstatus.initialized)) {
-			// TODO: Add any more initializations
-			pstatus.currentBatchSize = parameters->batchSize;
-			pstatus.initialized = true;
+			// Initialize the new ones
+			for(int i=pstatusAllocated; i<mpiSource+1; i++){
+				// TODO: Add any more initializations
+				processStatus[i].currentBatchSize = parameters->batchSize;
+				processStatus[i].computingIndex = 0;
+			    processStatus[i].assignedElements = 0;
+				processStatus[i].jobsCompleted = 0;
+				processStatus[i].elementsCalculated = 0;
+				processStatus[i].finished = false;
+
+				pstatus.initialized = true;
+			}
+
+			pstatusAllocated = mpiSource+1;
 		}
 
 		if (status.MPI_TAG == TAG_READY) {
@@ -147,19 +165,11 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int* numOfProcesses) {
 			MPI_Send(&tmpNumOfElements, 1, MPI_INT, mpiSource, TAG_DATA_COUNT, comm);
 			MPI_Send(tmpToCalculate, parameters->D, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, comm);
 
-			// If no more data available, source will finish
-			if (tmpNumOfElements == 0) {
-				#if DEBUG >= 2
-				cout << " Master: Slave " << mpiSource << " finishing..." << endl;
-				#endif
-				finished++;
-				pstatus.computingIndex = totalElements;
-				pstatus.finished = true;
-			}
+			pstatus.assignedElements = tmpNumOfElements;
 
 		}else if (status.MPI_TAG == TAG_RESULTS) {
 			// Save received results in this->results
-			MPI_Get_count(&status, RESULT_MPI_TYPE, &tmpNumOfElements);
+			MPI_Get_count(&status, RESULT_MPI_TYPE, &tmpNumOfElements);	// This is equal to pstatus.assignedElements
 			#if DEBUG >= 2
 			printf(" Master: Saving %ld results from slave %d to results[%ld]...\n", tmpNumOfElements, mpiSource, pstatus.computingIndex);
 			#endif
@@ -172,6 +182,8 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int* numOfProcesses) {
 			printf(" at %d\n", pstatus.computingIndex);
 			#endif
 
+			this->totalReceived += tmpNumOfElements;
+
 			// Update details for process
 			pstatus.jobsCompleted++;
 			pstatus.elementsCalculated += tmpNumOfElements;
@@ -180,7 +192,7 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int* numOfProcesses) {
 			float completionTime = pstatus.stopwatch.getMsec();
 
 			if (parameters->benchmark) {
-				printf("Slave %d: Benchmark: %d elements, %f ms\n", mpiSource, tmpNumOfElements, completionTime);
+				printf("Slave %d: Benchmark: %d elements, %f ms\n", mpiSource, pstatus.assignedElements, completionTime);
 				fflush(stdout);
 			}
 
@@ -214,14 +226,23 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int* numOfProcesses) {
 			if(! (parameters->benchmark))
 				memcpy(&results[pstatus.computingIndex], tmpResults, tmpNumOfElements*sizeof(RESULT_TYPE));
 
+			pstatus.assignedElements = 0;
 
-//#if DEBUG >= 4
-//			printf(" Master: results after memcpy: ");
-//			for (int i = 0; i < totalElements; i++) {
-//				printf("%f ", results[i]);
-//			}
-//			printf("\n");
-//#endif
+		}else if(status.MPI_TAG == TAG_EXITING){
+			#if DEBUG >= 2
+			cout << " Master: Slave " << mpiSource << " exiting..." << endl;
+			#endif
+
+			if(pstatus.assignedElements != 0){
+				printf("[E] Slave %d exited with %d assigned elements!! Returning...\n", mpiSource, pstatus.assignedElements);
+				break;
+			}
+
+			finished++;
+			pstatus.computingIndex = totalElements;
+			pstatus.finished = true;
+
+			// TODO: Maybe set pstatus initialized = false to reuse the slot??
 		}
 	}
 
@@ -231,27 +252,58 @@ void ParallelFramework::masterThread(MPI_Comm& comm, int* numOfProcesses) {
 }
 
 void ParallelFramework::listenerThread(MPI_Comm* finalcomm, int* numOfProcesses, bool* stopFlag) {
-	// Receive connections from other processes on the network, and merge them with finalcomm
-	#if DEBUG >=1
-	printf("Join: joinThread started\n");
-	#endif
+	// Receive connections from other processes on the network from localhost:DEFAULT_PORT,
+	// Merge them with parentcomm
+	int serverSocket;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
 
-	// TODO: Open server socket at DEFAULT_PORT
+	// Create socket
+	serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if(serverSocket == 0){
+		printf("ListenerThread: Can't create socket\n");
+		return;
+    }
 
+    // Set address to localhost:DEFAULT_PORT
+    if(setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))){
+		printf("ListenerThread: Can't set socket options\n");
+		return;
+    }
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(DEFAULT_PORT);
+
+    // Bind socket to the address
+    if(bind(serverSocket, (struct sockaddr *)&address, sizeof(address)) < 0){
+		printf("ListenerThread: bind() failed\n");
+		return;
+    }
+    if (listen(serverSocket, 3) < 0){
+		printf("ListenerThread: listen() failed\n");
+		return;
+    }
+	fcntl(serverSocket, F_SETFL, O_NONBLOCK);
+
+	printf("Listening for connections on %s:%d...\n", parameters->serverName.c_str(), DEFAULT_PORT);
 	while (! (*stopFlag)) {
+		// Sleep for 100ms
 		usleep(100000);
 
-		// TODO: Accept a client socket (non blocking)
-		int clientSocket = -1;
-
-		if(clientSocket > 0){
+		// Accept a client
+		int clientSocket = accept4(serverSocket, (struct sockaddr *)&address, (socklen_t*)&addrlen, SOCK_NONBLOCK);
+	    if(clientSocket >= 0){
+			printf("Got connection\n");
 			*numOfProcesses += 1;
+
 			MPI_Comm joinedComm;
 			MPI_Comm_join(clientSocket, &joinedComm);
-
 			MPI_Intercomm_merge(joinedComm, 0, finalcomm);
-		}
+	    }
 	}
+
+	close(serverSocket);
 
 	#if DEBUG >=1
 	printf("Join: joinThread stopped\n");

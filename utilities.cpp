@@ -17,9 +17,9 @@ void Stopwatch::start(){
 void Stopwatch::stop(){
     clock_gettime(CLOCK_MONOTONIC_RAW, &t2);
 }
-float Stopwatch::getNsec(){
+float Stopwatch::getUsec(){
     return (t2.tv_sec - t1.tv_sec) * 1000000 + (t2.tv_nsec - t1.tv_nsec) / 1000;
 }
 float Stopwatch::getMsec(){
-    return getNsec() / 1000000.0;
+    return getUsec() / 1000.0;
 }

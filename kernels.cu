@@ -2,6 +2,7 @@
 #define KERNELS_CU
 
 #include <cuda.h>
+#include <omp.h>
 
 #include "utilities.h"
 
@@ -51,36 +52,44 @@ __global__ void validate_kernel(ImplementedModel** model, unsigned long* startin
 // CPU kernel to run the computation
 template<class ImplementedModel>
 void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfElements) {
-	DATA_TYPE* point = new DATA_TYPE[D];
 	DATA_TYPE* step = new DATA_TYPE[D];
-	unsigned long tmpIndex;
-
 	ImplementedModel model = ImplementedModel();
 
 	for (unsigned int i = 0; i < D; i++) {
 		step[i] = abs(limits[i].lowerLimit - limits[i].upperLimit) / limits[i].N;
 	}
 
-	for (long j = 0; j < numOfElements; j++) {
-		// Calculate 'myIndex = startingPointIdx + j' and then the exact point
-		unsigned int i;
-		unsigned long carry = j;
-		for (i = 0; i < D; i++) {
-			tmpIndex = (startingPointIdx[i] + carry) % limits[i].N;
-			carry = (startingPointIdx[i] + carry) / limits[i].N;
+	// TODO: Change constant num_thread(4)
+	// TODO: No performance improvement
+	#pragma omp parallel shared(step, model, startingPointIdx, results, limits, D, numOfElements) num_threads(4)
+	{
+		DATA_TYPE* point = new DATA_TYPE[D];
+		unsigned long tmpIndex, carry;
+		unsigned int i, j;
 
-			// Calculate the exact coordinate i
-			point[i] = limits[i].lowerLimit + tmpIndex * step[i];
+		for (j = omp_get_thread_num(); j < numOfElements; j+=omp_get_num_threads()) {
+			// Calculate 'myIndex = startingPointIdx + j' and then the exact point
+			carry = j;
+
+			for (i = 0; i < D; i++) {
+				tmpIndex = (startingPointIdx[i] + carry) % limits[i].N;
+				carry = (startingPointIdx[i] + carry) / limits[i].N;
+
+				// Calculate the exact coordinate i
+				point[i] = limits[i].lowerLimit + tmpIndex * step[i];
+			}
+
+			// Run the validation function
+			results[j] = model.validate_cpu(point);
 		}
 
-		// Run the validation function
-		results[j] = model.validate_cpu(point);
-#if DEBUG >=4
-		//cout << "Point (" << point[0] << "," << point[1] << ") returned " << results[j] << endl;
-#endif
+		#if DEBUG >=4
+			//cout << "Point (" << point[0] << "," << point[1] << ") returned " << results[j] << endl;
+		#endif
+
+		delete[] point;
 	}
 
-	delete[] point;
 }
 
 #endif

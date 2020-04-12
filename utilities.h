@@ -17,7 +17,7 @@
 }
 
 // Server parameters
-#define DEFAULT_PORT "9000"
+#define DEFAULT_PORT 9000
 
 // Slow start parameters for batch size increment
 #define SS_THRESHOLD 200000000
@@ -49,6 +49,7 @@
 #define TAG_DATA 2
 #define TAG_RESULTS 3
 #define TAG_MAX_DATA_COUNT 4
+#define TAG_EXITING 5
 
 class Model {
 public:
@@ -67,7 +68,7 @@ private:
 public:
     void start();
     void stop();
-    float getNsec();
+    float getUsec();
     float getMsec();
 };
 
@@ -98,13 +99,16 @@ struct ParallelFrameworkParameters {
 };
 
 struct ComputeProcessStatus {
-	unsigned long computingIndex = 0;
+    // These are allocated with malloc so they are not initialized
+    // Initialization should be done by masterThread()
 	unsigned long maxBatchSize;
-	unsigned long currentBatchSize;		// Initialized by masterThread()
-	unsigned int jobsCompleted = 0;
-	unsigned elementsCalculated = 0;
-	bool finished = false;
-	bool initialized = false;
+	unsigned long currentBatchSize;
+    unsigned long computingIndex;
+    int assignedElements;
+	unsigned int jobsCompleted;
+	unsigned elementsCalculated;
+	bool finished;
+	bool initialized;
 
 	Stopwatch stopwatch;
 };

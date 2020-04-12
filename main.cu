@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <mpi.h>
 #include <sys/time.h>
+#include <omp.h>
 
 #include "framework.h"
 
@@ -38,12 +39,12 @@ int main(int argc, char** argv){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.batchSize = 20000;
+    parameters.batchSize = 200;
     parameters.processingType = TYPE_BOTH;
     parameters.dynamicBatchSize = true;
     parameters.benchmark = false;
     parameters.remote = argc > 1;
-    parameters.serverName = "localhost";
+    parameters.serverName = "127.0.0.1";
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
     limits[0] = Limit { 0, 10, 5000 };
@@ -63,7 +64,6 @@ int main(int argc, char** argv){
 
     fflush(stdout);
     if (!parameters.benchmark) {
-        //sleep(1000);
 
         // Test the outputs
         #if DEBUG >= 4
@@ -121,11 +121,9 @@ int main(int argc, char** argv){
             }
 
         }
-        //printf("errorSum=%lf, limits[0].N=%ld, limits[1].N=%ld\n", errorSum, limits[0].N, limits[1].N);
-        printf("Average absolute error: %f\n", absErrorSum / (limits[0].N * limits[1].N));
-        printf("Max absolute error: %f\n", absMaxError);
-        printf("Average relative error: %f\n", relErrorSum / (limits[0].N * limits[1].N));
-        printf("Max relative error: %f\n", relMaxError);
+
+        printf("Absolute error: Max=%f, Avg=%f\n", absMaxError, absErrorSum / (limits[0].N * limits[1].N));
+        printf("Relative error: Max=%f, Avg=%f\n", relMaxError, relErrorSum / (limits[0].N * limits[1].N));
         printf("Skipped elements: Inf=%ld, NaN=%ld\n", skippedInf, skippedNan);
     }
 
