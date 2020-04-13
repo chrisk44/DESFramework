@@ -6,6 +6,7 @@
 #include <string>
 #include <sys/time.h>
 #include <unistd.h>
+#include <semaphore.h>
 
 #define cce() {                               \
   cudaError_t e = cudaGetLastError();                    \
@@ -50,6 +51,7 @@
 #define TAG_RESULTS 3
 #define TAG_MAX_DATA_COUNT 4
 #define TAG_EXITING 5
+#define TAG_RESULTS_DATA 6
 
 class Model {
 public:
@@ -72,8 +74,8 @@ public:
     float getMsec();
 };
 
-long getDefaultCPUBatchSize();
-long getDefaultGPUBatchSize();
+unsigned long getDefaultCPUBatchSize();
+unsigned long getDefaultGPUBatchSize();
 
 struct Limit {
 	DATA_TYPE lowerLimit;
@@ -87,13 +89,17 @@ enum ProcessingType {
 	TYPE_BOTH
 };
 
+enum ProcessType {
+    TYPE_MASTER,
+    TYPE_SLAVE
+};
+
 struct ParallelFrameworkParameters {
 	unsigned int D;
 	unsigned int batchSize;
 	ProcessingType processingType = TYPE_BOTH;
 	bool dynamicBatchSize = true;
 	bool benchmark = false;
-	bool remote = false;
 	std::string serverName;
 	// ...
 };
@@ -111,6 +117,15 @@ struct ComputeProcessStatus {
 	bool initialized;
 
 	Stopwatch stopwatch;
+};
+
+struct ProcessingThreadInfo{
+    int id;
+    int numOfElements;
+    unsigned long* startPointIdx;
+    RESULT_TYPE* results;
+    sem_t semData;
+    sem_t* semResults;
 };
 
 #endif

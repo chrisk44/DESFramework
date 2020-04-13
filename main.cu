@@ -41,10 +41,9 @@ int main(int argc, char** argv){
     parameters.D = 2;
     parameters.batchSize = 200;
     parameters.processingType = TYPE_BOTH;
-    parameters.dynamicBatchSize = true;
+    parameters.dynamicBatchSize = false;
     parameters.benchmark = false;
-    parameters.remote = argc > 1;
-    parameters.serverName = "127.0.0.1";
+    parameters.serverName = "192.168.1.201";        // This would be an input to the program, not relevant to the framework
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
     limits[0] = Limit { 0, 10, 5000 };
@@ -57,7 +56,7 @@ int main(int argc, char** argv){
     }
 
     // Start the computation
-    result = framework.run<MyModel>(argv[0]);
+    result = framework.run<MyModel>(argc > 1 ? TYPE_SLAVE : TYPE_MASTER);
     if (result != 0) {
         cout << "Error running the computation: " << result << endl;
     }
