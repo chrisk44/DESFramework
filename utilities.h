@@ -43,7 +43,7 @@
 // 2: Processes steps
 // 3: Data transfers
 // 4: Data calculations
-#define DEBUG 2
+#define DEBUG 3
 
 #define TAG_READY 0
 #define TAG_DATA_COUNT 1

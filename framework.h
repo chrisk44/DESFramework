@@ -49,6 +49,7 @@ private:
 	void masterProcess();
 	void coordinatorThread(ProcessingThreadInfo* pti, int numOfThreads);
 	void getDataChunk(unsigned long maxBatchSize, unsigned long* toCalculate, int *numOfElements);
+	void addToIdxVector(unsigned long* start, unsigned long* result, int num, int* overflow);
 
 	template<class ImplementedModel>
 	void slaveProcess();
@@ -60,25 +61,31 @@ private:
 template<class ImplementedModel>
 int ParallelFramework::run(ProcessType processType) {
 	// Initialize MPI
+	int rank;
 	MPI_Init(nullptr, nullptr);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-	if(processType == TYPE_MASTER){
+	//if(processType == TYPE_MASTER){
+	if(rank == 0){
 
+		printf("Master process starting\n");
 		masterProcess();
-		printf("Master finished\n");
+		printf("Master process finished\n");
 
-	}else if(processType == TYPE_SLAVE){
+	}else{
 
+		printf("Slave process starting\n");
 		slaveProcess<ImplementedModel>();
-		printf("Slave finished\n");
+		printf("Slave process finished\n");
 
 	}
 
 	MPI_Finalize();
 
 	// If we are running in slave mode, stop here
-	if(processType == TYPE_SLAVE){
-		printf("Master exiting\n");
+	//if(processType == TYPE_SLAVE){
+	if(rank != 0){
+		printf("Master process exiting\n");
 		exit(0);
 	}
 
@@ -88,7 +95,7 @@ int ParallelFramework::run(ProcessType processType) {
 template<class ImplementedModel>
 void ParallelFramework::slaveProcess() {
 	// Calculate number of threads (#GPUs + 1CPU)
-	int numOfThreads = 1; 	// One thread to handle the communication
+	int numOfThreads = 0;
 
 	if(parameters->processingType != TYPE_CPU)
 		cudaGetDeviceCount(&numOfThreads);
@@ -110,7 +117,7 @@ void ParallelFramework::slaveProcess() {
 		PTIs[i].startPointIdx = new unsigned long[parameters->D];
 	}
 
-	#pragma omp parallel num_threads(numOfThreads + 1) shared(PTIs)
+	#pragma omp parallel num_threads(numOfThreads + 1) shared(PTIs) 	// +1 thread to handle the communication
 	{
 		int tid = omp_get_thread_num();
 		if(tid == 0){
@@ -167,15 +174,15 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 		cudaMemcpy(deviceLimits, limits, parameters->D * sizeof(Limit), cudaMemcpyHostToDevice);	cce();
 
 		#if DEBUG > 2
-			printf("  Thread %d: deviceModelAddress: 0x%x\n", id, (void*) deviceModelAddress);
-			printf("  Thread %d: deviceResults: 0x%x\n", id, (void*) deviceResults);
-			printf("  Thread %d: deviceStartingPointIdx: 0x%x\n", id, (void*) deviceStartingPointIdx);
-			printf("  Thread %d: deviceLimits: 0x%x\n", id, (void*) deviceLimits);
+			printf("ComputeThread %d: deviceModelAddress: 0x%x\n", pti.id, (void*) deviceModelAddress);
+			printf("ComputeThread %d: deviceResults: 0x%x\n", pti.id, (void*) deviceResults);
+			printf("ComputeThread %d: deviceStartingPointIdx: 0x%x\n", pti.id, (void*) deviceStartingPointIdx);
+			printf("ComputeThread %d: deviceLimits: 0x%x\n", pti.id, (void*) deviceLimits);
 		#endif
 	}
 
 	// #if DEBUG >= 2
-	// 	printf("  Thread %d: maxBatchSize = %d (%ld MB)\n", id, maxBatchSize, maxBatchSize*sizeof(RESULT_TYPE) / (1024 * 1024));
+	// 	printf("ComputeThread %d: maxBatchSize = %d (%ld MB)\n", id, maxBatchSize, maxBatchSize*sizeof(RESULT_TYPE) / (1024 * 1024));
 	// #endif
 
 	while(true){
@@ -185,10 +192,10 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 		// If more data available...
 		if (pti.numOfElements > 0) {
 			#if DEBUG >= 1
-				printf("  Thread %d: Running for %d elements...\n", pti.id, pti.numOfElements);
+				printf("ComputeThread %d: Running for %d elements...\n", pti.id, pti.numOfElements);
 			#endif
 			#if DEBUG >= 3
-				printf("  Thread %d: Got %d elements starting from  ", pti.id, pti.numOfElements);
+				printf("ComputeThread %d: Got %d elements starting from  ", pti.id, pti.numOfElements);
 				for (unsigned int i = 0; i < parameters->D; i++)
 					printf("%d ", pti.startPointIdx[i]);
 				printf("\n");
@@ -198,7 +205,7 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 			// If batchSize was increased, allocate more memory for the results
 			if (allocatedElements < pti.numOfElements && pti.id > -1) {
 				#if DEBUG >= 2
-					printf("  Thread %d: Allocating more GPU memory (%d -> %d elements, %ld MB)\n",
+					printf("ComputeThread %d: Allocating more GPU memory (%d -> %d elements, %ld MB)\n",
 							pti.id, allocatedElements, pti.numOfElements, (pti.numOfElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
 					fflush(stdout);
 				#endif
@@ -212,7 +219,7 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 				cce();
 
 				#if DEBUG >=2
-					printf("  Thread %d: deviceResults = 0x%x\n", pti.id, deviceResults);
+					printf("ComputeThread %d: deviceResults = 0x%x\n", pti.id, deviceResults);
 				#endif
 			}
 

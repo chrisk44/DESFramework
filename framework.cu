@@ -90,12 +90,22 @@ void ParallelFramework::masterProcess() {
 	int tmpNumOfElements;	// This needs to be int because of MPI
 	float completionTime;
 
-	while (totalReceived < totalElements) {
+	int finished = 0;
+	int numOfProcesses;
+	MPI_Comm_size(MPI_COMM_WORLD, &numOfProcesses);
+
+	while (totalReceived < totalElements || finished < numOfProcesses-1) {
 		// Receive request from any worker thread
+		#if DEBUG >= 1
+			printf("Master: Waiting for signal...\n");
+		#endif
+		fflush(stdout);
+
 		MPI_Recv(nullptr, 0, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 		mpiSource = status.MPI_SOURCE;
+
 		#if DEBUG >= 2
-		cout << " Master: Received " << status.MPI_TAG << " from " << status.MPI_SOURCE << endl;
+			printf("Master: Received %d from %d\n", status.MPI_TAG, mpiSource);
 		#endif
 
 		if(mpiSource+1 > pstatusAllocated){
@@ -128,14 +138,14 @@ void ParallelFramework::masterProcess() {
 				pstatus.computingIndex = getIndexFromIndices(tmpToCalculate);
 
 				#if DEBUG >= 2
-				cout << " Master: Sending " << tmpNumOfElements << " elements to " << mpiSource << " with index " << pstatus.computingIndex << endl;
+					printf("Master: Sending %d elements to %d with index %d\n", tmpNumOfElements, mpiSource, pstatus.computingIndex);
 				#endif
 				#if DEBUG >= 3
-				cout << " Master: Sending data to " << mpiSource << ": ";
-				for (unsigned int i = 0; i < parameters->D; i++) {
-					cout << tmpToCalculate[i] << " ";
-				}
-				cout << endl;
+					printf("Master: Sending data to %d: ", mpiSource);
+					for (unsigned int i = 0; i < parameters->D; i++) {
+						printf("%d ", tmpToCalculate[i]);
+					}
+					printf("\n");
 				#endif
 
 				// Send data
@@ -155,15 +165,14 @@ void ParallelFramework::masterProcess() {
 				MPI_Get_count(&status, RESULT_MPI_TYPE, &tmpNumOfElements);	// This is equal to pstatus.assignedElements
 
 				#if DEBUG >= 2
-				printf(" Master: Saving %ld results from slave %d to results[%ld]...\n", tmpNumOfElements, mpiSource, pstatus.computingIndex);
+					printf("Master: Saving %ld results from slave %d to results[%ld]...\n", tmpNumOfElements, mpiSource, pstatus.computingIndex);
 				#endif
 				#if DEBUG >= 4
-				printf(" Master: Saving tmpResults: ");
-				for (int i = 0; i < tmpNumOfElements; i++) {
-					//printf("%d", min(tmpResults[i], 1));
-					printf("%f ", tmpResults[i]);
-				}
-				printf(" at %d\n", pstatus.computingIndex);
+					printf("Master: Saving tmpResults: ");
+					for (int i = 0; i < tmpNumOfElements; i++) {
+						printf("%f ", tmpResults[i]);
+					}
+					printf(" at %d\n", pstatus.computingIndex);
 				#endif
 
 				this->totalReceived += tmpNumOfElements;
@@ -176,8 +185,7 @@ void ParallelFramework::masterProcess() {
 				completionTime = pstatus.stopwatch.getMsec();
 
 				if (parameters->benchmark) {
-					printf("Slave %d: Benchmark: %d elements, %f ms\n", mpiSource, pstatus.assignedElements, completionTime);
-					fflush(stdout);
+					printf("Master: Slave %d benchmark: %d elements, %f ms\n", mpiSource, pstatus.assignedElements, completionTime);
 				}
 
 				if (parameters->dynamicBatchSize) {
@@ -195,14 +203,14 @@ void ParallelFramework::masterProcess() {
 
 					if (allocatedElements < pstatus.currentBatchSize) {
 						#if DEBUG >= 2
-						printf("Master: Allocating more memory (%d -> %d elements, %ld MB)\n", allocatedElements, pstatus.currentBatchSize, pstatus.currentBatchSize*sizeof(RESULT_TYPE)/(1024*1024));
+							printf("Master: Allocating more memory (%d -> %d elements, %ld MB)\n", allocatedElements, pstatus.currentBatchSize, pstatus.currentBatchSize*sizeof(RESULT_TYPE)/(1024*1024));
 						#endif
 
 						allocatedElements = pstatus.currentBatchSize;
 						tmpResults = (RESULT_TYPE*)realloc(tmpResults, allocatedElements * sizeof(RESULT_TYPE));
 
-						#if DEBUG >= 2
-						printf("Master: tmpResults: 0x%x\n", (void*)tmpResults);
+						#if DEBUG >= 3
+							printf("Master: tmpResults: 0x%x\n", (void*)tmpResults);
 						#endif
 					}
 				}
@@ -215,7 +223,7 @@ void ParallelFramework::masterProcess() {
 
 			case TAG_EXITING:
 				#if DEBUG >= 2
-				cout << " Master: Slave " << mpiSource << " exiting..." << endl;
+					printf("Master: Slave %d exiting\n", mpiSource);
 				#endif
 
 				if(pstatus.assignedElements != 0){
@@ -224,22 +232,29 @@ void ParallelFramework::masterProcess() {
 
 				pstatus.computingIndex = totalElements;
 				pstatus.finished = true;
-
 				// TODO: Maybe set pstatus initialized = false to reuse the slot??
+
+				finished++;
+
 				break;
 		}
+
+		MPI_Comm_size(MPI_COMM_WORLD, &numOfProcesses);
 	}
 
 	delete[] tmpResults;
 	delete[] tmpToCalculate;
 	free(processStatus);
+
+	tmpNumOfElements = 0;
+	MPI_Bcast(&tmpNumOfElements, 1, MPI_INT, 0, MPI_COMM_WORLD);
 }
 
 void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfThreads){
 	sem_t* semResults = pti[0].semResults;
 
-	int numOfElements, elementsPerThread;
-	unsigned long maxBatchSize = getDefaultCPUBatchSize();
+	int numOfElements, elementsPerThread, tmp;
+	unsigned long maxBatchSize = getDefaultCPUBatchSize();		// TODO: Also consider GPUs
 	unsigned long *startPointIdx = new unsigned long[parameters->D];
 	unsigned long allocatedElements = 0;
 	RESULT_TYPE* results = nullptr;
@@ -247,6 +262,9 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 
 	while(true){
 		// Send READY signal to master
+		#if DEBUG >= 2
+			printf("Coordinator: Sending READY...\n");
+		#endif
 		MPI_Send(nullptr, 0, MPI_INT, 0, TAG_READY, MPI_COMM_WORLD);
 		MPI_Send(&maxBatchSize, 1, MPI_UNSIGNED_LONG, 0, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD);
 
@@ -254,6 +272,14 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 		MPI_Recv(&numOfElements, 1, MPI_INT, 0, TAG_DATA_COUNT, MPI_COMM_WORLD, &status);
 		MPI_Recv(startPointIdx, parameters->D, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, &status);
 
+		#if DEBUG >= 3
+			printf("Coordinator: Received %d elements starting at: ", numOfElements);
+			for(int i=0; i<parameters->D; i++)
+				printf("%ld ", startPointIdx[i]);
+			printf("\n");
+		#elif DEBUG >= 2
+			printf("Coordinator: Received %d elements\n", numOfElements);
+		#endif
 		// If no results, break
 		if(numOfElements == 0)
 			break;
@@ -262,28 +288,60 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 		if(numOfElements > allocatedElements){
 			allocatedElements = numOfElements;
 			results = (RESULT_TYPE*) realloc(results, allocatedElements * sizeof(RESULT_TYPE));
-			// TODO: assert results!=nullptr
+			if(results == nullptr){
+				printf("[E] Coordinator: Can't allocate %ld bytes for results\n", allocatedElements * sizeof(RESULT_TYPE));
+				printf("[E] Coordinator: Exiting...\n");
+				break;
+			}
 		}
 
 		// Split the data into numOfThreads pieces
 		elementsPerThread = numOfElements / numOfThreads;
 
-		pti[0].numOfElements = elementsPerThread>0 ? elementsPerThread : numOfElements;
-		pti[0].results = results;
+		#if DEBUG >= 2
+			printf("Coordinator: Split data into %d elements for each thread\n", elementsPerThread);
+			printf("Coordinator: Posting worker threads...\n");
+		#endif
 
-		for(int i=1; i<numOfThreads; i++){
-			pti[i].numOfElements = elementsPerThread;
-			pti[i].results = pti[i-1].results + pti[i-1].numOfElements;
+		for(int i=0; i<numOfThreads; i++){
+			if(i==0){
+				memcpy(pti[i].startPointIdx, startPointIdx, parameters->D * sizeof(unsigned long));
+				pti[i].numOfElements = elementsPerThread==0 ? numOfElements : elementsPerThread;
+				pti[i].results = results;
+			}else{
+				addToIdxVector(pti[i-1].startPointIdx, pti[i].startPointIdx, pti[i-1].numOfElements, &tmp);
+				pti[i].numOfElements = elementsPerThread;
+				pti[i].results = pti[i-1].results + pti[i-1].numOfElements;
+			}
+
+			if(tmp!=0){
+				printf("[E] Coordinator: Shit happened, addToIdxVector for thread %d returned overflow = %d\n", i, tmp);
+			}
+
+
+			#if DEBUG >=3
+				printf("Coordinator: Thread %d -> Assigning %d elements starting at: ", i, pti[i].numOfElements);
+				for(int j=0; j<parameters->D; j++){
+					printf("%ld ", pti[i].startPointIdx[j]);
+				}
+				printf("\n");
+			#endif
 
 			sem_post(&pti[i].semData);
 		}
 
-		// Wait for all threads to finish their work
+		#if DEBUG >= 2
+			printf("Coordinator: Waiting for results...\n");
+		#endif
+		// Wait for all worker threads to finish their work
 		for(int i=0; i<numOfThreads; i++){
 			sem_wait(semResults);
 		}
 
 		// Send all results to master
+		#if DEBUG >= 2
+			printf("Coordinator: Sending data to master...\n");
+		#endif
 		MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
 		MPI_Send(results, numOfElements, RESULT_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
 	}
@@ -291,6 +349,7 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 	// Notify about exiting
 	MPI_Send(nullptr, 0, MPI_INT, 0, TAG_EXITING, MPI_COMM_WORLD);
 
+	// Notify worker threads to finish
 	for(int i=0; i<numOfThreads; i++){
 		pti[i].numOfElements = 0;
 		sem_post(&pti[i].semData);
@@ -313,16 +372,17 @@ void ParallelFramework::getDataChunk(unsigned long batchSize, unsigned long* toC
 	memcpy(toCalculate, toSendVector, parameters->D * sizeof(long));
 	*numOfElements = batchSize;
 
-	unsigned int i;
-	unsigned int newIndex;
-	unsigned int carry = batchSize;
-
-	for (i = 0; i < parameters->D; i++) {
-		newIndex = (toSendVector[i] + carry) % limits[i].N;
-		carry = (toSendVector[i] + carry) / limits[i].N;
-
-		toSendVector[i] = newIndex;
-	}
+	addToIdxVector(toSendVector, toSendVector, batchSize, nullptr);
+	// unsigned int i;
+	// unsigned int newIndex;
+	// unsigned int carry = batchSize;
+	//
+	// for (i = 0; i < parameters->D; i++) {
+	// 	newIndex = (toSendVector[i] + carry) % limits[i].N;
+	// 	carry = (toSendVector[i] + carry) / limits[i].N;
+	//
+	// 	toSendVector[i] = newIndex;
+	// }
 
 	totalSent += batchSize;
 }
@@ -372,4 +432,21 @@ long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) {
 //#endif
 
 	return index;
+}
+
+void ParallelFramework::addToIdxVector(unsigned long* start, unsigned long* result, int num, int* overflow){
+    unsigned int i;
+	unsigned int newIndex;
+	unsigned int carry = num;
+
+	for (i = 0; i < parameters->D; i++) {
+		newIndex = (start[i] + carry) % limits[i].N;
+		carry = (start[i] + carry) / limits[i].N;
+
+		result[i] = newIndex;
+	}
+
+	if(overflow != nullptr){
+		*overflow = carry;
+	}
 }

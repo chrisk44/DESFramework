@@ -39,7 +39,7 @@ int main(int argc, char** argv){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.batchSize = 200;
+    parameters.batchSize = 20000;
     parameters.processingType = TYPE_BOTH;
     parameters.dynamicBatchSize = false;
     parameters.benchmark = false;
