@@ -27,12 +27,13 @@ __global__ void validate_kernel(ImplementedModel** model, unsigned long* startin
 	unsigned int threadX = (blockIdx.x * BLOCK_SIZE) + threadIdx.x;
 	if (threadX < numOfElements) {
 		DATA_TYPE point[MAX_DIMENSIONS];
+		DATA_TYPE step[MAX_DIMENSIONS];
 		unsigned long tmpIndex, carry;
 		unsigned int i;
-		/*DATA_TYPE step[MAX_DIMENSINS];
+
 		for (i = 0; i < D; i++) {
-			step[i] = abs(limits[i].lowerLimit - limits[i].upperLimit) / limits[i].N;
-		}*/
+			step[i] = limits[i].step;
+		}
 
 		// Calculate 'myIndex = startingPointIdx + threadIdx.x' and then the exact point
 		carry = threadX;
@@ -41,7 +42,7 @@ __global__ void validate_kernel(ImplementedModel** model, unsigned long* startin
 			carry = (startingPointIdx[i] + carry) / limits[i].N;
 
 			// Calculate the exact coordinate i
-			point[i] = limits[i].lowerLimit + tmpIndex * (abs(limits[i].lowerLimit - limits[i].upperLimit) / limits[i].N);
+			point[i] = limits[i].lowerLimit + tmpIndex * step[i];
 		}
 
 		// Run the validation function and save the result to the global memory
@@ -52,20 +53,17 @@ __global__ void validate_kernel(ImplementedModel** model, unsigned long* startin
 // CPU kernel to run the computation
 template<class ImplementedModel>
 void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfElements) {
-	DATA_TYPE* step = new DATA_TYPE[D];
 	ImplementedModel model = ImplementedModel();
-
-	for (unsigned int i = 0; i < D; i++) {
-		step[i] = abs(limits[i].lowerLimit - limits[i].upperLimit) / limits[i].N;
-	}
 
 	// TODO: Change constant num_thread(4)
 	// TODO: No performance improvement
-	#pragma omp parallel shared(step, model, startingPointIdx, results, limits, D, numOfElements) num_threads(4)
+	omp_set_nested(1);		// We are already in a parallel region
+	#pragma omp parallel num_threads(4)
 	{
 		DATA_TYPE* point = new DATA_TYPE[D];
 		unsigned long tmpIndex, carry;
 		unsigned int i, j;
+		//printf("thread %d\n", omp_get_thread_num());
 
 		for (j = omp_get_thread_num(); j < numOfElements; j+=omp_get_num_threads()) {
 			// Calculate 'myIndex = startingPointIdx + j' and then the exact point
@@ -76,7 +74,7 @@ void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* li
 				carry = (startingPointIdx[i] + carry) / limits[i].N;
 
 				// Calculate the exact coordinate i
-				point[i] = limits[i].lowerLimit + tmpIndex * step[i];
+				point[i] = limits[i].lowerLimit + tmpIndex * limits[i].step;
 			}
 
 			// Run the validation function

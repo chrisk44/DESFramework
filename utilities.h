@@ -43,7 +43,7 @@
 // 2: Processes steps
 // 3: Data transfers
 // 4: Data calculations
-#define DEBUG 3
+#define DEBUG 2
 
 #define TAG_READY 0
 #define TAG_DATA_COUNT 1
@@ -81,6 +81,7 @@ struct Limit {
 	DATA_TYPE lowerLimit;
 	DATA_TYPE upperLimit;
 	unsigned long N;
+    DATA_TYPE step;
 };
 
 enum ProcessingType {
@@ -89,18 +90,12 @@ enum ProcessingType {
 	TYPE_BOTH
 };
 
-enum ProcessType {
-    TYPE_MASTER,
-    TYPE_SLAVE
-};
-
 struct ParallelFrameworkParameters {
 	unsigned int D;
 	unsigned int batchSize;
 	ProcessingType processingType = TYPE_BOTH;
 	bool dynamicBatchSize = true;
 	bool benchmark = false;
-	std::string serverName;
 	// ...
 };
 

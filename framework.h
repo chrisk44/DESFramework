@@ -1,15 +1,11 @@
 #ifndef PARALLELFRAMEWORK_H
 #define PARALLELFRAMEWORK_H
 
-#include <cuda_runtime.h>
 #include <cuda.h>
 #include <iostream>
-#include <string.h>
 #include <stdlib.h>
 #include <mpi.h>
 #include <omp.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
 #include <unistd.h>
 
 #include "utilities.h"
@@ -25,7 +21,6 @@ private:
 
 	// Runtime variables
 	unsigned long* idxSteps = NULL;			// Index steps for each dimension
-	DATA_TYPE* steps = NULL;				// Real step for each dimension
 	RESULT_TYPE* results = NULL;			// An array of N0 * N1 * ... * N(D-1)
 	bool valid = false;
 	unsigned long* toSendVector = NULL;		// An array of D elements, where every entry shows the next element of that dimension to be dispatched
@@ -38,7 +33,7 @@ public:
 	~ParallelFramework();
 
 	template<class ImplementedModel>
-	int run(ProcessType processtype);
+	int run();
 
 	RESULT_TYPE* getResults();
 	void getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst);
@@ -59,13 +54,12 @@ private:
 };
 
 template<class ImplementedModel>
-int ParallelFramework::run(ProcessType processType) {
+int ParallelFramework::run() {
 	// Initialize MPI
 	int rank;
 	MPI_Init(nullptr, nullptr);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-	//if(processType == TYPE_MASTER){
 	if(rank == 0){
 
 		printf("Master process starting\n");
@@ -82,10 +76,9 @@ int ParallelFramework::run(ProcessType processType) {
 
 	MPI_Finalize();
 
-	// If we are running in slave mode, stop here
-	//if(processType == TYPE_SLAVE){
+	// If we are a slave, stop here
 	if(rank != 0){
-		printf("Master process exiting\n");
+		printf("Exiting\n");
 		exit(0);
 	}
 
@@ -103,6 +96,11 @@ void ParallelFramework::slaveProcess() {
 	if(parameters->processingType != TYPE_GPU)
 		numOfThreads++;
 
+	if(numOfThreads == 0){
+		printf("[E] SlaveProcess: numOfThreads is 0\n");
+		return;
+	}
+
 	sem_t semResults;
 	sem_init(&semResults, 0, 0);
 
@@ -116,6 +114,10 @@ void ParallelFramework::slaveProcess() {
 		PTIs[i].results = nullptr;
 		PTIs[i].startPointIdx = new unsigned long[parameters->D];
 	}
+
+	#if DEBUG >= 1
+		printf("SlaveProcess: Spawning %d worker threads...\n", numOfThreads);
+	#endif
 
 	#pragma omp parallel num_threads(numOfThreads + 1) shared(PTIs) 	// +1 thread to handle the communication
 	{

@@ -1,9 +1,5 @@
 #include <cmath>
 #include <iostream>
-#include <sys/socket.h>
-#include <stdlib.h>
-#include <netinet/in.h>
-#include <fcntl.h>
 
 #include "framework.h"
 
@@ -37,9 +33,8 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 		idxSteps[i] = idxSteps[i - 1] * limits[i-1].N;
 	}
 
-	steps = new DATA_TYPE[parameters.D];
 	for (i = 0; i < parameters.D; i++) {
-		steps[i] = abs(limits[i].upperLimit - limits[i].lowerLimit) / limits[i].N;
+		limits[i].step = abs(limits[i].upperLimit - limits[i].lowerLimit) / limits[i].N;
 	}
 
 	totalSent = 0;
@@ -66,7 +61,6 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 
 ParallelFramework::~ParallelFramework() {
 	delete [] idxSteps;
-	delete [] steps;
 	delete [] results;
 	delete [] toSendVector;
 	valid = false;
@@ -400,7 +394,7 @@ void ParallelFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst
 		}
 
 		// Calculate the steps for dimension i
-		dst[i] = (int) round(abs(limits[i].lowerLimit - point[i]) / steps[i]);		// TODO: 1.9999997 will round to 2, verify correctness
+		dst[i] = (int) round(abs(limits[i].lowerLimit - point[i]) / limits[i].step);		// TODO: 1.9999997 will round to 2, verify correctness
 	}
 
 //#if DEBUG >= 4
