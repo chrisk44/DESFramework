@@ -2,12 +2,12 @@
 
 #include <unistd.h>
 
-long getDefaultCPUBatchSize(){
+unsigned long getDefaultCPUBatchSize(){
     long pages = sysconf(_SC_PHYS_PAGES);
     long page_size = sysconf(_SC_PAGE_SIZE);
     return (pages * page_size)/(4*sizeof(RESULT_TYPE));
 }
-long getDefaultGPUBatchSize(){
+unsigned long getDefaultGPUBatchSize(){
     return 0;
 }
 

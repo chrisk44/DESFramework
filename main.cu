@@ -2,9 +2,6 @@
 
 #include <iostream>
 #include <cstdlib>
-#include <mpi.h>
-#include <sys/time.h>
-#include <omp.h>
 
 #include "framework.h"
 
@@ -39,15 +36,13 @@ int main(int argc, char** argv){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.batchSize = 200;
+    parameters.batchSize = 20000000;
     parameters.processingType = TYPE_BOTH;
-    parameters.dynamicBatchSize = true;
+    parameters.dynamicBatchSize = false;
     parameters.benchmark = false;
-    parameters.remote = argc > 1;
-    parameters.serverName = "127.0.0.1";
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
-    limits[0] = Limit { 0, 10, 5000 };
+    limits[0] = Limit { 0, 10, 50000 };
     limits[1] = Limit { -1e05, 1e05, 3000 };
 
     // Initialize the framework object
@@ -57,7 +52,7 @@ int main(int argc, char** argv){
     }
 
     // Start the computation
-    result = framework.run<MyModel>(argv[0]);
+    result = framework.run<MyModel>();
     if (result != 0) {
         cout << "Error running the computation: " << result << endl;
     }
