@@ -29,6 +29,7 @@
 // Computing parameters
 #define BLOCK_SIZE 1024
 #define COMPUTE_BATCH_SIZE 500
+#define NUM_OF_STREAMS 8
 #define MAX_DIMENSIONS 10
 //#define min(X, Y)  ((X) < (Y) ? (X) : (Y))
 //#define max(X, Y)  ((X) > (Y) ? (X) : (Y))

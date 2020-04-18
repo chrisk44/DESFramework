@@ -36,7 +36,7 @@ int main(int argc, char** argv){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.batchSize = 100000000;
+    parameters.batchSize = 500000000;
     parameters.processingType = TYPE_GPU;
     parameters.dynamicBatchSize = false;
     parameters.benchmark = true;
