@@ -24,29 +24,62 @@ __global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
 // CUDA kernel to run the computation
 template<class ImplementedModel>
 __global__ void validate_kernel(ImplementedModel** model, unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned int numOfElements) {
-	unsigned int threadX = (blockIdx.x * BLOCK_SIZE) + threadIdx.x;
-	if (threadX < numOfElements) {
-		DATA_TYPE point[MAX_DIMENSIONS];
-		DATA_TYPE step[MAX_DIMENSIONS];
-		unsigned long tmpIndex, carry;
-		unsigned int i;
+	unsigned int threadOffset = ((blockIdx.x * BLOCK_SIZE) + threadIdx.x) * COMPUTE_BATCH_SIZE;
+	unsigned int end = min(numOfElements, threadOffset + COMPUTE_BATCH_SIZE);
 
-		for (i = 0; i < D; i++) {
-			step[i] = limits[i].step;
+	DATA_TYPE point[MAX_DIMENSIONS];
+	unsigned long tmpIndex, carry;
+	unsigned int i, d;
+
+	// Load data on registers
+	// unsigned long shStartingPointIdx[MAX_DIMENSIONS];
+	// DATA_TYPE shStep[MAX_DIMENSIONS];
+	// unsigned int shN[MAX_DIMENSIONS];
+	// DATA_TYPE shLowerLimit[MAX_DIMENSIONS];
+	// for (d = 0; d < D; d++) {
+	// 	shStartingPointIdx[d] = startingPointIdx[d];
+	// 	shStep[d] = limits[d].step;
+	// 	shN[d] = limits[d].N;
+	// 	shLowerLimit[d] = limits[d].lowerLimit;
+	// }
+
+	// Load data on shared memory
+	__shared__ unsigned long shStartingPointIdx[MAX_DIMENSIONS];
+	__shared__ DATA_TYPE shStep[MAX_DIMENSIONS];
+	__shared__ unsigned int shN[MAX_DIMENSIONS];
+	__shared__ DATA_TYPE shLowerLimit[MAX_DIMENSIONS];
+	if(blockDim.x < D){
+		// If threads are <D, thread 0 will load everything
+		if(threadIdx.x == 0){
+			for(d=0 ; d<D; d++){
+				shStartingPointIdx[d] = startingPointIdx[d];
+				shStep[d] = limits[d].step;
+				shN[d] = limits[d].N;
+				shLowerLimit[d] = limits[d].lowerLimit;
+			}
 		}
+	}else if(threadIdx.x < D){
+		shStartingPointIdx[threadIdx.x] = startingPointIdx[threadIdx.x];
+		shStep[threadIdx.x] = limits[threadIdx.x].step;
+		shN[threadIdx.x] = limits[threadIdx.x].N;
+		shLowerLimit[threadIdx.x] = limits[threadIdx.x].lowerLimit;
+	}
+	__syncthreads();
 
-		// Calculate 'myIndex = startingPointIdx + threadIdx.x' and then the exact point
-		carry = threadX;
-		for (i = 0; i < D; i++) {
-			tmpIndex = (startingPointIdx[i] + carry) % limits[i].N;
-			carry = (startingPointIdx[i] + carry) / limits[i].N;
+
+	for(i=threadOffset; i<end; i++){
+		// Calculate point for (startingPointIdx + threadOffset + i)
+		carry = i;
+		for (d = 0; d < D; d++) {
+			tmpIndex = (shStartingPointIdx[d] + carry) % shN[d];
+			carry = (shStartingPointIdx[d] + carry) / shN[d];
 
 			// Calculate the exact coordinate i
-			point[i] = limits[i].lowerLimit + tmpIndex * step[i];
+			point[d] = shLowerLimit[d] + tmpIndex * shStep[d];//* step[i];
 		}
 
 		// Run the validation function and save the result to the global memory
-		results[threadX] = (*model)->validate_gpu(point);
+		results[i] = (*model)->validate_gpu(point);
 	}
 }
 
@@ -55,15 +88,12 @@ template<class ImplementedModel>
 void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfElements) {
 	ImplementedModel model = ImplementedModel();
 
-	// TODO: Change constant num_thread(4)
-	// TODO: No performance improvement
-	omp_set_nested(1);		// We are already in a parallel region
-	#pragma omp parallel num_threads(4)
+	omp_set_nested(1);		// We are already in a parallel region since slaveProcess()
+	#pragma omp parallel
 	{
 		DATA_TYPE* point = new DATA_TYPE[D];
 		unsigned long tmpIndex, carry;
 		unsigned int i, j;
-		//printf("thread %d\n", omp_get_thread_num());
 
 		for (j = omp_get_thread_num(); j < numOfElements; j+=omp_get_num_threads()) {
 			// Calculate 'myIndex = startingPointIdx + j' and then the exact point

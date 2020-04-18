@@ -73,6 +73,9 @@ bool ParallelFramework::isValid() {
 void ParallelFramework::masterProcess() {
 	MPI_Status status;
 	int mpiSource;
+	int finished = 0;
+	int numOfProcesses;
+	MPI_Comm_size(MPI_COMM_WORLD, &numOfProcesses);
 
 	int pstatusAllocated = 0;
 	ComputeProcessStatus* processStatus = nullptr;
@@ -84,18 +87,15 @@ void ParallelFramework::masterProcess() {
 	int tmpNumOfElements;	// This needs to be int because of MPI
 	float completionTime;
 
-	int finished = 0;
-	int numOfProcesses;
-	MPI_Comm_size(MPI_COMM_WORLD, &numOfProcesses);
 
 	while (totalReceived < totalElements || finished < numOfProcesses-1) {
 		// Receive request from any worker thread
-		#if DEBUG >= 1
+		#if DEBUG >= 2
 			printf("Master: Waiting for signal...\n");
 		#endif
 		fflush(stdout);
 
-		MPI_Recv(nullptr, 0, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+		MMPI_Recv(nullptr, 0, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 		mpiSource = status.MPI_SOURCE;
 
 		#if DEBUG >= 2
@@ -125,7 +125,7 @@ void ParallelFramework::masterProcess() {
 		switch(status.MPI_TAG){
 			case TAG_READY:
 				// Receive the maximum batch size reported by the slave process
-				MPI_Recv(&pstatus.maxBatchSize, 1, MPI_UNSIGNED_LONG, mpiSource, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD, &status);
+				MMPI_Recv(&pstatus.maxBatchSize, 1, MPI_UNSIGNED_LONG, mpiSource, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD, &status);
 
 				// Get next data batch to calculate
 				getDataChunk(pstatus.currentBatchSize, tmpToCalculate, &tmpNumOfElements);
@@ -153,7 +153,7 @@ void ParallelFramework::masterProcess() {
 
 			case TAG_RESULTS:
 				// Receive the results
-				MPI_Recv(tmpResults, pstatus.maxBatchSize, RESULT_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
+				MMPI_Recv(tmpResults, pstatus.maxBatchSize, RESULT_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
 
 				// Find the length of the results
 				MPI_Get_count(&status, RESULT_MPI_TYPE, &tmpNumOfElements);	// This is equal to pstatus.assignedElements
@@ -226,7 +226,6 @@ void ParallelFramework::masterProcess() {
 
 				pstatus.computingIndex = totalElements;
 				pstatus.finished = true;
-				// TODO: Maybe set pstatus initialized = false to reuse the slot??
 
 				finished++;
 
@@ -263,8 +262,8 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 		MPI_Send(&maxBatchSize, 1, MPI_UNSIGNED_LONG, 0, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD);
 
 		// Receive a batch of data from master
-		MPI_Recv(&numOfElements, 1, MPI_INT, 0, TAG_DATA_COUNT, MPI_COMM_WORLD, &status);
-		MPI_Recv(startPointIdx, parameters->D, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, &status);
+		MMPI_Recv(&numOfElements, 1, MPI_INT, 0, TAG_DATA_COUNT, MPI_COMM_WORLD, &status);
+		MMPI_Recv(startPointIdx, parameters->D, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, &status);
 
 		#if DEBUG >= 3
 			printf("Coordinator: Received %d elements starting at: ", numOfElements);
@@ -309,7 +308,8 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 			}
 
 			if(tmp!=0){
-				printf("[E] Coordinator: Shit happened, addToIdxVector for thread %d returned overflow = %d\n", i, tmp);
+				printf("[E] Coordinator: addToIdxVector for thread %d returned overflow = %d\n", i, tmp);
+				break;
 			}
 
 
@@ -367,16 +367,6 @@ void ParallelFramework::getDataChunk(unsigned long batchSize, unsigned long* toC
 	*numOfElements = batchSize;
 
 	addToIdxVector(toSendVector, toSendVector, batchSize, nullptr);
-	// unsigned int i;
-	// unsigned int newIndex;
-	// unsigned int carry = batchSize;
-	//
-	// for (i = 0; i < parameters->D; i++) {
-	// 	newIndex = (toSendVector[i] + carry) % limits[i].N;
-	// 	carry = (toSendVector[i] + carry) / limits[i].N;
-	//
-	// 	toSendVector[i] = newIndex;
-	// }
 
 	totalSent += batchSize;
 }
@@ -396,18 +386,6 @@ void ParallelFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst
 		// Calculate the steps for dimension i
 		dst[i] = (int) round(abs(limits[i].lowerLimit - point[i]) / limits[i].step);		// TODO: 1.9999997 will round to 2, verify correctness
 	}
-
-//#if DEBUG >= 4
-//	cout << "Index for point ( ";
-//	for (i = 0; i < parameters->D; i++)
-//		cout << point[i] << " ";
-//	cout << "): ";
-//
-//	for (i = 0; i < parameters->D; i++) {
-//		cout << dst[i] << " ";
-//	}
-//	cout << endl;
-//#endif
 }
 long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) {
 	unsigned int i;
@@ -417,13 +395,6 @@ long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) {
 		// Increase index by i*(index-steps for this dimension)
 		index += pointIdx[i] * idxSteps[i];
 	}
-
-//#if DEBUG >= 4
-//	cout << "Index for point ( ";
-//	for (i = 0; i < parameters->D; i++)
-//		cout << pointIdx[i] << " ";
-//	cout << "): " << index << endl;
-//#endif
 
 	return index;
 }
@@ -438,6 +409,10 @@ void ParallelFramework::addToIdxVector(unsigned long* start, unsigned long* resu
 		carry = (start[i] + carry) / limits[i].N;
 
 		result[i] = newIndex;
+
+		if(carry == 0 && start==result)
+			break;
+		// else we need to write the rest of the indices from start to result
 	}
 
 	if(overflow != nullptr){

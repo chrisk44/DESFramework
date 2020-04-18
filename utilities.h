@@ -7,6 +7,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <semaphore.h>
+#include <mpi.h>
 
 #define cce() {                               \
   cudaError_t e = cudaGetLastError();                    \
@@ -16,9 +17,6 @@
     exit(1);                                             \
   }                                                      \
 }
-
-// Server parameters
-#define DEFAULT_PORT 9000
 
 // Slow start parameters for batch size increment
 #define SS_THRESHOLD 200000000
@@ -30,6 +28,7 @@
 
 // Computing parameters
 #define BLOCK_SIZE 1024
+#define COMPUTE_BATCH_SIZE 500
 #define MAX_DIMENSIONS 10
 //#define min(X, Y)  ((X) < (Y) ? (X) : (Y))
 //#define max(X, Y)  ((X) > (Y) ? (X) : (Y))
@@ -43,8 +42,10 @@
 // 2: Processes steps
 // 3: Data transfers
 // 4: Data calculations
-#define DEBUG 2
+#define DEBUG 1
 
+// MPI
+#define RECV_SLEEP_MS 1
 #define TAG_READY 0
 #define TAG_DATA_COUNT 1
 #define TAG_DATA 2
@@ -76,6 +77,9 @@ public:
 
 unsigned long getDefaultCPUBatchSize();
 unsigned long getDefaultGPUBatchSize();
+
+// MPI_Recv without busy wait
+void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status* status);
 
 struct Limit {
 	DATA_TYPE lowerLimit;

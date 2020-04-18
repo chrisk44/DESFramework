@@ -119,7 +119,7 @@ void ParallelFramework::slaveProcess() {
 		printf("SlaveProcess: Spawning %d worker threads...\n", numOfThreads);
 	#endif
 
-	#pragma omp parallel num_threads(numOfThreads + 1) shared(PTIs) 	// +1 thread to handle the communication
+	#pragma omp parallel num_threads(numOfThreads + 1) shared(PTIs) 	// +1 thread to handle the communication with masterProcess
 	{
 		int tid = omp_get_thread_num();
 		if(tid == 0){
@@ -227,26 +227,34 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 
 			// Calculate the results
 			if (pti.id > -1) {
+				//Stopwatch s1, s2;
 
 				// Copy starting point indices to device
 				cudaMemcpy(deviceStartingPointIdx, pti.startPointIdx, parameters->D * sizeof(unsigned long), cudaMemcpyHostToDevice);
 				cce();
 
 				// Call the kernel
-				blockSize = min(BLOCK_SIZE, pti.numOfElements);
-				numOfBlocks = (pti.numOfElements + blockSize - 1) / blockSize;
+				int computeThreads = (pti.numOfElements + COMPUTE_BATCH_SIZE - 1) / COMPUTE_BATCH_SIZE;
+				blockSize = min(BLOCK_SIZE, computeThreads);
+				numOfBlocks = (computeThreads + blockSize - 1) / blockSize;
+				//s1.start();
 				validate_kernel<ImplementedModel><<<numOfBlocks, blockSize>>>(deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, pti.numOfElements);
 				cce();
 
 				// Wait for kernel to finish
 				cudaDeviceSynchronize();
 				cce();
+				//s1.stop();
 
-				if(! parameters->benchmark){
-					// Get results from device
-					cudaMemcpy(pti.results, deviceResults, pti.numOfElements * sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost);
-					cce();
-				}
+				// Get results from device
+				//s2.start();
+				cudaMemcpy(pti.results, deviceResults, pti.numOfElements * sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost);
+				cce();
+				//s2.stop();
+
+				// if(parameters->benchmark){
+				// 	printf("ComputeThread %d: GPU kernel time %f ms, GPU memcpy time %f ms\n", pti.id, s1.getMsec(), s2.getMsec());
+				// }
 
 			} else {
 

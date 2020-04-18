@@ -11,6 +11,20 @@ unsigned long getDefaultGPUBatchSize(){
     return 0;
 }
 
+void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status* status){
+    // MPI_Recv(buf, count, datatype, source, tag, comm, status);
+    // return;
+
+	MPI_Request request;
+	int flag = 0;
+
+	MPI_Irecv(buf, count, datatype, source, tag, comm, &request);
+	while(!flag){
+		usleep(RECV_SLEEP_MS * 1000);
+		MPI_Test(&request, &flag, status);
+	}
+}
+
 void Stopwatch::start(){
     clock_gettime(CLOCK_MONOTONIC_RAW, &t1);
 }
