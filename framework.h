@@ -2,10 +2,11 @@
 #define PARALLELFRAMEWORK_H
 
 #include <cuda.h>
+#include <cmath>
 #include <iostream>
-#include <stdlib.h>
 #include <mpi.h>
 #include <omp.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #include "utilities.h"
@@ -155,7 +156,6 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 	cudaStream_t streams[NUM_OF_STREAMS];
 	int blockSize;							// Size of thread blocks
 	int numOfBlocks;						// Number of blocks
-	size_t freeMem, totalMem;				// Bytes of free,total memory on GPU
 	int allocatedElements = 500;
 
 	// Initialize device
@@ -168,10 +168,6 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 			cudaStreamCreate(&streams[i]);
 			cce();
 		}
-
-		// Read device's memory info
-		cudaMemGetInfo(&freeMem, &totalMem);
-		//maxBatchSize = (freeMem - MEM_GPU_SPARE_BYTES) / sizeof(RESULT_TYPE);
 
 		// Allocate memory on device
 		cudaMalloc(&deviceModelAddress, sizeof(ImplementedModel**));				cce();
@@ -192,10 +188,6 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 			printf("ComputeThread %d: deviceLimits: 0x%x\n", pti.id, (void*) deviceLimits);
 		#endif
 	}
-
-	// #if DEBUG >= 2
-	// 	printf("ComputeThread %d: maxBatchSize = %d (%ld MB)\n", id, maxBatchSize, maxBatchSize*sizeof(RESULT_TYPE) / (1024 * 1024));
-	// #endif
 
 	while(true){
 		// Wait for data from coordinateThread

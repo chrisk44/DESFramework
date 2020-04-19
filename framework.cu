@@ -1,6 +1,3 @@
-#include <cmath>
-#include <iostream>
-
 #include "framework.h"
 
 using namespace std;
@@ -248,11 +245,15 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 	sem_t* semResults = pti[0].semResults;
 
 	int numOfElements, tmp;
-	unsigned long maxBatchSize = getDefaultCPUBatchSize();		// TODO: Also consider GPUs
+	unsigned long maxBatchSize = min(getDefaultCPUBatchSize(), getDefaultGPUBatchSize());
 	unsigned long *startPointIdx = new unsigned long[parameters->D];
 	unsigned long allocatedElements = 0;
 	RESULT_TYPE* results = nullptr;
 	MPI_Status status;
+
+	#if DEBUG >= 1
+		printf("Coordinator: Max batch size: %d\n", maxBatchSize);
+	#endif
 
 	while(true){
 		// Send READY signal to master

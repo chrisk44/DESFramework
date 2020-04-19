@@ -3,11 +3,12 @@
 
 #include <cuda_runtime.h>
 #include <cuda.h>
+#include <limits.h>
+#include <mpi.h>
+#include <semaphore.h>
 #include <string>
 #include <sys/time.h>
 #include <unistd.h>
-#include <semaphore.h>
-#include <mpi.h>
 
 #define cce() {                               \
   cudaError_t e = cudaGetLastError();                    \
@@ -19,7 +20,7 @@
 }
 
 // Slow start parameters for batch size increment
-#define SS_THRESHOLD 200000000
+#define SS_THRESHOLD 2000000000
 #define SS_STEP 1000
 
 // Memory parameters
@@ -31,8 +32,6 @@
 #define COMPUTE_BATCH_SIZE 500
 #define NUM_OF_STREAMS 8
 #define MAX_DIMENSIONS 10
-//#define min(X, Y)  ((X) < (Y) ? (X) : (Y))
-//#define max(X, Y)  ((X) > (Y) ? (X) : (Y))
 
 #define RESULT_TYPE float
 #define DATA_TYPE double

@@ -6,7 +6,6 @@
 
 #include "utilities.h"
 
-#include <iostream>
 using namespace std;
 
 // CUDA kernel to create the 'Model' object on device

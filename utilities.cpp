@@ -1,6 +1,6 @@
 #include "utilities.h"
 
-#include <unistd.h>
+using namespace std;
 
 unsigned long getDefaultCPUBatchSize(){
     long pages = sysconf(_SC_PHYS_PAGES);
@@ -8,7 +8,24 @@ unsigned long getDefaultCPUBatchSize(){
     return (pages * page_size)/(4*sizeof(RESULT_TYPE));
 }
 unsigned long getDefaultGPUBatchSize(){
-    return 0;
+    size_t freeMem, totalMem;				// Bytes of free,total memory on GPU
+    int gpus;
+    int minBatchSize = INT_MAX;
+
+    // Get GPUs count
+    cudaGetDeviceCount(&gpus);
+
+    for(int i=0; i<gpus; i++){
+        // Select GPU i
+        cudaSetDevice(i);
+
+        // Read device's memory info
+        cudaMemGetInfo(&freeMem, &totalMem);
+
+        // Calculate and keep the minimum batch size
+        minBatchSize = min(minBatchSize, (int) ((freeMem - MEM_GPU_SPARE_BYTES) / sizeof(RESULT_TYPE)));
+    }
+    return minBatchSize;
 }
 
 void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status* status){
