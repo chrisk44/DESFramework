@@ -306,9 +306,12 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 			sem_post(pti.semResults);
 			pti.stopwatch.stop();
 
-		} else {
-			// No more data
+		} else if(pti.numOfElements == -1){
+			// No more data, exit
 			break;
+		}else{
+			// Sleep 1 ms to prevent stopwatch time = 0
+			usleep(1000);
 		}
 	}
 

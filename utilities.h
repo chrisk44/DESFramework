@@ -67,14 +67,13 @@ public:
 class Stopwatch{
     // Measures time is nano seconds
 private:
-    struct timespec t1, t2;
+    timespec t1, t2;
 
 public:
     void start();
     void stop();
     float getNsec();
     float getMsec();
-    timespec diff(timespec start, timespec end);
 };
 
 unsigned long getDefaultCPUBatchSize();

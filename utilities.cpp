@@ -32,21 +32,20 @@ void Stopwatch::stop(){
     clock_gettime(CLOCK_MONOTONIC_RAW, &t2);
 }
 float Stopwatch::getNsec(){
-    timespec difference = diff(t1, t2);
+    timespec difference;
+	if ((t2.tv_nsec - t1.tv_nsec)<0) {
+		difference.tv_sec = t2.tv_sec - t1.tv_sec - 1;
+		difference.tv_nsec = 1000000000 + t2.tv_nsec - t1.tv_nsec;
+	} else {
+		difference.tv_sec = t2.tv_sec - t1.tv_sec;
+		difference.tv_nsec = t2.tv_nsec - t1.tv_nsec;
+	}
+
+    // printf("t1 is %d s and %d nsec\n", t1.tv_sec, t1.tv_nsec);
+    // printf("t2 is %d s and %d nsec\n", t2.tv_sec, t2.tv_nsec);
+    // printf("difference is %d s and %d nsec\n", difference.tv_sec, difference.tv_nsec);
     return difference.tv_sec * 1000000000 + difference.tv_nsec;
 }
 float Stopwatch::getMsec(){
     return getNsec() / 1000000.0;
-}
-
-timespec Stopwatch::diff(timespec start, timespec end){        // Ref: http://www.guyrutenberg.com/2007/09/22/profiling-code-using-clock_gettime/
-	timespec temp;
-	if ((end.tv_nsec-start.tv_nsec)<0) {
-		temp.tv_sec = end.tv_sec-start.tv_sec-1;
-		temp.tv_nsec = 1000000000+end.tv_nsec-start.tv_nsec;
-	} else {
-		temp.tv_sec = end.tv_sec-start.tv_sec;
-		temp.tv_nsec = end.tv_nsec-start.tv_nsec;
-	}
-	return temp;
 }

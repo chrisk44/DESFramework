@@ -246,7 +246,7 @@ void ParallelFramework::masterProcess() {
 void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfThreads){
 	sem_t* semResults = pti[0].semResults;
 
-	int numOfElements, elementsPerThread, tmp;
+	int numOfElements, tmp;
 	unsigned long maxBatchSize = getDefaultCPUBatchSize();		// TODO: Also consider GPUs
 	unsigned long *startPointIdx = new unsigned long[parameters->D];
 	unsigned long allocatedElements = 0;
@@ -285,23 +285,41 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 			cudaHostAlloc(&results, allocatedElements * sizeof(RESULT_TYPE), cudaHostAllocPortable);
 		}
 
-		// Split the data into numOfThreads pieces
-		elementsPerThread = numOfElements / numOfThreads;
+		// Split the data into pieces for each thread
+		int* pieces = new int[numOfThreads];
+		int total = 0;
+		for(int i=0; i<numOfThreads; i++){
+			pieces[i] = numOfElements * pti[i].ratio;
+			total += pieces[i];
+		}
+		if(total < numOfElements){
+			// Something was left out, assign it to first thread
+			pieces[0] += numOfElements - total;
+		}else if(total > numOfElements){
+			// More elements were given, remove from the first threads
+			for(int i=0; i<numOfThreads; i++){
+				// If thread i has enough elements, remove all the extra from it
+				if(pieces[i] > total-numOfElements){
+					pieces[i] -= total-numOfElements;
+					total = numOfElements;
+					break;
+				}
 
-		#if DEBUG >= 2
-			printf("Coordinator: Split data into %d elements for each thread\n", elementsPerThread);
-			printf("Coordinator: Posting worker threads...\n");
-		#endif
+				// else assign 0 elements to it and move it to the next thread
+				total -= pieces[i];
+				pieces[i] = 0;
+			}
+		}
 
-		int skip = 0;
 		for(int i=0; i<numOfThreads; i++){
 			tmp = 0;
+
 			if(i==0){
 				// Set the starting point as the sessions starting point
 				memcpy(pti[i].startPointIdx, startPointIdx, parameters->D * sizeof(unsigned long));
 
-				// Set numOfElements as elementsPerThread, or all of them if elementsPerThread==0
-				pti[i].numOfElements = elementsPerThread==0 ? numOfElements : elementsPerThread;
+				// Set numOfElements as pieces[0]
+				pti[i].numOfElements = pieces[0];
 
 				// Set results as the start of global results
 				pti[i].results = results;
@@ -309,8 +327,8 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 				// Set the starting point as the starting point of the previous thread + numOfElements of the previous thread
 				addToIdxVector(pti[i-1].startPointIdx, pti[i].startPointIdx, pti[i-1].numOfElements, &tmp);
 
-				// Set the numOfelements as elementsPerThread, or all the remaining if we are at the last thread
-				pti[i].numOfElements = i==numOfThreads-1 ? numOfElements-skip : elementsPerThread;
+				// Set the numOfelements as pieces[i]
+				pti[i].numOfElements = pieces[i];
 
 				// Set results as the results of the previous thread + numOfElements of the previous thread
 				pti[i].results = pti[i-1].results + pti[i-1].numOfElements;
@@ -328,9 +346,9 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 				printf("[E] Coordinator: addToIdxVector for thread %d returned overflow = %d\n", i, tmp);
 				break;
 			}
-
-			skip += pti[i].numOfElements;
 		}
+
+		delete[] pieces;
 
 		// Start all the worker threads
 		for(int i=0; i<numOfThreads; i++){
@@ -345,21 +363,32 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 			sem_wait(semResults);
 		}
 
-		float linTime = 0;
+		float tmpScore;
+		float totalScore = 0;
 		for(int i=0; i<numOfThreads; i++){
 			if(parameters->benchmark){
 				printf("Coordinator: Thread %d time: %f ms\n", pti[i].id, pti[i].stopwatch.getMsec());
 			}
 
-			linTime += pti[i].stopwatch.getMsec();
+			tmpScore = pti[i].numOfElements / pti[i].stopwatch.getMsec();
+			totalScore += tmpScore;
+
+			if(tmpScore < 0){
+				totalScore = -1;
+				break;
+			}
 		}
 
-		for(int i=0; i<numOfThreads; i++){
-			pti[i].ratio = 1 - (pti[i].stopwatch.getMsec() / linTime);
+		if(totalScore > 0){
+			for(int i=0; i<numOfThreads; i++){
+				pti[i].ratio = pti[i].numOfElements / (totalScore * pti[i].stopwatch.getMsec());
 
-			#if DEBUG >= 1
-				printf("Coordinator: Adjusting thread %d ratio to %f\n", pti[i].id, pti[i].ratio);
-			#endif
+				#if DEBUG >= 1
+					printf("Coordinator: Adjusting thread %d ratio to %f\n", pti[i].id, pti[i].ratio);
+				#endif
+			}
+		}else{
+			printf("[E] Coordinator: Got negative score (which means negative time), skipping ratio correction");
 		}
 
 		// Send all results to master
@@ -375,7 +404,7 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 
 	// Notify worker threads to finish
 	for(int i=0; i<numOfThreads; i++){
-		pti[i].numOfElements = 0;
+		pti[i].numOfElements = -1;
 		sem_post(&pti[i].semData);
 	}
 
