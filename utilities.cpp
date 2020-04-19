@@ -27,11 +27,37 @@ void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
 
 void Stopwatch::start(){
     clock_gettime(CLOCK_MONOTONIC_RAW, &t1);
+    started = true;
 }
 void Stopwatch::stop(){
-    clock_gettime(CLOCK_MONOTONIC_RAW, &t2);
+    if(!started){
+        printf("[E] -----------(stop())------------- CLOCK HAS NOT BEEN STARTED --------------------------------------\n");
+    }else if(stopped){
+        printf("[E] -----------(stop())--------------- CLOCK ALREADY STOPPED -----------------------------------------\n");
+    }
+    fflush(stdout);
+
+    stopped = true;
+    bool flag = false;
+    do{
+        if(flag){
+            printf("---------------------- looped because of negative clock\n");
+        }
+        flag = true;
+        clock_gettime(CLOCK_MONOTONIC_RAW, &t2);
+    }while(getMsec() < 0);  // Clock may backwards for some reason
+
+}
+void Stopwatch::reset(){
+    started = false;
+    stopped = false;
 }
 float Stopwatch::getNsec(){
+    if(!started){
+        printf("[E] -----------(getNsec())------------- CLOCK HAS NOT BEEN STARTED --------------------------------------\n");
+    }else if(!stopped){
+        printf("[E] -----------(getNsec())------------- CLOCK HAS NOT BEEN STOPPED --------------------------------------\n");
+    }
     timespec difference;
 	if ((t2.tv_nsec - t1.tv_nsec)<0) {
 		difference.tv_sec = t2.tv_sec - t1.tv_sec - 1;
@@ -41,9 +67,9 @@ float Stopwatch::getNsec(){
 		difference.tv_nsec = t2.tv_nsec - t1.tv_nsec;
 	}
 
-    // printf("t1 is %d s and %d nsec\n", t1.tv_sec, t1.tv_nsec);
+    // printf("\nt1 is %d s and %d nsec\n", t1.tv_sec, t1.tv_nsec);
     // printf("t2 is %d s and %d nsec\n", t2.tv_sec, t2.tv_nsec);
-    // printf("difference is %d s and %d nsec\n", difference.tv_sec, difference.tv_nsec);
+    // printf("difference is %d s and %d nsec\n\n", difference.tv_sec, difference.tv_nsec);
     return difference.tv_sec * 1000000000 + difference.tv_nsec;
 }
 float Stopwatch::getMsec(){

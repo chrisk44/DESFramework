@@ -68,10 +68,12 @@ class Stopwatch{
     // Measures time is nano seconds
 private:
     timespec t1, t2;
+    bool started = false, stopped = false;
 
 public:
     void start();
     void stop();
+    void reset();
     float getNsec();
     float getMsec();
 };

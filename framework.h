@@ -302,10 +302,6 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 				printf("\n");
 			#endif
 
-			// Let coordinatorThread know that the results are ready
-			sem_post(pti.semResults);
-			pti.stopwatch.stop();
-
 		} else if(pti.numOfElements == -1){
 			// No more data, exit
 			break;
@@ -313,6 +309,11 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 			// Sleep 1 ms to prevent stopwatch time = 0
 			usleep(1000);
 		}
+
+		pti.stopwatch.stop();
+
+		// Let coordinatorThread know that the results are ready
+		sem_post(pti.semResults);
 	}
 
 	// Finalize GPU

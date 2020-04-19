@@ -213,6 +213,7 @@ void ParallelFramework::masterProcess() {
 					memcpy(&results[pstatus.computingIndex], tmpResults, tmpNumOfElements*sizeof(RESULT_TYPE));
 
 				pstatus.assignedElements = 0;
+				pstatus.stopwatch.reset();
 				break;
 
 			case TAG_EXITING:
@@ -388,8 +389,11 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 				#endif
 			}
 		}else{
-			printf("[E] Coordinator: Got negative score (which means negative time), skipping ratio correction");
+			printf("[E] Coordinator: Got negative time (which means that the clock went backwards), skipping ratio correction\n");
 		}
+
+		for(int i=0; i<numOfThreads; i++)
+			pti[i].stopwatch.reset();
 
 		// Send all results to master
 		#if DEBUG >= 2
