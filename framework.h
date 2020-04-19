@@ -113,6 +113,7 @@ void ParallelFramework::slaveProcess() {
 		PTIs[i].semResults = &semResults;
 		PTIs[i].results = nullptr;
 		PTIs[i].startPointIdx = new unsigned long[parameters->D];
+		PTIs[i].ratio = 0.5;
 	}
 
 	#if DEBUG >= 1
@@ -199,6 +200,7 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 	while(true){
 		// Wait for data from coordinateThread
 		sem_wait(&pti.semData);
+		pti.stopwatch.start();
 
 		// If more data available...
 		if (pti.numOfElements > 0) {
@@ -302,6 +304,7 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 
 			// Let coordinatorThread know that the results are ready
 			sem_post(pti.semResults);
+			pti.stopwatch.stop();
 
 		} else {
 			// No more data

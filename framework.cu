@@ -329,9 +329,12 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 				break;
 			}
 
-			sem_post(&pti[i].semData);
-
 			skip += pti[i].numOfElements;
+		}
+
+		// Start all the worker threads
+		for(int i=0; i<numOfThreads; i++){
+			sem_post(&pti[i].semData);
 		}
 
 		#if DEBUG >= 2
@@ -340,6 +343,23 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 		// Wait for all worker threads to finish their work
 		for(int i=0; i<numOfThreads; i++){
 			sem_wait(semResults);
+		}
+
+		float linTime = 0;
+		for(int i=0; i<numOfThreads; i++){
+			if(parameters->benchmark){
+				printf("Coordinator: Thread %d time: %f ms\n", pti[i].id, pti[i].stopwatch.getMsec());
+			}
+
+			linTime += pti[i].stopwatch.getMsec();
+		}
+
+		for(int i=0; i<numOfThreads; i++){
+			pti[i].ratio = 1 - (pti[i].stopwatch.getMsec() / linTime);
+
+			#if DEBUG >= 1
+				printf("Coordinator: Adjusting thread %d ratio to %f\n", pti[i].id, pti[i].ratio);
+			#endif
 		}
 
 		// Send all results to master

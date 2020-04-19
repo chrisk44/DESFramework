@@ -28,8 +28,8 @@
 
 // Computing parameters
 #define BLOCK_SIZE 1024
-#define COMPUTE_BATCH_SIZE 419
-#define NUM_OF_STREAMS 5
+#define COMPUTE_BATCH_SIZE 500
+#define NUM_OF_STREAMS 8
 #define MAX_DIMENSIONS 10
 //#define min(X, Y)  ((X) < (Y) ? (X) : (Y))
 //#define max(X, Y)  ((X) > (Y) ? (X) : (Y))
@@ -43,7 +43,7 @@
 // 2: Processes steps
 // 3: Data transfers
 // 4: Data calculations
-#define DEBUG 2
+#define DEBUG 1
 
 // MPI
 #define RECV_SLEEP_MS 1
@@ -72,8 +72,9 @@ private:
 public:
     void start();
     void stop();
-    float getUsec();
+    float getNsec();
     float getMsec();
+    timespec diff(timespec start, timespec end);
 };
 
 unsigned long getDefaultCPUBatchSize();
@@ -126,6 +127,10 @@ struct ProcessingThreadInfo{
     RESULT_TYPE* results;
     sem_t semData;
     sem_t* semResults;
+
+    // Data distribution
+    Stopwatch stopwatch;
+    float ratio;
 };
 
 #endif
