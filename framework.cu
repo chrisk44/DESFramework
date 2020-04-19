@@ -280,12 +280,9 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 		// Make sure we have enough allocated memory for the results
 		if(numOfElements > allocatedElements){
 			allocatedElements = numOfElements;
-			results = (RESULT_TYPE*) realloc(results, allocatedElements * sizeof(RESULT_TYPE));
-			if(results == nullptr){
-				printf("[E] Coordinator: Can't allocate %ld bytes for results\n", allocatedElements * sizeof(RESULT_TYPE));
-				printf("[E] Coordinator: Exiting...\n");
-				break;
-			}
+
+			if(results != nullptr) cudaFreeHost(results);
+			cudaHostAlloc(&results, allocatedElements * sizeof(RESULT_TYPE), cudaHostAllocPortable);
 		}
 
 		// Split the data into numOfThreads pieces
@@ -296,32 +293,45 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 			printf("Coordinator: Posting worker threads...\n");
 		#endif
 
+		int skip = 0;
 		for(int i=0; i<numOfThreads; i++){
+			tmp = 0;
 			if(i==0){
+				// Set the starting point as the sessions starting point
 				memcpy(pti[i].startPointIdx, startPointIdx, parameters->D * sizeof(unsigned long));
+
+				// Set numOfElements as elementsPerThread, or all of them if elementsPerThread==0
 				pti[i].numOfElements = elementsPerThread==0 ? numOfElements : elementsPerThread;
+
+				// Set results as the start of global results
 				pti[i].results = results;
 			}else{
+				// Set the starting point as the starting point of the previous thread + numOfElements of the previous thread
 				addToIdxVector(pti[i-1].startPointIdx, pti[i].startPointIdx, pti[i-1].numOfElements, &tmp);
-				pti[i].numOfElements = elementsPerThread;
+
+				// Set the numOfelements as elementsPerThread, or all the remaining if we are at the last thread
+				pti[i].numOfElements = i==numOfThreads-1 ? numOfElements-skip : elementsPerThread;
+
+				// Set results as the results of the previous thread + numOfElements of the previous thread
 				pti[i].results = pti[i-1].results + pti[i-1].numOfElements;
 			}
+
+			#if DEBUG >=2
+				printf("Coordinator: Thread %d -> Assigning %d elements starting at: ", i, pti[i].numOfElements);
+				for(int j=0; j < (parameters->D); j++){
+					printf("%ld ", pti[i].startPointIdx[j]);
+				}
+				printf("\n");
+			#endif
 
 			if(tmp!=0){
 				printf("[E] Coordinator: addToIdxVector for thread %d returned overflow = %d\n", i, tmp);
 				break;
 			}
 
-
-			#if DEBUG >=3
-				printf("Coordinator: Thread %d -> Assigning %d elements starting at: ", i, pti[i].numOfElements);
-				for(int j=0; j<parameters->D; j++){
-					printf("%ld ", pti[i].startPointIdx[j]);
-				}
-				printf("\n");
-			#endif
-
 			sem_post(&pti[i].semData);
+
+			skip += pti[i].numOfElements;
 		}
 
 		#if DEBUG >= 2
@@ -350,7 +360,7 @@ void ParallelFramework::coordinatorThread(ProcessingThreadInfo* pti, int numOfTh
 	}
 
 	delete[] startPointIdx;
-	free(results);
+	cudaFreeHost(results);
 }
 
 void ParallelFramework::getDataChunk(unsigned long batchSize, unsigned long* toCalculate, int* numOfElements) {

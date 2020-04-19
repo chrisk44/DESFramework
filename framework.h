@@ -155,10 +155,7 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 	int blockSize;							// Size of thread blocks
 	int numOfBlocks;						// Number of blocks
 	size_t freeMem, totalMem;				// Bytes of free,total memory on GPU
-	int allocatedElements = 0;
-
-	// Memory on host for results, allocated by cudaMalloc to be used by memcpyAsync
-	RESULT_TYPE* hostResults;
+	int allocatedElements = 500;
 
 	// Initialize device
 	if (pti.id > -1) {
@@ -180,9 +177,6 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));		cce();
 		cudaMalloc(&deviceStartingPointIdx, parameters->D * sizeof(unsigned long));	cce();
 		cudaMalloc(&deviceLimits, parameters->D * sizeof(Limit));					cce();
-
-		// Allocate hostResults
-		cudaMallocHost(&hostResults, allocatedElements * sizeof(RESULT_TYPE));
 
 		// Instantiate the model object on the device, and write its address in 'deviceModelAddress' on the device
 		create_model_kernel<ImplementedModel><<< 1, 1 >>>(deviceModelAddress);	cce();
@@ -235,15 +229,8 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 				cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));
 				cce();
 
-				// Reallocate pinned memory on host
-				cudaFreeHost(hostResults);
-				cce();
-				cudaMallocHost(&hostResults, allocatedElements * sizeof(RESULT_TYPE));
-				cce();
-
 				#if DEBUG >=2
 					printf("ComputeThread %d: deviceResults = 0x%x\n", pti.id, deviceResults);
-					printf("ComputeThread %d: hostResults = 0x%x\n", pti.id, hostResults);
 				#endif
 			}
 
@@ -263,7 +250,11 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 				}
 				for(int i=0; i<NUM_OF_STREAMS; i++){
 					// Adjust elementsPerStream for last stream (= total-queued)
-					elementsPerStream = min(elementsPerStream, pti.numOfElements - skip);
+					if(i == NUM_OF_STREAMS - 1){
+						elementsPerStream = pti.numOfElements - skip;
+					}else{
+						elementsPerStream = min(elementsPerStream, pti.numOfElements - skip);
+					}
 
 					// Queue the kernel in stream[i]
 					int gpuThreads = (elementsPerStream + COMPUTE_BATCH_SIZE - 1) / COMPUTE_BATCH_SIZE;
@@ -274,7 +265,7 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 					);
 
 					// Queue the memcpy in stream[i]
-					cudaMemcpyAsync(&hostResults[skip], &deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, streams[i]);
+					cudaMemcpyAsync(&pti.results[skip], &deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, streams[i]);
 
 					#if DEBUG >= 2
 					printf("ComputeThread %d: Queueing %d elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%d\n",
@@ -294,13 +285,20 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 					cce();
 				}
 
-				memcpy(pti.results, hostResults, pti.numOfElements * sizeof(RESULT_TYPE));
 
 			} else {
 
 				cpu_kernel<ImplementedModel>(pti.startPointIdx, pti.results, limits, parameters->D, pti.numOfElements);
 
 			}
+
+			#if DEBUG >= 4
+				printf("ComputeThread %d: Results are: ", pti.id);
+				for (int i = 0; i < pti.numOfElements; i++) {
+					printf("%f ", pti.results[i]);
+				}
+				printf("\n");
+			#endif
 
 			// Let coordinatorThread know that the results are ready
 			sem_post(pti.semResults);
@@ -322,9 +320,6 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 		cudaFree(deviceResults);			cce();
 		cudaFree(deviceStartingPointIdx);	cce();
 		cudaFree(deviceLimits);				cce();
-
-		// Free the space allocated on host
-		cudaFreeHost(hostResults);
 
 		// Make sure streams are finished and destroy them
 		for(int i=0;i<NUM_OF_STREAMS;i++){

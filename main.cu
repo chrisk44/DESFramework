@@ -5,7 +5,7 @@
 
 #include "framework.h"
 
-#define RESULTS_THRESHOLD 1e-15
+#define RESULTS_THRESHOLD 1e-13
 
 using namespace std;
 
@@ -36,13 +36,19 @@ int main(int argc, char** argv){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.batchSize = 500000000;
-    parameters.processingType = TYPE_GPU;
-    parameters.dynamicBatchSize = false;
-    parameters.benchmark = true;
+    parameters.processingType = TYPE_BOTH;
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
-    limits[0] = Limit { 0, 10, 5000000 };
+    // parameters.batchSize = 500000000;
+    // parameters.dynamicBatchSize = false;
+    // parameters.benchmark = true;
+    // limits[0] = Limit { 0, 10, 5000000 };
+    // limits[1] = Limit { -1e05, 1e05, 3000 };
+
+    parameters.batchSize = 5000;
+    parameters.dynamicBatchSize = true;
+    parameters.benchmark = false;
+    limits[0] = Limit { 0, 10, 50000 };
     limits[1] = Limit { -1e05, 1e05, 3000 };
 
     // Initialize the framework object
@@ -59,16 +65,7 @@ int main(int argc, char** argv){
 
     fflush(stdout);
     if (!parameters.benchmark) {
-
         // Test the outputs
-        #if DEBUG >= 4
-        // Print outputs
-        printf("final results: ");
-        for (unsigned int i = 0; i < framework.totalElements; i++) {
-            printf("%f ", framework.getResults()[i]);
-        }
-        printf("\n");
-        #endif
 
         unsigned long linearIndex;
         unsigned long indices[2];
