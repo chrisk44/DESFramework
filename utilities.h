@@ -96,7 +96,6 @@ struct ParallelFrameworkParameters {
 	unsigned int D;
 	unsigned int batchSize;
 	ProcessingType processingType = TYPE_BOTH;
-	bool dynamicBatchSize = true;
 	bool benchmark = false;
 	// ...
 };
