@@ -43,31 +43,37 @@ void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
 }
 
 void Stopwatch::start(){
-    if(started){
-        printf("[E] -------------(start())------------- CLOCK ALREADY STARTED ----------------------------------------\n");
-    }
-    if(stopped){
-        printf("[E] -------------(start())------------- CLOCK HAS BEEN STOPPED ---------------------------------------\n");
-    }
-    fflush(stdout);
+    #ifdef DBG_SNH
+        if(started){
+            printf("[E] -------------(start())------------- CLOCK ALREADY STARTED ----------------------------------------\n");
+        }
+        if(stopped){
+            printf("[E] -------------(start())------------- CLOCK HAS BEEN STOPPED ---------------------------------------\n");
+        }
+        fflush(stdout);
+        started = true;
+    #endif
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &t1);
-    started = true;
 }
 void Stopwatch::stop(){
-    if(!started){
-        printf("[E] -----------(stop())------------- CLOCK HAS NOT BEEN STARTED --------------------------------------\n");
-    }
-    if(stopped){
-        printf("[E] -----------(stop())--------------- CLOCK ALREADY STOPPED -----------------------------------------\n");
-    }
-    fflush(stdout);
+    #ifdef DBG_SNH
+        if(!started){
+            printf("[E] -----------(stop())------------- CLOCK HAS NOT BEEN STARTED --------------------------------------\n");
+        }
+        if(stopped){
+            printf("[E] -----------(stop())--------------- CLOCK ALREADY STOPPED -----------------------------------------\n");
+        }
+        fflush(stdout);
+        stopped = true;
+    #endif
 
-    stopped = true;
     bool flag = false;
     do{
         if(flag){
-            printf("---------------------- looped because of negative clock\n");
+            #ifdef DBG_SNH
+                printf("---------------------- looped because of negative clock\n");
+            #endif
         }
         flag = true;
         clock_gettime(CLOCK_MONOTONIC_RAW, &t2);
@@ -78,12 +84,14 @@ void Stopwatch::reset(){
     stopped = false;
 }
 float Stopwatch::getNsec(){
-    if(!started){
-        printf("[E] -----------(getNsec())------------- CLOCK HAS NOT BEEN STARTED --------------------------------------\n");
-    }
-    if(!stopped){
-        printf("[E] -----------(getNsec())------------- CLOCK HAS NOT BEEN STOPPED --------------------------------------\n");
-    }
+    #ifdef DBG_SNH
+        if(!started){
+            printf("[E] -----------(getNsec())------------- CLOCK HAS NOT BEEN STARTED --------------------------------------\n");
+        }
+        if(!stopped){
+            printf("[E] -----------(getNsec())------------- CLOCK HAS NOT BEEN STOPPED --------------------------------------\n");
+        }
+    #endif
 
     timespec difference;
 	if ((t2.tv_nsec - t1.tv_nsec)<0) {
@@ -94,9 +102,6 @@ float Stopwatch::getNsec(){
 		difference.tv_nsec = t2.tv_nsec - t1.tv_nsec;
 	}
 
-    // printf("\nt1 is %d s and %d nsec\n", t1.tv_sec, t1.tv_nsec);
-    // printf("t2 is %d s and %d nsec\n", t2.tv_sec, t2.tv_nsec);
-    // printf("difference is %d s and %d nsec\n\n", difference.tv_sec, difference.tv_nsec);
     return difference.tv_sec * 1000000000 + difference.tv_nsec;
 }
 float Stopwatch::getMsec(){

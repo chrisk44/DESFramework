@@ -110,10 +110,6 @@ void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* li
 			results[j] = model.validate_cpu(point);
 		}
 
-		#if DEBUG >=4
-			//cout << "Point (" << point[0] << "," << point[1] << ") returned " << results[j] << endl;
-		#endif
-
 		delete[] point;
 	}
 

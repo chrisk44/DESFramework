@@ -65,15 +65,15 @@ int ParallelFramework::run() {
 
 	if(rank == 0){
 
-		printf("Master %d process starting\n", rank);
+		printf("[%d] Master process starting\n", rank);
 		masterProcess();
-		printf("Master %d process finished\n", rank);
+		printf("[%d] Master process finished\n", rank);
 
 	}else{
 
-		printf("Slave %d process starting\n", rank);
+		printf("[%d] Slave process starting\n", rank);
 		slaveProcess<ImplementedModel>();
-		printf("Slave %d process finished\n", rank);
+		printf("[%d] Slave process finished\n", rank);
 
 	}
 
@@ -81,7 +81,7 @@ int ParallelFramework::run() {
 
 	// If we are a slave, stop here
 	if(rank != 0){
-		printf("run() exiting\n");
+		printf("[%d] run() exiting\n", rank);
 		exit(0);
 	}
 
@@ -91,7 +91,7 @@ int ParallelFramework::run() {
 template<class ImplementedModel>
 void ParallelFramework::slaveProcess() {
 	/*******************************************************************
-	 ********* Calculate number of worker threads (#GPUs + 1CPU) *******
+	********** Calculate number of worker threads (#GPUs + 1CPU) *******
 	********************************************************************/
 	int numOfThreads = 0;
 
@@ -102,13 +102,13 @@ void ParallelFramework::slaveProcess() {
 		numOfThreads++;
 
 	if(numOfThreads == 0){
-		printf("[E] SlaveProcess %d: numOfThreads is 0\n", rank);
+		printf("[%d] [E] SlaveProcess: numOfThreads is 0\n", rank);
 		return;
 	}
 
 
 	/*******************************************************************
-	 ********************* Initialization ******************************
+	********************** Initialization ******************************
 	********************************************************************/
 	sem_t semResults;
 	sem_init(&semResults, 0, 0);
@@ -123,12 +123,12 @@ void ParallelFramework::slaveProcess() {
 		computeThreadInfo[i].stopwatch.reset();
 	}
 
-	#if DEBUG >= 1
-		printf("SlaveProcess %d: Spawning %d worker threads...\n", rank, numOfThreads);
+	#ifdef DBG_START_STOP
+		printf("[%d] SlaveProcess: Spawning %d worker threads...\n", rank, numOfThreads);
 	#endif
 
 	/*******************************************************************
-	 ************** Launch coordinator and worker threads **************
+	*************** Launch coordinator and worker threads **************
 	********************************************************************/
 	#pragma omp parallel num_threads(numOfThreads + 1) shared(computeThreadInfo) 	// +1 thread to handle the communication with masterProcess
 	{
@@ -144,7 +144,7 @@ void ParallelFramework::slaveProcess() {
 	}
 
 	/*******************************************************************
-	 **************************** Finalize *****************************
+	***************************** Finalize *****************************
 	********************************************************************/
 	sem_destroy(&semResults);
 	for(int i=0; i<numOfThreads; i++){
@@ -165,10 +165,10 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 	// GPU Runtime
 	cudaStream_t streams[NUM_OF_STREAMS];
-	int allocatedElements = 500;
+	int allocatedElements = 0;
 
 	/*******************************************************************
-	 ************************ Initialization ***************************
+	************************* Initialization ***************************
 	********************************************************************/
 
 	// Initialize device
@@ -194,45 +194,44 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		// Copy limits to device
 		cudaMemcpy(deviceLimits, limits, parameters->D * sizeof(Limit), cudaMemcpyHostToDevice);	cce();
 
-		#if DEBUG > 2
-			printf("ComputeThread %d %d: deviceModelAddress: 0x%x\n", rank, cti.id, (void*) deviceModelAddress);
-			printf("ComputeThread %d %d: deviceResults: 0x%x\n", rank, cti.id, (void*) deviceResults);
-			printf("ComputeThread %d %d: deviceStartingPointIdx: 0x%x\n", rank, cti.id, (void*) deviceStartingPointIdx);
-			printf("ComputeThread %d %d: deviceLimits: 0x%x\n", rank, cti.id, (void*) deviceLimits);
+		#ifdef DBG_MEMORY
+			printf("[%d] ComputeThread %d: deviceModelAddress: 0x%x\n", rank, cti.id, (void*) deviceModelAddress);
+			printf("[%d] ComputeThread %d: deviceResults: 0x%x\n", rank, cti.id, (void*) deviceResults);
+			printf("[%d] ComputeThread %d: deviceStartingPointIdx: 0x%x\n", rank, cti.id, (void*) deviceStartingPointIdx);
+			printf("[%d] ComputeThread %d: deviceLimits: 0x%x\n", rank, cti.id, (void*) deviceLimits);
 		#endif
 	}
 
 
-
 	/*******************************************************************
-	 ************************ Execution loop ***************************
+	************************* Execution loop ***************************
 	********************************************************************/
-
 	while(true){
-		//
-		// Wait for data from coordinateThread
-		//
+		/*****************************************************************
+		************* Request data from coordinateThread *****************
+		******************************************************************/
 		sem_wait(&cti.semData);
 		cti.stopwatch.start();
 
 		// If more data available...
 		if (cti.numOfElements > 0) {
-			#if DEBUG >= 1
-				printf("ComputeThread %d %d: Running for %d elements...\n", rank, cti.id, cti.numOfElements);
-			#elif DEBUG >= 3
-				printf("ComputeThread %d %d: Got %d elements starting from  ", rank, cti.id, cti.numOfElements);
+			#ifdef DBG_START_STOP
+				printf("[%d] ComputeThread %d: Running for %d elements...\n", rank, cti.id, cti.numOfElements);
+			#endif
+			#ifdef DBG_DATA
+				printf("[%d] ComputeThread %d: Got %d elements starting from  ", rank, cti.id, cti.numOfElements);
 				for (unsigned int i = 0; i < parameters->D; i++)
 					printf("%d ", cti.startPointIdx[i]);
 				printf("\n");
 			#endif
 			fflush(stdout);
 
-			//
-			// If batchSize was increased, allocate more memory for the results
-			//
+			/*****************************************************************
+			 If batchSize was increased, allocate more memory for the results
+			******************************************************************/
 			if (allocatedElements < cti.numOfElements && cti.id > -1) {
-				#if DEBUG >= 2
-					printf("ComputeThread %d %d: Allocating more GPU memory (%d -> %d elements, %ld MB)\n", rank,
+				#ifdef DBG_MEMORY
+					printf("[%d] ComputeThread %d: Allocating more GPU memory (%d -> %d elements, %ld MB)\n", rank,
 							cti.id, allocatedElements, cti.numOfElements, (cti.numOfElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
 					fflush(stdout);
 				#endif
@@ -245,14 +244,14 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 				cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));
 				cce();
 
-				#if DEBUG >=2
-					printf("ComputeThread %d %d: deviceResults = 0x%x\n", rank, cti.id, deviceResults);
+				#ifdef DBG_MEMORY
+					printf("[%d] ComputeThread %d: deviceResults = 0x%x\n", rank, cti.id, deviceResults);
 				#endif
 			}
 
-			//
-			// Calculate the results
-			//
+			/*****************************************************************
+			******************** Calculate the results ***********************
+			******************************************************************/
 			// If GPU...
 			if (cti.id > -1) {
 
@@ -289,8 +288,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					// Queue the memcpy in stream[i]
 					cudaMemcpyAsync(&cti.results[skip], &deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, streams[i]);
 
-					#if DEBUG >= 2
-					printf("ComputeThread %d %d: Queueing %d elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%d\n", rank,
+					#ifdef DBG_QUEUE
+						printf("[%d] ComputeThread %d: Queueing %d elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%d\n", rank,
 								cti.id, elementsPerStream, i, gpuThreads, numOfBlocks, blockSize, skip);
 					#endif
 
@@ -314,11 +313,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 			}
 
-			#if DEBUG >= 2
-				printf("ComputeThread %d %d: Finished work\n", rank, cti.id);
-			#endif
-			#if DEBUG >= 4
-				printf("ComputeThread %d %d: Results are: ", rank, cti.id);
+			#ifdef DBG_RESULTS
+				printf("[%d] ComputeThread %d: Results are: ", rank, cti.id);
 				for (int i = 0; i < cti.numOfElements; i++) {
 					printf("%f ", cti.results[i]);
 				}

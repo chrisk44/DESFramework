@@ -33,15 +33,18 @@
 #define DATA_TYPE double
 #define RESULT_MPI_TYPE MPI_FLOAT
 
-// 0: Only errors
-// 1: Processes steps
-// 2: Processes steps details
-// 3: Data transfers
-// 4: Data calculations
-#define DEBUG 2
+// Debugging
+#define DBG_START_STOP      // Messages about starting/stopping processes and threads
+#define DBG_QUEUE           // Messeges about queueing work (coordinator->worker threads, worker->gpu streams)
+// #define DBG_MPI_STEPS       // Messeges after each MPI step
+// #define DBG_RATIO           // Messeges about changes in ratios (masterProcess and coordinatorThread)
+// #define DBG_DATA            // Messeges about the exact data being assigned (start points)
+#define DBG_MEMORY          // Messeges about memory management (addresses, reallocations)
+// #define DBG_RESULTS         // Messeges with the exact results being passed around
+#define DBG_SNH             // Should not happen
 
 // MPI
-#define RECV_SLEEP_MS 1
+#define RECV_SLEEP_MS 1     // Time in ms to sleep between checking for data in MPI_Recv
 #define TAG_READY 0
 #define TAG_DATA_COUNT 1
 #define TAG_DATA 2
@@ -60,10 +63,11 @@ public:
 };
 
 class Stopwatch{
-    // Measures time is nano seconds
 private:
     timespec t1, t2;
-    bool started = false, stopped = false;
+    #ifdef DBG_SNH
+        bool started = false, stopped = false;
+    #endif
 
 public:
     void start();
@@ -126,7 +130,6 @@ struct ComputeThreadInfo{
     sem_t semData;
     sem_t* semResults;
 
-    // Data distribution
     Stopwatch stopwatch;
     float ratio;
 };

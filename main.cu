@@ -34,7 +34,7 @@ int main(int argc, char** argv){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.processingType = TYPE_CPU;
+    parameters.processingType = TYPE_BOTH;
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
     // Benchmark configuration

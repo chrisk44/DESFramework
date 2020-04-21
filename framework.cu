@@ -8,18 +8,18 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 
 	// Verify parameters
 	if (parameters.D == 0 || parameters.D>MAX_DIMENSIONS) {
-		cout << "[E] Dimension must be between 1 and " << MAX_DIMENSIONS << endl;
+		cout << "[Init] [E] Dimension must be between 1 and " << MAX_DIMENSIONS << endl;
 		return;
 	}
 
 	for (i = 0; i < parameters.D; i++) {
 		if (limits[i].lowerLimit > limits[i].upperLimit) {
-			cout << "[E] Limits for dimension " << i << ": Lower limit can't be higher than upper limit" << endl;
+			cout << "[Init] [E] Limits for dimension " << i << ": Lower limit can't be higher than upper limit" << endl;
 			return;
 		}
 
 		if (limits[i].N == 0) {
-			cout << "[E] Limits for dimension " << i << ": N must be > 0" << endl;
+			cout << "[Init] [E] Limits for dimension " << i << ": N must be > 0" << endl;
 			return;
 		}
 	}
@@ -100,16 +100,16 @@ void ParallelFramework::masterProcess() {
 
 	while (totalReceived < totalElements || finished < numOfSlaves) {
 		// Receive request from any worker thread
-		#if DEBUG >= 3
-			printf("Master %d: Waiting for signal...\n", rank);
+		#ifdef DBG_MPI_STEPS
+			printf("[%d] Master: Waiting for signal...\n", rank);
 		#endif
 		fflush(stdout);
 
 		MMPI_Recv(nullptr, 0, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 		mpiSource = status.MPI_SOURCE;
 
-		#if DEBUG >= 3
-			printf("Master %d: Received %d from %d\n", rank, status.MPI_TAG, mpiSource);
+		#ifdef DBG_MPI_STEPS
+			printf("[%d] Master: Received %d from %d\n", rank, status.MPI_TAG, mpiSource);
 		#endif
 
 		switch(status.MPI_TAG){
@@ -122,11 +122,11 @@ void ParallelFramework::masterProcess() {
 				getDataChunk(min((int)(pinfo.ratio * parameters->batchSize), (int)pinfo.maxBatchSize), tmpToCalculate, &tmpNumOfElements);
 				pinfo.computingIndex = getIndexFromIndices(tmpToCalculate);
 
-				#if DEBUG >= 2
-					printf("Master %d: Sending %d elements to %d with index %d\n", rank, tmpNumOfElements, mpiSource, pinfo.computingIndex);
+				#ifdef DBG_MPI_STEPS
+					printf("[%d] Master: Sending %d elements to %d with index %d\n", rank, tmpNumOfElements, mpiSource, pinfo.computingIndex);
 				#endif
-				#if DEBUG >= 3
-					printf("Master %d: Sending data to %d: ", rank, mpiSource);
+				#ifdef DBG_DATA
+					printf("[%d] Master: Sending data to %d: ", rank, mpiSource);
 					for (unsigned int i = 0; i < parameters->D; i++) {
 						printf("%d ", tmpToCalculate[i]);
 					}
@@ -149,11 +149,11 @@ void ParallelFramework::masterProcess() {
 				// Find the length of the results
 				MPI_Get_count(&status, RESULT_MPI_TYPE, &tmpNumOfElements);	// This is equal to pinfo.assignedElements
 
-				#if DEBUG >= 3
-					printf("Master %d: Saving %ld results from slave %d to results[%ld]...\n", rank, tmpNumOfElements, mpiSource, pinfo.computingIndex);
+				#ifdef DBG_MPI_STEPS
+					printf("[%d] Master: Saving %ld results from slave %d to results[%ld]...\n", rank, tmpNumOfElements, mpiSource, pinfo.computingIndex);
 				#endif
-				#if DEBUG >= 4
-					printf("Master %d: Saving tmpResults: ", rank);
+				#ifdef DBG_RESULTS
+					printf("[%d] Master: Saving tmpResults: ", rank);
 					for (int i = 0; i < tmpNumOfElements; i++) {
 						printf("%f ", tmpResults[i]);
 					}
@@ -171,7 +171,7 @@ void ParallelFramework::masterProcess() {
 
 				// Print benchmark results
 				if (parameters->benchmark) {
-					printf("Master %d: Slave %d benchmark: %d elements, %f ms\n", rank, mpiSource, pinfo.assignedElements, pinfo.stopwatch.getMsec());
+					printf("[%d] Master: Slave %d benchmark: %d elements, %f ms\n", rank, mpiSource, pinfo.assignedElements, pinfo.stopwatch.getMsec());
 				}
 
 				// Check other scores and calculate the sum
@@ -190,13 +190,13 @@ void ParallelFramework::masterProcess() {
 				if(totalScore > 0){
 					for(int i=0; i<numOfSlaves; i++){
 						slaveProcessInfo[i].ratio = slaveProcessInfo[i].lastScore / totalScore;
-						#if DEBUG >= 2
-							printf("Master %d: Adjusting slave %d ratio = %f\n", rank, slaveProcessInfo[i].id, slaveProcessInfo[i].ratio);
+						#ifdef DBG_RATIO
+							printf("[%d] Master: Adjusting slave %d ratio = %f\n", rank, slaveProcessInfo[i].id, slaveProcessInfo[i].ratio);
 						#endif
 					}
 				}else{
-					#if DEBUG >= 2
-						printf("Master %d: Skipping ratio adjustment\n", rank);
+					#ifdef DBG_RATIO
+						printf("[%d] Master: Skipping ratio adjustment\n", rank);
 					#endif
 				}
 
@@ -211,12 +211,12 @@ void ParallelFramework::masterProcess() {
 				break;
 
 			case TAG_EXITING:
-				#if DEBUG >= 2
-					printf("Master %d: Slave %d exiting\n", rank, mpiSource);
+				#ifdef DBG_MPI_STEPS
+					printf("[%d] Master: Slave %d exiting\n", rank, mpiSource);
 				#endif
 
 				if(pinfo.assignedElements != 0){
-					printf("[E] Master %d: Slave %d exited with %d assigned elements!!\n", rank, mpiSource, pinfo.assignedElements);
+					printf("[%d] [E] Master: Slave %d exited with %d assigned elements!!\n", rank, mpiSource, pinfo.assignedElements);
 				}
 
 				pinfo.computingIndex = totalElements;
@@ -247,14 +247,14 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 	RESULT_TYPE* localResults = nullptr;
 	MPI_Status status;
 
-	#if DEBUG >= 2
-		printf("Coordinator %d: Max batch size: %d\n", rank, maxBatchSize);
+	#ifdef DBG_START_STOP
+		printf("[%d] Coordinator: Max batch size: %d\n", rank, maxBatchSize);
 	#endif
 
 	while(true){
 		// Send READY signal to master
-		#if DEBUG >= 3
-			printf("Coordinator %d: Sending READY...\n", rank);
+		#ifdef DBG_MPI_STEPS
+			printf("[%d] Coordinator: Sending READY...\n", rank);
 		#endif
 		MPI_Send(nullptr, 0, MPI_INT, 0, TAG_READY, MPI_COMM_WORLD);
 		MPI_Send(&maxBatchSize, 1, MPI_UNSIGNED_LONG, 0, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD);
@@ -263,13 +263,14 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		MMPI_Recv(&numOfElements, 1, MPI_INT, 0, TAG_DATA_COUNT, MPI_COMM_WORLD, &status);
 		MMPI_Recv(startPointIdx, parameters->D, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, &status);
 
-		#if DEBUG >= 4
-			printf("Coordinator %d: Received %d elements starting at: ", rank, numOfElements);
+		#ifdef DBG_DATA
+			printf("[%d] Coordinator: Received %d elements starting at: ", rank, numOfElements);
 			for(int i=0; i<parameters->D; i++)
 				printf("%ld ", startPointIdx[i]);
 			printf("\n");
-		#elif DEBUG >= 2
-			printf("Coordinator %d: Received %d elements\n", rank, numOfElements);
+		#endif
+		#ifdef DBG_MPI_STEPS
+			printf("[%d] Coordinator: Received %d elements\n", rank, numOfElements);
 		#endif
 
 		// If no results, break
@@ -278,16 +279,16 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 
 		// Make sure we have enough allocated memory for localResults
 		if(numOfElements > allocatedElements){
-			#if DEBUG >= 3
-				printf("Coordinator %d: Allocating more memory for localResults: %d (0x%x) -> ", rank, allocatedElements, localResults);
+			#ifdef DBG_MEMORY
+				printf("[%d] Coordinator: Allocating more memory for localResults: %d (0x%x) -> ", rank, allocatedElements, localResults);
 			#endif
 
 			allocatedElements = numOfElements;
-			// if(localResults != nullptr) cudaFreeHost(localResults);
+			// if(localResults != nullptr) cudaFreeHost(localResults);		// TODO: This causes a problem when running without GPU
 			// cudaHostAlloc(&localResults, allocatedElements * sizeof(RESULT_TYPE), cudaHostAllocPortable);
 			localResults = (RESULT_TYPE*) realloc(localResults, allocatedElements * sizeof(RESULT_TYPE));
 
-			#if DEBUG >= 3
+			#ifdef DBG_MEMORY
 				printf("%d (0x%x)\n", allocatedElements, localResults);
 			#endif
 		}
@@ -335,8 +336,8 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 				cti[i].results = cti[i-1].results + cti[i-1].numOfElements;
 			}
 
-			#if DEBUG >= 2
-				printf("Coordinator %d: Thread %d -> Assigning %d elements starting at: ", rank, i, cti[i].numOfElements);
+			#ifdef DBG_QUEUE
+				printf("[%d] Coordinator: Thread %d -> Assigning %d elements starting at: ", rank, i, cti[i].numOfElements);
 				for(int j=0; j < (parameters->D); j++){
 					printf("%ld ", cti[i].startPointIdx[j]);
 				}
@@ -344,7 +345,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 			#endif
 
 			if(tmp!=0){
-				printf("[E] Coordinator %d: addToIdxVector for thread %d returned overflow = %d\n", rank, i, tmp);
+				printf("[%d] [E] Coordinator: addToIdxVector for thread %d returned overflow = %d\n", rank, i, tmp);
 				break;
 			}
 		}
@@ -354,8 +355,8 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 			sem_post(&cti[i].semData);
 		}
 
-		#if DEBUG >= 3
-			printf("Coordinator %d: Waiting for results...\n", rank);
+		#ifdef DBG_MPI_STEPS
+			printf("[%d] Coordinator: Waiting for results...\n", rank);
 		#endif
 		// Wait for all worker threads to finish their work
 		for(int i=0; i<numOfThreads; i++){
@@ -372,7 +373,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 				float totalScore = 0;
 				for(int i=0; i<numOfThreads; i++){
 					if(parameters->benchmark){
-						printf("Coordinator %d: Thread %d time: %f ms\n", rank, cti[i].id, cti[i].stopwatch.getMsec());
+						printf("[%d] Coordinator: Thread %d time: %f ms\n", rank, cti[i].id, cti[i].stopwatch.getMsec());
 					}
 
 					tmpScore = cti[i].numOfElements / cti[i].stopwatch.getMsec();
@@ -389,12 +390,12 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 					for(int i=0; i<numOfThreads; i++){
 						cti[i].ratio = cti[i].numOfElements / (totalScore * cti[i].stopwatch.getMsec());
 
-						#if DEBUG >= 3
-							printf("Coordinator %d: Adjusting thread %d ratio to %f\n", rank, cti[i].id, cti[i].ratio);
+						#ifdef DBG_RATIO
+							printf("[%d] Coordinator: Adjusting thread %d ratio to %f\n", rank, cti[i].id, cti[i].ratio);
 						#endif
 					}
 				}else{
-					printf("[E] Coordinator %d: Got negative time, skipping ratio correction\n", rank);
+					printf("[%d] [E] Coordinator: Got negative time, skipping ratio correction\n", rank);
 				}
 
 				// Reset the stopwatches
@@ -403,8 +404,8 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 
 			}else{
 				// Send all results to master
-				#if DEBUG >= 2
-					printf("Coordinator %d: Sending data to master...\n", rank);
+				#ifdef DBG_MPI_STEPS
+					printf("[%d] Coordinator: Sending data to master...\n", rank);
 				#endif
 				MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
 				MPI_Send(localResults, numOfElements, RESULT_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
@@ -455,7 +456,7 @@ void ParallelFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst
 
 	for (i = 0; i < parameters->D; i++) {
 		if (point[i] < limits[i].lowerLimit || point[i] >= limits[i].upperLimit) {
-			cout << "Result query for out-of-bounds point" << endl;
+			printf("Result query for out-of-bounds point\n");
 			return;
 		}
 
