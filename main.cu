@@ -34,22 +34,22 @@ int main(int argc, char** argv){
 
     // Create the parameters struct
     parameters.D = 2;
-    parameters.processingType = TYPE_BOTH;
+    parameters.processingType = TYPE_CPU;
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
     // Benchmark configuration
-    parameters.batchSize = 5000000;
-    parameters.dynamicBatchSize = true;
-    parameters.benchmark = true;
-    limits[0] = Limit { 0, 10, 5000000 };
-    limits[1] = Limit { -1e05, 1e05, 3000 };
+    // parameters.batchSize = 5000000;
+    // parameters.dynamicBatchSize = true;
+    // parameters.benchmark = true;
+    // limits[0] = Limit { 0, 10, 5000000 };
+    // limits[1] = Limit { -1e05, 1e05, 3000 };
 
     // Results test configuration
-    // parameters.batchSize = 5000;
-    // parameters.dynamicBatchSize = true;
-    // parameters.benchmark = false;
-    // limits[0] = Limit { 0, 10, 50000 };
-    // limits[1] = Limit { -1e05, 1e05, 3000 };
+    parameters.batchSize = 20000000;
+    parameters.dynamicBatchSize = true;
+    parameters.benchmark = false;
+    limits[0] = Limit { 0, 10, 50000 };
+    limits[1] = Limit { -1e05, 1e05, 3000 };
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);

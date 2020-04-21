@@ -22,12 +22,15 @@ private:
 
 	// Runtime variables
 	unsigned long* idxSteps = NULL;			// Index steps for each dimension
-	RESULT_TYPE* results = NULL;			// An array of N0 * N1 * ... * N(D-1)
+	RESULT_TYPE* finalResults = NULL;		// An array of N0 * N1 * ... * N(D-1)
 	bool valid = false;
 	unsigned long* toSendVector = NULL;		// An array of D elements, where every entry shows the next element of that dimension to be dispatched
 	unsigned long totalSent = 0;			// Total elements that have been sent for processing
 	unsigned long totalReceived = 0;		// TOtal elements that have been calculated and returned
 	unsigned long totalElements = 0;		// Total elements
+
+	// MPI
+	int rank;
 
 public:
 	ParallelFramework(Limit* limits, ParallelFrameworkParameters& parameters);
@@ -43,7 +46,7 @@ public:
 
 private:
 	void masterProcess();
-	void coordinatorThread(ProcessingThreadInfo* pti, int numOfThreads);
+	void coordinatorThread(ComputeThreadInfo* cti, int numOfThreads);
 	void getDataChunk(unsigned long maxBatchSize, unsigned long* toCalculate, int *numOfElements);
 	void addToIdxVector(unsigned long* start, unsigned long* result, int num, int* overflow);
 
@@ -51,27 +54,26 @@ private:
 	void slaveProcess();
 
 	template<class ImplementedModel>
-	void computeThread(ProcessingThreadInfo& pti);
+	void computeThread(ComputeThreadInfo& cti);
 };
 
 template<class ImplementedModel>
 int ParallelFramework::run() {
 	// Initialize MPI
-	int rank;
 	MPI_Init(nullptr, nullptr);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
 	if(rank == 0){
 
-		printf("Master process starting\n");
+		printf("Master %d process starting\n", rank);
 		masterProcess();
-		printf("Master process finished\n");
+		printf("Master %d process finished\n", rank);
 
 	}else{
 
-		printf("Slave process starting\n");
+		printf("Slave %d process starting\n", rank);
 		slaveProcess<ImplementedModel>();
-		printf("Slave process finished\n");
+		printf("Slave %d process finished\n", rank);
 
 	}
 
@@ -88,7 +90,9 @@ int ParallelFramework::run() {
 
 template<class ImplementedModel>
 void ParallelFramework::slaveProcess() {
-	// Calculate number of threads (#GPUs + 1CPU)
+	/*******************************************************************
+	 ********* Calculate number of worker threads (#GPUs + 1CPU) *******
+	********************************************************************/
 	int numOfThreads = 0;
 
 	if(parameters->processingType != TYPE_CPU)
@@ -98,53 +102,60 @@ void ParallelFramework::slaveProcess() {
 		numOfThreads++;
 
 	if(numOfThreads == 0){
-		printf("[E] SlaveProcess: numOfThreads is 0\n");
+		printf("[E] SlaveProcess %d: numOfThreads is 0\n", rank);
 		return;
 	}
 
+
+	/*******************************************************************
+	 ********************* Initialization ******************************
+	********************************************************************/
 	sem_t semResults;
 	sem_init(&semResults, 0, 0);
 
-	ProcessingThreadInfo* PTIs = new ProcessingThreadInfo[numOfThreads];
-
-	// Initialize PTIs
+	ComputeThreadInfo* computeThreadInfo = new ComputeThreadInfo[numOfThreads];
 	for(int i=0; i<numOfThreads; i++){
-
-		sem_init(&PTIs[i].semData, 0, 0);
-		PTIs[i].semResults = &semResults;
-		PTIs[i].results = nullptr;
-		PTIs[i].startPointIdx = new unsigned long[parameters->D];
-		PTIs[i].ratio = 0.5;
+		sem_init(&computeThreadInfo[i].semData, 0, 0);
+		computeThreadInfo[i].semResults = &semResults;
+		computeThreadInfo[i].results = nullptr;
+		computeThreadInfo[i].startPointIdx = new unsigned long[parameters->D];
+		computeThreadInfo[i].ratio = (float)1/numOfThreads;
+		computeThreadInfo[i].stopwatch.reset();
 	}
 
 	#if DEBUG >= 1
-		printf("SlaveProcess: Spawning %d worker threads...\n", numOfThreads);
+		printf("SlaveProcess %d: Spawning %d worker threads...\n", rank, numOfThreads);
 	#endif
 
-	#pragma omp parallel num_threads(numOfThreads + 1) shared(PTIs) 	// +1 thread to handle the communication with masterProcess
+	/*******************************************************************
+	 ************** Launch coordinator and worker threads **************
+	********************************************************************/
+	#pragma omp parallel num_threads(numOfThreads + 1) shared(computeThreadInfo) 	// +1 thread to handle the communication with masterProcess
 	{
 		int tid = omp_get_thread_num();
 		if(tid == 0){
-			coordinatorThread(PTIs, omp_get_num_threads()-1);
+			coordinatorThread(computeThreadInfo, omp_get_num_threads()-1);
 		}else{
 			// Calculate id: -1 -> CPU, 0+ -> GPU[id]
-			PTIs[tid-1].id = tid - (parameters->processingType == TYPE_GPU ? 1 : 2);
+			computeThreadInfo[tid-1].id = tid - (parameters->processingType == TYPE_GPU ? 1 : 2);
 
-			computeThread<ImplementedModel>(PTIs[tid - 1]);
+			computeThread<ImplementedModel>(computeThreadInfo[tid - 1]);
 		}
 	}
 
-	// Free resources
-	for(int i=0; i<numOfThreads; i++){
-		sem_destroy(&PTIs[i].semData);
-		delete[] PTIs[i].startPointIdx;
-	}
-
+	/*******************************************************************
+	 **************************** Finalize *****************************
+	********************************************************************/
 	sem_destroy(&semResults);
+	for(int i=0; i<numOfThreads; i++){
+		sem_destroy(&computeThreadInfo[i].semData);
+		delete[] computeThreadInfo[i].startPointIdx;
+	}
+	delete[] computeThreadInfo;
 }
 
 template<class ImplementedModel>
-void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
+void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 	// GPU Memory
 	ImplementedModel** deviceModelAddress;	// GPU Memory to save the address of the 'Model' object on device
@@ -154,14 +165,16 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 
 	// GPU Runtime
 	cudaStream_t streams[NUM_OF_STREAMS];
-	int blockSize;							// Size of thread blocks
-	int numOfBlocks;						// Number of blocks
 	int allocatedElements = 500;
 
+	/*******************************************************************
+	 ************************ Initialization ***************************
+	********************************************************************/
+
 	// Initialize device
-	if (pti.id > -1) {
+	if (cti.id > -1) {
 		// Select gpu[id]
-		cudaSetDevice(pti.id);
+		cudaSetDevice(cti.id);
 
 		// Create streams
 		for(int i=0; i<NUM_OF_STREAMS; i++){
@@ -182,40 +195,49 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 		cudaMemcpy(deviceLimits, limits, parameters->D * sizeof(Limit), cudaMemcpyHostToDevice);	cce();
 
 		#if DEBUG > 2
-			printf("ComputeThread %d: deviceModelAddress: 0x%x\n", pti.id, (void*) deviceModelAddress);
-			printf("ComputeThread %d: deviceResults: 0x%x\n", pti.id, (void*) deviceResults);
-			printf("ComputeThread %d: deviceStartingPointIdx: 0x%x\n", pti.id, (void*) deviceStartingPointIdx);
-			printf("ComputeThread %d: deviceLimits: 0x%x\n", pti.id, (void*) deviceLimits);
+			printf("ComputeThread %d %d: deviceModelAddress: 0x%x\n", rank, cti.id, (void*) deviceModelAddress);
+			printf("ComputeThread %d %d: deviceResults: 0x%x\n", rank, cti.id, (void*) deviceResults);
+			printf("ComputeThread %d %d: deviceStartingPointIdx: 0x%x\n", rank, cti.id, (void*) deviceStartingPointIdx);
+			printf("ComputeThread %d %d: deviceLimits: 0x%x\n", rank, cti.id, (void*) deviceLimits);
 		#endif
 	}
 
+
+
+	/*******************************************************************
+	 ************************ Execution loop ***************************
+	********************************************************************/
+
 	while(true){
+		//
 		// Wait for data from coordinateThread
-		sem_wait(&pti.semData);
-		pti.stopwatch.start();
+		//
+		sem_wait(&cti.semData);
+		cti.stopwatch.start();
 
 		// If more data available...
-		if (pti.numOfElements > 0) {
+		if (cti.numOfElements > 0) {
 			#if DEBUG >= 1
-				printf("ComputeThread %d: Running for %d elements...\n", pti.id, pti.numOfElements);
-			#endif
-			#if DEBUG >= 3
-				printf("ComputeThread %d: Got %d elements starting from  ", pti.id, pti.numOfElements);
+				printf("ComputeThread %d %d: Running for %d elements...\n", rank, cti.id, cti.numOfElements);
+			#elif DEBUG >= 3
+				printf("ComputeThread %d %d: Got %d elements starting from  ", rank, cti.id, cti.numOfElements);
 				for (unsigned int i = 0; i < parameters->D; i++)
-					printf("%d ", pti.startPointIdx[i]);
+					printf("%d ", cti.startPointIdx[i]);
 				printf("\n");
 			#endif
 			fflush(stdout);
 
+			//
 			// If batchSize was increased, allocate more memory for the results
-			if (allocatedElements < pti.numOfElements && pti.id > -1) {
+			//
+			if (allocatedElements < cti.numOfElements && cti.id > -1) {
 				#if DEBUG >= 2
-					printf("ComputeThread %d: Allocating more GPU memory (%d -> %d elements, %ld MB)\n",
-							pti.id, allocatedElements, pti.numOfElements, (pti.numOfElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
+					printf("ComputeThread %d %d: Allocating more GPU memory (%d -> %d elements, %ld MB)\n", rank,
+							cti.id, allocatedElements, cti.numOfElements, (cti.numOfElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
 					fflush(stdout);
 				#endif
 
-				allocatedElements = pti.numOfElements;
+				allocatedElements = cti.numOfElements;
 
 				// Reallocate memory on device
 				cudaFree(deviceResults);
@@ -224,46 +246,52 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 				cce();
 
 				#if DEBUG >=2
-					printf("ComputeThread %d: deviceResults = 0x%x\n", pti.id, deviceResults);
+					printf("ComputeThread %d %d: deviceResults = 0x%x\n", rank, cti.id, deviceResults);
 				#endif
 			}
 
+			//
 			// Calculate the results
-			if (pti.id > -1) {
+			//
+			// If GPU...
+			if (cti.id > -1) {
 
 				// Copy starting point indices to device
-				cudaMemcpy(deviceStartingPointIdx, pti.startPointIdx, parameters->D * sizeof(unsigned long), cudaMemcpyHostToDevice);
+				cudaMemcpy(deviceStartingPointIdx, cti.startPointIdx, parameters->D * sizeof(unsigned long), cudaMemcpyHostToDevice);
 				cce();
 
-				int elementsPerStream = pti.numOfElements / NUM_OF_STREAMS;
+				// Divide the chunk to smaller chunks to scatter accross streams
+				int elementsPerStream = cti.numOfElements / NUM_OF_STREAMS;
 				bool onlyOne = false;
 				int skip = 0;
 				if(elementsPerStream == 0){
-					elementsPerStream = pti.numOfElements;
+					elementsPerStream = cti.numOfElements;
 					onlyOne = true;
 				}
+
+				// Queue the chunks to the streams
 				for(int i=0; i<NUM_OF_STREAMS; i++){
 					// Adjust elementsPerStream for last stream (= total-queued)
 					if(i == NUM_OF_STREAMS - 1){
-						elementsPerStream = pti.numOfElements - skip;
+						elementsPerStream = cti.numOfElements - skip;
 					}else{
-						elementsPerStream = min(elementsPerStream, pti.numOfElements - skip);
+						elementsPerStream = min(elementsPerStream, cti.numOfElements - skip);
 					}
 
-					// Queue the kernel in stream[i]
+					// Queue the kernel in stream[i] (each GPU thread gets COMPUTE_BATCH_SIZE elements to calculate)
 					int gpuThreads = (elementsPerStream + COMPUTE_BATCH_SIZE - 1) / COMPUTE_BATCH_SIZE;
-					blockSize = min(BLOCK_SIZE, gpuThreads);
-					numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
+					int blockSize = min(BLOCK_SIZE, gpuThreads);
+					int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
 					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, 0, streams[i]>>>(		// Note: Point at the start of deviceResults, because the offset is calculated in the kernel
 						deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, elementsPerStream, skip
 					);
 
 					// Queue the memcpy in stream[i]
-					cudaMemcpyAsync(&pti.results[skip], &deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, streams[i]);
+					cudaMemcpyAsync(&cti.results[skip], &deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, streams[i]);
 
 					#if DEBUG >= 2
-					printf("ComputeThread %d: Queueing %d elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%d\n",
-								pti.id, elementsPerStream, i, gpuThreads, numOfBlocks, blockSize, skip);
+					printf("ComputeThread %d %d: Queueing %d elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%d\n", rank,
+								cti.id, elementsPerStream, i, gpuThreads, numOfBlocks, blockSize, skip);
 					#endif
 
 					// Increase skip
@@ -282,34 +310,46 @@ void ParallelFramework::computeThread(ProcessingThreadInfo& pti){
 
 			} else {
 
-				cpu_kernel<ImplementedModel>(pti.startPointIdx, pti.results, limits, parameters->D, pti.numOfElements);
+				cpu_kernel<ImplementedModel>(cti.startPointIdx, cti.results, limits, parameters->D, cti.numOfElements);
 
 			}
 
+			#if DEBUG >= 2
+				printf("ComputeThread %d %d: Finished work\n", rank, cti.id);
+			#endif
 			#if DEBUG >= 4
-				printf("ComputeThread %d: Results are: ", pti.id);
-				for (int i = 0; i < pti.numOfElements; i++) {
-					printf("%f ", pti.results[i]);
+				printf("ComputeThread %d %d: Results are: ", rank, cti.id);
+				for (int i = 0; i < cti.numOfElements; i++) {
+					printf("%f ", cti.results[i]);
 				}
 				printf("\n");
 			#endif
 
-		} else if(pti.numOfElements == -1){
+		}
+		// else if computation is complete...
+		else if(cti.numOfElements == -1){
 			// No more data, exit
 			break;
-		}else{
+		}
+		// else 0 elements were assigned due to extremely low computation score (improbable)
+		else{
 			// Sleep 1 ms to prevent stopwatch time = 0
 			usleep(1000);
 		}
 
-		pti.stopwatch.stop();
+		// Stop the stopwatch
+		cti.stopwatch.stop();
 
 		// Let coordinatorThread know that the results are ready
-		sem_post(pti.semResults);
+		sem_post(cti.semResults);
 	}
 
+	/*******************************************************************
+	 *************************** Finalize ******************************
+	********************************************************************/
+
 	// Finalize GPU
-	if (pti.id > -1) {
+	if (cti.id > -1) {
 		// Delete the model object on the device
 		delete_model_kernel<ImplementedModel><<<1, 1 >>>(deviceModelAddress);
 		cce();

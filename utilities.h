@@ -19,10 +19,6 @@
   }                                                      \
 }
 
-// Slow start parameters for batch size increment
-#define SS_THRESHOLD 2000000000
-#define SS_STEP 1000
-
 // Memory parameters
 #define MEM_CPU_SPARE_BYTES 100*1024*1024
 #define MEM_GPU_SPARE_BYTES 100*1024*1024
@@ -38,11 +34,11 @@
 #define RESULT_MPI_TYPE MPI_FLOAT
 
 // 0: Only errors
-// 1: Processes start/stop
-// 2: Processes steps
+// 1: Processes steps
+// 2: Processes steps details
 // 3: Data transfers
 // 4: Data calculations
-#define DEBUG 1
+#define DEBUG 2
 
 // MPI
 #define RECV_SLEEP_MS 1
@@ -105,9 +101,10 @@ struct ParallelFrameworkParameters {
 	// ...
 };
 
-struct ComputeProcessStatus {
+struct SlaveProcessInfo {
     // These are allocated with malloc so they are not initialized
-    // Initialization should be done by masterThread()
+    // Initialization should be done by masterProcess()
+    int id;
 	unsigned long maxBatchSize;
 	unsigned long currentBatchSize;
     unsigned long computingIndex;
@@ -115,12 +112,14 @@ struct ComputeProcessStatus {
 	unsigned int jobsCompleted;
 	unsigned elementsCalculated;
 	bool finished;
-	bool initialized;
 
 	Stopwatch stopwatch;
+    float lastScore;
+    float lastAssignedElements;
+    float ratio;
 };
 
-struct ProcessingThreadInfo{
+struct ComputeThreadInfo{
     int id;
     int numOfElements;
     unsigned long* startPointIdx;
