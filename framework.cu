@@ -174,30 +174,32 @@ void ParallelFramework::masterProcess() {
 					printf("[%d] Master: Slave %d benchmark: %d elements, %f ms\n", rank, mpiSource, pinfo.assignedElements, pinfo.stopwatch.getMsec());
 				}
 
-				// Check other scores and calculate the sum
-				totalScore = 0;
-				for(int i=0; i<numOfSlaves; i++){
-					totalScore += slaveProcessInfo[i].lastScore;
-
-					if(slaveProcessInfo[i].lastScore < 0){
-						// Either score has not been set, or got negative time
-						totalScore = -1;
-						break;
-					}
-				}
-
-				// If all the processes have a real score (has been set and not negative)
-				if(totalScore > 0){
+				if(parameters->slaveBalancing && numOfSlaves > 1){
+					// Check other scores and calculate the sum
+					totalScore = 0;
 					for(int i=0; i<numOfSlaves; i++){
-						slaveProcessInfo[i].ratio = slaveProcessInfo[i].lastScore / totalScore;
+						totalScore += slaveProcessInfo[i].lastScore;
+
+						if(slaveProcessInfo[i].lastScore < 0){
+							// Either score has not been set, or got negative time
+							totalScore = -1;
+							break;
+						}
+					}
+
+					// If all the processes have a real score (has been set and not negative)
+					if(totalScore > 0){
+						for(int i=0; i<numOfSlaves; i++){
+							slaveProcessInfo[i].ratio = slaveProcessInfo[i].lastScore / totalScore;
+							#ifdef DBG_RATIO
+								printf("[%d] Master: Adjusting slave %d ratio = %f\n", rank, slaveProcessInfo[i].id, slaveProcessInfo[i].ratio);
+							#endif
+						}
+					}else{
 						#ifdef DBG_RATIO
-							printf("[%d] Master: Adjusting slave %d ratio = %f\n", rank, slaveProcessInfo[i].id, slaveProcessInfo[i].ratio);
+							printf("[%d] Master: Skipping ratio adjustment\n", rank);
 						#endif
 					}
-				}else{
-					#ifdef DBG_RATIO
-						printf("[%d] Master: Skipping ratio adjustment\n", rank);
-					#endif
 				}
 
 				// Reset pinfo
@@ -365,9 +367,9 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 
 		// Start 2 threads: 1 to adjust the ratios, one to send the results to master
 		omp_set_nested(1);
-		#pragma omp parallel num_threads(2)
+		#pragma omp parallel num_threads(parameters->threadBalancing && numOfThreads>1 ? 2 : 1)
 		{
-			if(omp_get_thread_num() == 0){
+			if(omp_get_thread_num() == 1){	// Will run if parameters->threadBalancing == true
 				// Calculate a score for each thread (=numOfElements/time)
 				float tmpScore;
 				float totalScore = 0;
@@ -398,10 +400,6 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 					printf("[%d] [E] Coordinator: Got negative time, skipping ratio correction\n", rank);
 				}
 
-				// Reset the stopwatches
-				for(int i=0; i<numOfThreads; i++)
-					cti[i].stopwatch.reset();
-
 			}else{
 				// Send all results to master
 				#ifdef DBG_MPI_STEPS
@@ -411,6 +409,10 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 				MPI_Send(localResults, numOfElements, RESULT_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
 			}
 		}
+
+		// Reset the stopwatches
+		for(int i=0; i<numOfThreads; i++)
+			cti[i].stopwatch.reset();
 	}
 
 	// Notify about exiting

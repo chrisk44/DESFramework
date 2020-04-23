@@ -38,16 +38,18 @@ int main(int argc, char** argv){
 
     // Create the limits for each dimension (lower is inclusive, upper is exclusive)
     // Benchmark configuration
-    // parameters.batchSize = 5000000;
-    // parameters.benchmark = true;
-    // limits[0] = Limit { 0, 10, 5000000 };
-    // limits[1] = Limit { -1e05, 1e05, 3000 };
+    parameters.batchSize = 500000000;
+    parameters.benchmark = true;
+    parameters.threadBalancing = true;
+    parameters.slaveBalancing = true;
+    limits[0] = Limit { 0, 10, 50000000 };
+    limits[1] = Limit { -1e05, 1e05, 3000 };
 
     // Results test configuration
-    parameters.batchSize = 20000000;
-    parameters.benchmark = false;
-    limits[0] = Limit { 0, 10, 50000 };
-    limits[1] = Limit { -1e05, 1e05, 3000 };
+    // parameters.batchSize = 20000000;
+    // parameters.benchmark = false;
+    // limits[0] = Limit { 0, 10, 50000 };
+    // limits[1] = Limit { -1e05, 1e05, 3000 };
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);
@@ -56,10 +58,15 @@ int main(int argc, char** argv){
     }
 
     // Start the computation
+    Stopwatch sw;
+    sw.reset();
+    sw.start();
     result = framework.run<MyModel>();
+    sw.stop();
     if (result != 0) {
         cout << "Error running the computation: " << result << endl;
     }
+    printf("[Main] Time: %f ms\n", sw.getMsec());
 
     fflush(stdout);
     if (!parameters.benchmark) {

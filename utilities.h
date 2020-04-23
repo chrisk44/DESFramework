@@ -35,11 +35,11 @@
 
 // Debugging
 #define DBG_START_STOP      // Messages about starting/stopping processes and threads
-#define DBG_QUEUE           // Messeges about queueing work (coordinator->worker threads, worker->gpu streams)
+// #define DBG_QUEUE           // Messeges about queueing work (coordinator->worker threads, worker->gpu streams)
 // #define DBG_MPI_STEPS       // Messeges after each MPI step
 // #define DBG_RATIO           // Messeges about changes in ratios (masterProcess and coordinatorThread)
 // #define DBG_DATA            // Messeges about the exact data being assigned (start points)
-#define DBG_MEMORY          // Messeges about memory management (addresses, reallocations)
+// #define DBG_MEMORY          // Messeges about memory management (addresses, reallocations)
 // #define DBG_RESULTS         // Messeges with the exact results being passed around
 #define DBG_SNH             // Should not happen
 
@@ -100,6 +100,8 @@ struct ParallelFrameworkParameters {
 	unsigned int D;
 	unsigned int batchSize;
 	ProcessingType processingType = TYPE_BOTH;
+    bool threadBalancing = true;
+    bool slaveBalancing = true;
 	bool benchmark = false;
 	// ...
 };
