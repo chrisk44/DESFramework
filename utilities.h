@@ -27,7 +27,7 @@
 #define BLOCK_SIZE 1024
 #define COMPUTE_BATCH_SIZE 500
 #define NUM_OF_STREAMS 8
-#define MAX_DIMENSIONS 10
+#define MAX_DIMENSIONS 10       // TODO: Calculate this accurately
 
 #define RESULT_TYPE float
 #define DATA_TYPE double

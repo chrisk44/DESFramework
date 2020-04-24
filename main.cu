@@ -36,20 +36,22 @@ int main(int argc, char** argv){
     parameters.D = 2;
     parameters.processingType = TYPE_BOTH;
 
-    // Create the limits for each dimension (lower is inclusive, upper is exclusive)
     // Benchmark configuration
-    parameters.batchSize = 500000000;
-    parameters.benchmark = true;
-    parameters.threadBalancing = true;
-    parameters.slaveBalancing = true;
-    limits[0] = Limit { 0, 10, 50000000 };
-    limits[1] = Limit { -1e05, 1e05, 3000 };
+    // parameters.batchSize = 500000000;
+    // parameters.benchmark = true;
+    // parameters.threadBalancing = true;
+    // parameters.slaveBalancing = true;
+
+    // Create the limits for each dimension (lower is inclusive, upper is exclusive)
+    // limits[0] = Limit { 0, 10, 50000000 };
+    // limits[1] = Limit { -1e05, 1e05, 3000 };
 
     // Results test configuration
-    // parameters.batchSize = 20000000;
-    // parameters.benchmark = false;
-    // limits[0] = Limit { 0, 10, 50000 };
-    // limits[1] = Limit { -1e05, 1e05, 3000 };
+    parameters.batchSize = 20000000;
+    parameters.benchmark = false;
+    // Create the limits for each dimension (lower is inclusive, upper is exclusive)
+    limits[0] = Limit { 0, 10, 50000 };
+    limits[1] = Limit { -1e05, 1e05, 3000 };
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);
@@ -73,7 +75,6 @@ int main(int argc, char** argv){
         // Test the outputs
 
         unsigned long linearIndex;
-        unsigned long indices[2];
         DATA_TYPE point[2];
         DATA_TYPE step[2] = {
             abs(limits[0].lowerLimit - limits[0].upperLimit) / limits[0].N,
@@ -91,8 +92,7 @@ int main(int argc, char** argv){
             for (unsigned int j = 0; j < limits[1].N; j++) {
                 point[1] = limits[1].lowerLimit + j * step[1];
 
-                framework.getIndicesFromPoint(point, indices);
-                linearIndex = framework.getIndexFromIndices(indices);
+                linearIndex = framework.getIndexFromPoint(point);
 
                 returned = framework.getResults()[linearIndex];
                 expected = MyModel().validate_cpu(point);

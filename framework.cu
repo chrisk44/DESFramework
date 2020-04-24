@@ -118,7 +118,6 @@ void ParallelFramework::masterProcess() {
 				MMPI_Recv(&pinfo.maxBatchSize, 1, MPI_UNSIGNED_LONG, mpiSource, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD, &status);
 
 				// Get next data batch to calculate
-				//getDataChunk(pinfo.currentBatchSize, tmpToCalculate, &tmpNumOfElements);
 				getDataChunk(min((int)(pinfo.ratio * parameters->batchSize), (int)pinfo.maxBatchSize), tmpToCalculate, &tmpNumOfElements);
 				pinfo.computingIndex = getIndexFromIndices(tmpToCalculate);
 
@@ -230,10 +229,6 @@ void ParallelFramework::masterProcess() {
 		}
 	}
 
-	// Notify all slave processes to finish
-	tmpNumOfElements = 0;
-	MPI_Bcast(&tmpNumOfElements, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
 	delete[] tmpResults;
 	delete[] tmpToCalculate;
 	delete[] slaveProcessInfo;
@@ -242,7 +237,7 @@ void ParallelFramework::masterProcess() {
 void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThreads){
 	sem_t* semResults = cti[0].semResults;
 
-	int numOfElements, tmp;
+	int numOfElements, carry;
 	unsigned long maxBatchSize = min(getDefaultCPUBatchSize(), getDefaultGPUBatchSize());
 	unsigned long *startPointIdx = new unsigned long[parameters->D];
 	unsigned long allocatedElements = 0;
@@ -322,7 +317,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 
 		// Assign work to the worker threads
 		for(int i=0; i<numOfThreads; i++){
-			tmp = 0;
+			carry = 0;
 
 			if(i==0){
 				// Set the starting point as the sessions starting point
@@ -332,7 +327,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 				cti[i].results = localResults;
 			}else{
 				// Set the starting point as the starting point of the previous thread + numOfElements of the previous thread
-				addToIdxVector(cti[i-1].startPointIdx, cti[i].startPointIdx, cti[i-1].numOfElements, &tmp);
+				addToIdxVector(cti[i-1].startPointIdx, cti[i].startPointIdx, cti[i-1].numOfElements, &carry);
 
 				// Set results as the results of the previous thread + numOfElements of the previous thread (compiler takes into account the size of RESULT_TYPE when adding an int)
 				cti[i].results = cti[i-1].results + cti[i-1].numOfElements;
@@ -346,8 +341,8 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 				printf(" with results at 0x%x\n", cti[i].results);
 			#endif
 
-			if(tmp!=0){
-				printf("[%d] [E] Coordinator: addToIdxVector for thread %d returned overflow = %d\n", rank, i, tmp);
+			if(carry!=0){
+				printf("[%d] [E] Coordinator: addToIdxVector for thread %d returned overflow = %d\n", rank, i, carry);
 				break;
 			}
 		}
@@ -475,6 +470,16 @@ long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) {
 		index += pointIdx[i] * idxSteps[i];
 	}
 
+	return index;
+}
+long ParallelFramework::getIndexFromPoint(DATA_TYPE* point){
+	unsigned long* indices = new unsigned long[parameters->D];
+	unsigned long index;
+
+	getIndicesFromPoint(point, indices);
+	index = getIndexFromIndices(indices);
+
+	delete[] indices;
 	return index;
 }
 

@@ -42,6 +42,7 @@ public:
 	RESULT_TYPE* getResults();
 	void getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst);
 	long getIndexFromIndices(unsigned long* pointIdx);
+	long getIndexFromPoint(DATA_TYPE* point);
 	bool isValid();
 
 private:
