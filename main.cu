@@ -9,17 +9,17 @@ using namespace std;
 
 class MyModel : public Model{
 public:
-    __host__ RESULT_TYPE validate_cpu(DATA_TYPE* point){
+    __host__ RESULT_TYPE validate_cpu(DATA_TYPE* point, void* dataPtr){
         DATA_TYPE x = point[0];
         DATA_TYPE y = point[1];
-        return sin(x) * sin(y) + pow(x, 2) + pow(y, 2) + x + y;
+        return sin(x) * sin(y) + pow(x, 2) + pow(y, 2) + x + y + *((int*)dataPtr);
         //return x + y;
     }
 
-    __device__ RESULT_TYPE validate_gpu(DATA_TYPE* point){
+    __device__ RESULT_TYPE validate_gpu(DATA_TYPE* point, void* dataPtr){
         DATA_TYPE x = point[0];
         DATA_TYPE y = point[1];
-        return sin(x) * sin(y) + pow(x, 2) + pow(y, 2) + x + y;
+        return sin(x) * sin(y) + pow(x, 2) + pow(y, 2) + x + y + *((int*)dataPtr);
         //return x + y;
     }
 
@@ -32,9 +32,13 @@ int main(int argc, char** argv){
     ParallelFrameworkParameters parameters;
     Limit limits[2];
 
+    int extraData = 1234;
+
     // Create the parameters struct
     parameters.D = 2;
     parameters.processingType = TYPE_BOTH;
+    parameters.dataPtr = &extraData;
+    parameters.dataSize = sizeof(extraData);
 
     // Benchmark configuration
     // parameters.batchSize = 500000000;
@@ -95,7 +99,7 @@ int main(int argc, char** argv){
                 linearIndex = framework.getIndexFromPoint(point);
 
                 returned = framework.getResults()[linearIndex];
-                expected = MyModel().validate_cpu(point);
+                expected = MyModel().validate_cpu(point, parameters.dataPtr);
 
                 absError = abs(returned - expected);
                 relError = absError == 0 ? 0 : abs(absError / max(abs(expected), abs(returned)));

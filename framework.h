@@ -163,6 +163,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 	RESULT_TYPE* deviceResults;				// GPU Memory for results
 	unsigned long* deviceStartingPointIdx;	// GPU Memory to store the start point indices
 	Limit* deviceLimits;					// GPU Memory to store the Limit structures
+	void* deviceDataPtr;					// GPU Memory to store any constant data
 
 	// GPU Runtime
 	cudaStream_t streams[NUM_OF_STREAMS];
@@ -188,18 +189,25 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));		cce();
 		cudaMalloc(&deviceStartingPointIdx, parameters->D * sizeof(unsigned long));	cce();
 		cudaMalloc(&deviceLimits, parameters->D * sizeof(Limit));					cce();
+		if(parameters->dataSize > 0){
+			cudaMalloc(&deviceDataPtr, parameters->dataSize);							cce();
+		}
 
 		// Instantiate the model object on the device, and write its address in 'deviceModelAddress' on the device
-		create_model_kernel<ImplementedModel><<< 1, 1 >>>(deviceModelAddress);	cce();
+		create_model_kernel<ImplementedModel><<< 1, 1 >>>(deviceModelAddress);		cce();
 
-		// Copy limits to device
+		// Copy limits and constant data to device
 		cudaMemcpy(deviceLimits, limits, parameters->D * sizeof(Limit), cudaMemcpyHostToDevice);	cce();
+		if(parameters->dataSize > 0){
+			cudaMemcpy(deviceDataPtr, parameters->dataPtr, parameters->dataSize, cudaMemcpyHostToDevice);	cce();
+		}
 
 		#ifdef DBG_MEMORY
 			printf("[%d] ComputeThread %d: deviceModelAddress: 0x%x\n", rank, cti.id, (void*) deviceModelAddress);
 			printf("[%d] ComputeThread %d: deviceResults: 0x%x\n", rank, cti.id, (void*) deviceResults);
 			printf("[%d] ComputeThread %d: deviceStartingPointIdx: 0x%x\n", rank, cti.id, (void*) deviceStartingPointIdx);
 			printf("[%d] ComputeThread %d: deviceLimits: 0x%x\n", rank, cti.id, (void*) deviceLimits);
+			printf("[%d] ComputeThread %d: deviceDataPtr: 0x%x\n", rank, cti.id, (void*) deviceDataPtr);
 		#endif
 	}
 
@@ -283,7 +291,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					int blockSize = min(BLOCK_SIZE, gpuThreads);
 					int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
 					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, 0, streams[i]>>>(		// Note: Point at the start of deviceResults, because the offset is calculated in the kernel
-						deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, elementsPerStream, skip
+						deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, elementsPerStream, skip, deviceDataPtr
 					);
 
 					// Queue the memcpy in stream[i]
@@ -310,7 +318,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 			} else {
 
-				cpu_kernel<ImplementedModel>(cti.startPointIdx, cti.results, limits, parameters->D, cti.numOfElements);
+				cpu_kernel<ImplementedModel>(cti.startPointIdx, cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr);
 
 			}
 
@@ -356,6 +364,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		cudaFree(deviceResults);			cce();
 		cudaFree(deviceStartingPointIdx);	cce();
 		cudaFree(deviceLimits);				cce();
+		cudaFree(deviceDataPtr);			cce();
 
 		// Make sure streams are finished and destroy them
 		for(int i=0;i<NUM_OF_STREAMS;i++){

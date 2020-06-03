@@ -22,7 +22,7 @@ __global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
 
 // CUDA kernel to run the computation
 template<class ImplementedModel>
-__global__ void validate_kernel(ImplementedModel** model, unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned int numOfElements, unsigned int offset) {
+__global__ void validate_kernel(ImplementedModel** model, unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned int numOfElements, unsigned int offset, void* dataPtr) {
 	unsigned int threadStart = offset + (((blockIdx.x * BLOCK_SIZE) + threadIdx.x) * COMPUTE_BATCH_SIZE);
 	unsigned int end = min(offset + numOfElements, threadStart + COMPUTE_BATCH_SIZE);
 
@@ -78,13 +78,13 @@ __global__ void validate_kernel(ImplementedModel** model, unsigned long* startin
 		}
 
 		// Run the validation function and save the result to the global memory
-		results[i] = (*model)->validate_gpu(point);
+		results[i] = (*model)->validate_gpu(point, dataPtr);
 	}
 }
 
 // CPU kernel to run the computation
 template<class ImplementedModel>
-void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfElements) {
+void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfElements, void* dataPtr) {
 	ImplementedModel model = ImplementedModel();
 
 	omp_set_nested(1);		// We are already in a parallel region since slaveProcess()
@@ -107,7 +107,7 @@ void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* li
 			}
 
 			// Run the validation function
-			results[j] = model.validate_cpu(point);
+			results[j] = model.validate_cpu(point, dataPtr);
 		}
 
 		delete[] point;

@@ -56,8 +56,8 @@
 class Model {
 public:
 	// float* point will be a D-dimension vector
-	__host__   virtual RESULT_TYPE validate_cpu(DATA_TYPE* point) = 0;
-	__device__ virtual RESULT_TYPE validate_gpu(DATA_TYPE* point) = 0;
+	__host__   virtual RESULT_TYPE validate_cpu(DATA_TYPE* point, void* dataPtr) = 0;
+	__device__ virtual RESULT_TYPE validate_gpu(DATA_TYPE* point, void* dataPtr) = 0;
 
 	virtual bool toBool() = 0;
 };
@@ -103,6 +103,8 @@ struct ParallelFrameworkParameters {
     bool threadBalancing = true;
     bool slaveBalancing = true;
 	bool benchmark = false;
+    void* dataPtr = nullptr;
+    unsigned long dataSize = 0;
 	// ...
 };
 
