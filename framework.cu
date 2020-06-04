@@ -36,9 +36,12 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 
 	totalSent = 0;
 	totalElements = (long)idxSteps[parameters.D - 1] * limits[parameters.D - 1].N;
-	if(! (parameters.benchmark))
-		finalResults = new RESULT_TYPE[totalElements];		// Uninitialized
-		// TODO: ^^ This really is a long story (memorywise)
+	if(! (parameters.benchmark)){
+		if(parameters.resultSaveType == SAVE_TYPE_ALL){
+			finalResults = new RESULT_TYPE[totalElements];		// Uninitialized
+			// TODO: ^^ This really is a long story (memorywise)
+		}// else listResults will be allocated through realloc when they are needed
+	}
 
 	toSendVector = new unsigned long[parameters.D];
 	for (i = 0; i < parameters.D; i++) {
@@ -60,6 +63,10 @@ ParallelFramework::~ParallelFramework() {
 	delete [] idxSteps;
 	delete [] finalResults;
 	delete [] toSendVector;
+	if(listResults != NULL){
+		free(listResults);
+		listResultsSaved = 0;
+	}
 	valid = false;
 }
 
@@ -79,10 +86,10 @@ void ParallelFramework::masterProcess() {
 	SlaveProcessInfo* slaveProcessInfo = new SlaveProcessInfo[numOfSlaves];
 	#define pinfo (slaveProcessInfo[mpiSource-1])
 
-	unsigned long allocatedElements = parameters->batchSize;				// Number of allocated elements for results
-	RESULT_TYPE* tmpResults = new RESULT_TYPE[allocatedElements];
+	RESULT_TYPE* tmpResults = new RESULT_TYPE[parameters->batchSize];
+	DATA_TYPE* tmpResultsList = new DATA_TYPE[parameters->batchSize * parameters->D];
 	unsigned long* tmpToCalculate = new unsigned long[parameters->D];
-	int tmpNumOfElements;	// This needs to be int because of MPI
+	int tmpNumOfElements, tmpNumOfPoints;	// These need to be int because of MPI
 
 	for(int i=0; i<numOfSlaves; i++){
 		// TODO: Add any more initializations
@@ -143,20 +150,46 @@ void ParallelFramework::masterProcess() {
 
 			case TAG_RESULTS:
 				// Receive the results
-				MMPI_Recv(tmpResults, pinfo.maxBatchSize, RESULT_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
+				if(parameters->resultSaveType == SAVE_TYPE_ALL){
+					MMPI_Recv(tmpResults, pinfo.maxBatchSize, RESULT_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
 
-				// Find the length of the results
-				MPI_Get_count(&status, RESULT_MPI_TYPE, &tmpNumOfElements);	// This is equal to pinfo.assignedElements
+					// Find the length of the results
+					MPI_Get_count(&status, RESULT_MPI_TYPE, &tmpNumOfElements);	// This is equal to pinfo.assignedElements
+				}else{
+					MMPI_Recv(tmpResultsList, pinfo.maxBatchSize * parameters->D, DATA_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
+
+					// Find the number of points in list
+					MPI_Get_count(&status, DATA_MPI_TYPE, &tmpNumOfPoints);
+					// MPI_Get_count returned the count of DATA_TYPE elements received, so divide with D to get the count of points
+					tmpNumOfPoints /= parameters->D;
+				}
+
 
 				#ifdef DBG_MPI_STEPS
-					printf("[%d] Master: Saving %ld results from slave %d to results[%ld]...\n", rank, tmpNumOfElements, mpiSource, pinfo.computingIndex);
+					if(parameters->resultSaveType == SAVE_TYPE_ALL)
+						printf("[%d] Master: Saving %ld results from slave %d to finalResults[%ld]...\n", rank, tmpNumOfElements, mpiSource, pinfo.computingIndex);
+					else
+						printf("[%d] Master: Saving %ld points from slave %d to listResults[%ld]...\n", rank, tmpNumOfPoints, mpiSource, listResultsSaved);
+
 				#endif
 				#ifdef DBG_RESULTS
-					printf("[%d] Master: Saving tmpResults: ", rank);
-					for (int i = 0; i < tmpNumOfElements; i++) {
-						printf("%f ", tmpResults[i]);
+					if(parameters->resultSaveType == SAVE_TYPE_ALL){
+						printf("[%d] Master: Saving tmpResults: ", rank);
+						for (int i = 0; i < tmpNumOfElements; i++) {
+							printf("%f ", tmpResults[i]);
+						}
+						printf(" at %d\n", pinfo.computingIndex);
+					}else{
+						printf("[%d] Master: Saving tmpResultsList: ", rank);
+						for (int i = 0; i < tmpNumOfPoints; i++){
+							printf("[");
+							for(int j=0; j<parameters->D; j++){
+								printf("%f,", tmpResultsList[i*parameters->D + j]);
+							}
+							printf("]");
+						}
+						printf(" at %d\n", listResultsSaved);
 					}
-					printf(" at %d\n", pinfo.computingIndex);
 				#endif
 
 				// Update pinfo
@@ -205,9 +238,19 @@ void ParallelFramework::masterProcess() {
 				pinfo.assignedElements = 0;
 				pinfo.stopwatch.reset();
 
-				// Copy the received results to finalResults
-				if( ! (parameters->benchmark))
-					memcpy(&finalResults[pinfo.computingIndex], tmpResults, tmpNumOfElements*sizeof(RESULT_TYPE));
+				// Copy the received results to finalResults or listResults
+				if( ! (parameters->benchmark)){
+					if(parameters->resultSaveType == SAVE_TYPE_ALL){
+						memcpy(&finalResults[pinfo.computingIndex], tmpResults, tmpNumOfElements*sizeof(RESULT_TYPE));
+					}else{
+						// Reallocate listResults
+						listResultsSaved += tmpNumOfPoints;
+						listResults = (DATA_TYPE*) realloc(listResults, listResultsSaved * parameters->D * sizeof(DATA_TYPE));
+
+						// Append the received data in listResults
+						memcpy(&listResults[(listResultsSaved - tmpNumOfPoints) * parameters->D], tmpResultsList, tmpNumOfPoints * parameters->D * sizeof(DATA_TYPE));
+					}
+				}
 
 				break;
 
@@ -234,7 +277,7 @@ void ParallelFramework::masterProcess() {
 	delete[] slaveProcessInfo;
 }
 
-void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThreads){
+void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThreads, Model* model){
 	sem_t* semResults = cti[0].semResults;
 
 	int numOfElements, carry;
@@ -400,8 +443,37 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 				#ifdef DBG_MPI_STEPS
 					printf("[%d] Coordinator: Sending data to master...\n", rank);
 				#endif
-				MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
-				MPI_Send(localResults, numOfElements, RESULT_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
+
+				if(parameters->resultSaveType == SAVE_TYPE_ALL){
+					MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
+					MPI_Send(localResults, numOfElements, RESULT_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
+				}else{
+					DATA_TYPE* tmpPoint = new DATA_TYPE[parameters->D];
+					DATA_TYPE* localResultsList = new DATA_TYPE[numOfElements * parameters->D];
+					if(localResultsList == NULL){
+						printf("[%d] Coordinator: Can't allocate memory for localResultsList\n", rank);
+						exit(-1);
+					}
+
+					// Create a list with all the points for which toBool(result) is true
+					long idx = 0;
+					for(int i=0; i<numOfElements; i++){
+						if(model->toBool(localResults[i])){
+							// Convert index to point
+							getPointFromIndex(getIndexFromIndices(startPointIdx) + i, tmpPoint);
+
+							// Append to list
+							memcpy(&localResultsList[idx], tmpPoint, parameters->D * sizeof(DATA_TYPE));
+							idx += parameters->D;
+						}
+					}
+
+					MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
+					MPI_Send(localResultsList, idx, DATA_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
+
+					delete [] tmpPoint;
+					delete [] localResultsList;
+				}
 			}
 		}
 
@@ -420,7 +492,6 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 	}
 
 	delete[] startPointIdx;
-	//cudaFreeHost(localResults);
 	free(localResults);
 }
 
@@ -447,6 +518,12 @@ void ParallelFramework::getDataChunk(unsigned long batchSize, unsigned long* toC
 
 RESULT_TYPE* ParallelFramework::getResults() {
 	return finalResults;
+}
+DATA_TYPE* ParallelFramework::getList(int* length){
+	if(length != nullptr)
+		*length = listResultsSaved;
+
+	return listResults;
 }
 void ParallelFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst) {
 	unsigned int i;
@@ -481,6 +558,14 @@ long ParallelFramework::getIndexFromPoint(DATA_TYPE* point){
 
 	delete[] indices;
 	return index;
+}
+void ParallelFramework::getPointFromIndex(int index, DATA_TYPE* result){
+	for(int i=parameters->D - 1; i>=0; i--){
+		int currentIndex = index / idxSteps[i];
+		result[i] = limits[i].lowerLimit + currentIndex*limits[i].step;
+
+		index = index % idxSteps[i];
+	}
 }
 
 void ParallelFramework::addToIdxVector(unsigned long* start, unsigned long* result, int num, int* overflow){

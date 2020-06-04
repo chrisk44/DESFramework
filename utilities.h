@@ -32,6 +32,7 @@
 #define RESULT_TYPE float
 #define DATA_TYPE double
 #define RESULT_MPI_TYPE MPI_FLOAT
+#define DATA_MPI_TYPE MPI_DOUBLE
 
 // Debugging
 #define DBG_START_STOP      // Messages about starting/stopping processes and threads
@@ -59,7 +60,7 @@ public:
 	__host__   virtual RESULT_TYPE validate_cpu(DATA_TYPE* point, void* dataPtr) = 0;
 	__device__ virtual RESULT_TYPE validate_gpu(DATA_TYPE* point, void* dataPtr) = 0;
 
-	virtual bool toBool() = 0;
+	virtual bool toBool(RESULT_TYPE result) = 0;
 };
 
 class Stopwatch{
@@ -91,15 +92,21 @@ struct Limit {
 };
 
 enum ProcessingType {
-	TYPE_CPU,
-	TYPE_GPU,
-	TYPE_BOTH
+	PROCESSING_TYPE_CPU,
+	PROCESSING_TYPE_GPU,
+	PROCESSING_TYPE_BOTH
+};
+
+enum ResultSaveType {
+    SAVE_TYPE_ALL,
+    SAVE_TYPE_LIST
 };
 
 struct ParallelFrameworkParameters {
 	unsigned int D;
 	unsigned int batchSize;
-	ProcessingType processingType = TYPE_BOTH;
+	ProcessingType processingType = PROCESSING_TYPE_BOTH;
+    ResultSaveType resultSaveType = SAVE_TYPE_ALL;
     bool threadBalancing = true;
     bool slaveBalancing = true;
 	bool benchmark = false;

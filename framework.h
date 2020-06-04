@@ -23,6 +23,8 @@ private:
 	// Runtime variables
 	unsigned long* idxSteps = NULL;			// Index steps for each dimension
 	RESULT_TYPE* finalResults = NULL;		// An array of N0 * N1 * ... * N(D-1)
+	DATA_TYPE* listResults = NULL;			// An array of points for which the validation function has returned non-zero value
+	unsigned long listResultsSaved = 0;		// Number of points saved in listResults
 	bool valid = false;
 	unsigned long* toSendVector = NULL;		// An array of D elements, where every entry shows the next element of that dimension to be dispatched
 	unsigned long totalSent = 0;			// Total elements that have been sent for processing
@@ -40,6 +42,7 @@ public:
 	int run();
 
 	RESULT_TYPE* getResults();
+	DATA_TYPE* getList(int* length);
 	void getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst);
 	long getIndexFromIndices(unsigned long* pointIdx);
 	long getIndexFromPoint(DATA_TYPE* point);
@@ -47,9 +50,10 @@ public:
 
 private:
 	void masterProcess();
-	void coordinatorThread(ComputeThreadInfo* cti, int numOfThreads);
+	void coordinatorThread(ComputeThreadInfo* cti, int numOfThreads, Model* model);
 	void getDataChunk(unsigned long maxBatchSize, unsigned long* toCalculate, int *numOfElements);
 	void addToIdxVector(unsigned long* start, unsigned long* result, int num, int* overflow);
+	void getPointFromIndex(int index, DATA_TYPE* result);
 
 	template<class ImplementedModel>
 	void slaveProcess();
@@ -96,10 +100,10 @@ void ParallelFramework::slaveProcess() {
 	********************************************************************/
 	int numOfThreads = 0;
 
-	if(parameters->processingType != TYPE_CPU)
+	if(parameters->processingType != PROCESSING_TYPE_CPU)
 		cudaGetDeviceCount(&numOfThreads);
 
-	if(parameters->processingType != TYPE_GPU)
+	if(parameters->processingType != PROCESSING_TYPE_GPU)
 		numOfThreads++;
 
 	if(numOfThreads == 0){
@@ -124,6 +128,8 @@ void ParallelFramework::slaveProcess() {
 		computeThreadInfo[i].stopwatch.reset();
 	}
 
+	ImplementedModel model_p = ImplementedModel();
+
 	#ifdef DBG_START_STOP
 		printf("[%d] SlaveProcess: Spawning %d worker threads...\n", rank, numOfThreads);
 	#endif
@@ -135,10 +141,10 @@ void ParallelFramework::slaveProcess() {
 	{
 		int tid = omp_get_thread_num();
 		if(tid == 0){
-			coordinatorThread(computeThreadInfo, omp_get_num_threads()-1);
+			coordinatorThread(computeThreadInfo, omp_get_num_threads()-1, &model_p);
 		}else{
 			// Calculate id: -1 -> CPU, 0+ -> GPU[id]
-			computeThreadInfo[tid-1].id = tid - (parameters->processingType == TYPE_GPU ? 1 : 2);
+			computeThreadInfo[tid-1].id = tid - (parameters->processingType == PROCESSING_TYPE_GPU ? 1 : 2);
 
 			computeThread<ImplementedModel>(computeThreadInfo[tid - 1]);
 		}
