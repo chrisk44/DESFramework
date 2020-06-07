@@ -2,77 +2,60 @@
 #include <cstdlib>
 
 #include "framework.h"
+#include "mogi_model.h"
 
 #define RESULTS_THRESHOLD 1e-13
 
 using namespace std;
 
-class MyModel : public Model{
-public:
-    __host__ RESULT_TYPE validate_cpu(DATA_TYPE* point, void* dataPtr){
-        DATA_TYPE x = point[0];
-        DATA_TYPE y = point[1];
-        // return sin(x) * sin(y) + pow(x, 2) + pow(y, 2) + x + y + *((int*)dataPtr);
-        return x + y;
-    }
-
-    __device__ RESULT_TYPE validate_gpu(DATA_TYPE* point, void* dataPtr){
-        DATA_TYPE x = point[0];
-        DATA_TYPE y = point[1];
-        // return sin(x) * sin(y) + pow(x, 2) + pow(y, 2) + x + y + *((int*)dataPtr);
-        return x + y;
-    }
-
-    bool toBool(RESULT_TYPE result){
-        return result >= 8;
-    }
-};
-
 int main(int argc, char** argv){
     // Initialize framework
     int result = 0;
+
+    // Create the model's parameters struct (the model's input data)
+    // TBD: If the length of 'displacements' is known at compile time...
+    MogiParameters mogiParameters;
+    int displacementsLength = 10;
+    mogiParameters.stations = 1;
+    for(int i=0; i<displacementsLength; i++){
+        mogiParameters.displacements[i] = 0;
+    }
+
+    // // TBD: If the length of 'displacements is not known at compile time'...
+    // int displacementsLength = 10;        // <-- Determine this at runtime
+    // int stations = 2;                    // <-- Determine this at runtime
+    // float* modelDataPtr = (float*) malloc((displacementsLength+1) * sizeof(float));
+    // modelDataPtr[0] = stations;
+    // for(int i=0; i<displacementsLength; i++){
+    //     modelDataPtr[i+1] = 0;           // <-- Write at index i+1 because the first elements of the array is reserved for 'stations'
+    // }
+
+    // Create the framework's parameters struct
     ParallelFrameworkParameters parameters;
-    Limit limits[2];
-
-    int extraData = 1234;
-
-    // Create the parameters struct
     parameters.D = 2;
+    parameters.resultSaveType = SAVE_TYPE_LIST;
     parameters.processingType = PROCESSING_TYPE_BOTH;
-    parameters.dataPtr = &extraData;
-    parameters.dataSize = sizeof(extraData);
-
-    // Benchmark configuration
-    // parameters.resultSaveType = SAVE_TYPE_ALL;
-    // parameters.batchSize = 500000000;
-    // parameters.benchmark = true;
-    // parameters.threadBalancing = true;
-    // parameters.slaveBalancing = true;
-
-    // Create the limits for each dimension (lower is inclusive, upper is exclusive)
-    // limits[0] = Limit { 0, 10, 50000000 };
-    // limits[1] = Limit { -1e05, 1e05, 3000 };
-
-    // Results test configuration
-    parameters.resultSaveType = SAVE_TYPE_ALL;
-    parameters.batchSize = 20000000;
+    parameters.dataPtr = &mogiParameters;
+    parameters.dataSize = sizeof(mogiParameters);
+    // parameters.dataPtr = (void*) modelDataPtr;
+    // parameters.dataSize = (displacementsLength+1) * sizeof(float);
+    parameters.threadBalancing = true;
+    parameters.slaveBalancing = true;
     parameters.benchmark = false;
-    // Create the limits for each dimension (lower is inclusive, upper is exclusive)
-    limits[0] = Limit { 0, 10, 50000 };
-    limits[1] = Limit { -1e05, 1e05, 3000 };
+    parameters.batchSize = 20000000;
 
-    // Manual test configuration
-    // parameters.resultSaveType = SAVE_TYPE_LIST;
-    // parameters.batchSize = 200000;
-    // parameters.benchmark = false;
-    // // Create the limits for each dimension (lowe is inclusive, upper is exclusive)
-    // limits[0] = Limit { 0, 1, 10 };
-    // limits[1] = Limit { 0, 10, 10 };
+    // Create the limits for each dimension (lower is inclusive, upper is exclusive)
+    Limit limits[4];
+    limits[0] = Limit { 0, 1, 50000 };
+    limits[1] = Limit { 0, 1, 50000 };
+    limits[2] = Limit { 0, 1, 50000 };
+    limits[3] = Limit { 0, 1, 50000 };
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);
     if (! framework.isValid()) {
         cout << "Error initializing framework: " << result << endl;
+        exit(-1);
     }
 
     // Start the computation
@@ -83,14 +66,21 @@ int main(int argc, char** argv){
     sw.stop();
     if (result != 0) {
         cout << "Error running the computation: " << result << endl;
+        exit(-1);
     }
     printf("[Main] Time: %f ms\n", sw.getMsec());
+
+    int length;
+    DATA_TYPE* list = framework.getList(&length);
+    printf("Results:\n");
+    for(int k=0; k<length; k++){
+        printf("(%f, %f, %f, %f)\n", list[4*k], list[4*k + 1], list[4*k + 2], list[4*k + 3]);
+    }
 
     fflush(stdout);
     if (!parameters.benchmark) {
         // Test the outputs
 
-        unsigned long linearIndex;
         DATA_TYPE point[2];
         DATA_TYPE step[2] = {
             abs(limits[0].lowerLimit - limits[0].upperLimit) / limits[0].N,
@@ -98,94 +88,44 @@ int main(int argc, char** argv){
         };
         MyModel model = MyModel();
 
-        if(parameters.resultSaveType == SAVE_TYPE_ALL){
+        int correctCount = 0;
+        bool shouldBeInList, isInList;
+        list = framework.getList(&length);
 
-            DATA_TYPE returned, expected, absError, relError;
-            DATA_TYPE absErrorSum = 0, relErrorSum = 0;
-            DATA_TYPE absMaxError = 0, relMaxError = 0;
-            long skippedInf = 0, skippedNan = 0;
+        printf("\nVerifying results...\n");
 
-            printf("\nVerifying results...\n");
+        for (unsigned int i = 0; i < limits[0].N; i++) {
+            point[0] = limits[0].lowerLimit + i * step[0];
 
-            for (unsigned int i = 0; i < limits[0].N; i++) {
-                point[0] = limits[0].lowerLimit + i * step[0];
+            for (unsigned int j = 0; j < limits[1].N; j++) {
+                point[1] = limits[1].lowerLimit + j * step[1];
 
-                for (unsigned int j = 0; j < limits[1].N; j++) {
-                    point[1] = limits[1].lowerLimit + j * step[1];
+                // Check if it SHOULD be in list
+                shouldBeInList = model.toBool(model.validate_cpu(point, parameters.dataPtr));
+                if(shouldBeInList)
+                    correctCount++;
 
-                    linearIndex = framework.getIndexFromPoint(point);
-
-                    returned = framework.getResults()[linearIndex];
-                    expected = model.validate_cpu(point, parameters.dataPtr);
-
-                    absError = abs(returned - expected);
-                    relError = absError == 0 ? 0 : abs(absError / max(abs(expected), abs(returned)));
-
-                    if (isinf(absError) || isinf(relError)) {
-                        printf("(%f, %f): result=%f, expected=%f, absError=%f, relError=%f\n", point[0], point[1], returned, expected, absError, relError);
-                        skippedInf++;
-                    } else if (isnan(absError) || isnan(relError)) {
-                        printf("(%f, %f): result=%f, expected=%f, absError=%f, relError=%f\n", point[0], point[1], returned, expected, absError, relError);
-                        skippedNan++;
-                    } else {
-                        if (relError > RESULTS_THRESHOLD) {
-                            printf("(%f, %f): result=%f, expected=%f, absError=%f, relError=%f\n", point[0], point[1], returned, expected, absError, relError);
-                        }
-                        absErrorSum += absError;
-                        relErrorSum += relError;
-                        absMaxError = max(absMaxError, absError);
-                        relMaxError = max(relMaxError, relError);
-                    }
-                }
-
-            }
-
-            printf("Absolute error: Max=%f, Avg=%f\n", absMaxError, absErrorSum / (limits[0].N * limits[1].N));
-            printf("Relative error: Max=%f, Avg=%f\n", relMaxError, relErrorSum / (limits[0].N * limits[1].N));
-            printf("Skipped elements: Inf=%ld, NaN=%ld\n", skippedInf, skippedNan);
-
-        }else{
-
-            int length, correctCount = 0;
-            bool shouldBeInList, isInList;
-            DATA_TYPE* list = framework.getList(&length);
-
-            printf("\nVerifying results...\n");
-
-            for (unsigned int i = 0; i < limits[0].N; i++) {
-                point[0] = limits[0].lowerLimit + i * step[0];
-
-                for (unsigned int j = 0; j < limits[1].N; j++) {
-                    point[1] = limits[1].lowerLimit + j * step[1];
-
-                    // Check if it SHOULD be in list
-                    shouldBeInList = model.toBool(model.validate_cpu(point, parameters.dataPtr));
-                    if(shouldBeInList)
-                        correctCount++;
-
-                    // Check the list to see if the point is there
-                    isInList = false;
-                    for(int k=0; k<length; k++){
-                        if(list[k*2] == point[0] && list[k*2 + 1] == point[1]){
-                            isInList = true;
-                            break;
-                        }
-                    }
-
-                    if(shouldBeInList ^ isInList)
-                        printf("(%f, %f): shouldBeInList=%s, isInList=%s\n", point[0], point[1], shouldBeInList ? "true" : "false", isInList ? "true" : "false");
-                }
-            }
-
-            if(correctCount != length){
-                printf("List length is %d but should be \n", length, correctCount);
-
-                printf("Points is list:\n");
+                // Check the list to see if the point is there
+                isInList = false;
                 for(int k=0; k<length; k++){
-                    printf("%f, %f\n", list[2*k], list[2*k + 1]);
+                    if(list[k*2] == point[0] && list[k*2 + 1] == point[1]){
+                        isInList = true;
+                        break;
+                    }
                 }
-            }
 
+                if(shouldBeInList ^ isInList)
+                    printf("(%f, %f): shouldBeInList=%s, isInList=%s\n", point[0], point[1], shouldBeInList ? "true" : "false", isInList ? "true" : "false");
+            }
+        }
+
+        if(correctCount != length){
+            printf("List length is %d but should be \n", length, correctCount);
+
+            printf("Points is list:\n");
+            for(int k=0; k<length; k++){
+                printf("%f, %f\n", list[2*k], list[2*k + 1]);
+            }
         }
     }
 
