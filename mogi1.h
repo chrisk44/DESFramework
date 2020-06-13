@@ -102,3 +102,76 @@ public:
         return result != 0;
     }
 };
+
+void run(){
+    // Initialize framework
+    int result = 0;
+
+    // Create the model's parameters struct (the model's input data)
+    // TBD: If the length of 'displacements' is known at compile time...
+    MogiParameters mogiParameters;
+    int displacementsLength = 10;
+    mogiParameters.stations = 1;
+    for(int i=0; i<displacementsLength; i++){
+        mogiParameters.displacements[i] = 0;
+    }
+
+    // // TBD: If the length of 'displacements is not known at compile time'...
+    // int displacementsLength = 10;        // <-- Determine this at runtime
+    // int stations = 2;                    // <-- Determine this at runtime
+    // float* modelDataPtr = (float*) malloc((displacementsLength+1) * sizeof(float));
+    // modelDataPtr[0] = stations;
+    // for(int i=0; i<displacementsLength; i++){
+    //     modelDataPtr[i+1] = 0;           // <-- Write at index i+1 because the first elements of the array is reserved for 'stations'
+    // }
+
+    // Create the framework's parameters struct
+    ParallelFrameworkParameters parameters;
+    parameters.D = 4;
+    parameters.resultSaveType = SAVE_TYPE_LIST;
+    parameters.processingType = PROCESSING_TYPE_BOTH;
+    parameters.dataPtr = &mogiParameters;
+    parameters.dataSize = sizeof(mogiParameters);
+    // parameters.dataPtr = (void*) modelDataPtr;
+    // parameters.dataSize = (displacementsLength+1) * sizeof(float);
+    parameters.threadBalancing = true;
+    parameters.slaveBalancing = true;
+    parameters.benchmark = false;
+    parameters.batchSize = 20000000;
+
+    // Create the limits for each dimension (lower is inclusive, upper is exclusive)
+    Limit limits[4];
+    limits[0] = Limit { 0, 1, 50000 };
+    limits[1] = Limit { 0, 1, 50000 };
+    limits[2] = Limit { 0, 1, 50000 };
+    limits[3] = Limit { 0, 1, 50000 };
+
+    // Initialize the framework object
+    ParallelFramework framework = ParallelFramework(limits, parameters);
+    if (! framework.isValid()) {
+        cout << "Error initializing framework: " << result << endl;
+        exit(-1);
+    }
+
+    // Start the computation
+    Stopwatch sw;
+    sw.reset();
+    sw.start();
+    result = framework.run<MyModel>();
+    sw.stop();
+    if (result != 0) {
+        cout << "Error running the computation: " << result << endl;
+        exit(-1);
+    }
+    printf("Time: %f ms\n", sw.getMsec());
+
+    int length;
+    DATA_TYPE* list = framework.getList(&length);
+    printf("Results:\n");
+    for(int k=0; k<length; k++){
+        printf("( ");
+        for(int i=0; i<parameters.D; i++)
+            printf("%f ", list[i*k]);
+        printf(")\n");
+    }
+}
