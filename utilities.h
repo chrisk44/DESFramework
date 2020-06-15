@@ -24,7 +24,7 @@
 #define MEM_GPU_SPARE_BYTES 100*1024*1024
 
 // Computing parameters
-#define BLOCK_SIZE 1024
+#define BLOCK_SIZE 512
 #define COMPUTE_BATCH_SIZE 500
 #define NUM_OF_STREAMS 8
 #define MAX_DIMENSIONS 10       // TODO: Calculate this accurately
@@ -66,9 +66,6 @@ public:
 class Stopwatch{
 private:
     timespec t1, t2;
-    #ifdef DBG_SNH
-        bool started = false, stopped = false;
-    #endif
 
 public:
     void start();

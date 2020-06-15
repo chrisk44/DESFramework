@@ -34,7 +34,6 @@ void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
 
 	MPI_Request request;
 	int flag = 0;
-
 	MPI_Irecv(buf, count, datatype, source, tag, comm, &request);
 	while(!flag){
 		usleep(RECV_SLEEP_MS * 1000);
@@ -43,56 +42,13 @@ void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
 }
 
 void Stopwatch::start(){
-    #ifdef DBG_SNH
-        if(started){
-            printf("[E] -------------(start())------------- CLOCK ALREADY STARTED ----------------------------------------\n");
-        }
-        if(stopped){
-            printf("[E] -------------(start())------------- CLOCK HAS BEEN STOPPED ---------------------------------------\n");
-        }
-        fflush(stdout);
-        started = true;
-    #endif
-
     clock_gettime(CLOCK_MONOTONIC_RAW, &t1);
 }
 void Stopwatch::stop(){
-    #ifdef DBG_SNH
-        if(!started){
-            printf("[E] -----------(stop())------------- CLOCK HAS NOT BEEN STARTED --------------------------------------\n");
-        }
-        if(stopped){
-            printf("[E] -----------(stop())--------------- CLOCK ALREADY STOPPED -----------------------------------------\n");
-        }
-        fflush(stdout);
-        stopped = true;
-    #endif
-
-    bool flag = false;
-    do{
-        if(flag){
-            #ifdef DBG_SNH
-                printf("---------------------- looped because of negative clock\n");
-            #endif
-        }
-        flag = true;
-        clock_gettime(CLOCK_MONOTONIC_RAW, &t2);
-    }while(getMsec() < 0);  // Clock may backwards for some reason
+    clock_gettime(CLOCK_MONOTONIC_RAW, &t2);
 }
-void Stopwatch::reset(){
-    started = false;
-    stopped = false;
-}
+void Stopwatch::reset(){}
 float Stopwatch::getNsec(){
-    #ifdef DBG_SNH
-        if(!started){
-            printf("[E] -----------(getNsec())------------- CLOCK HAS NOT BEEN STARTED --------------------------------------\n");
-        }
-        if(!stopped){
-            printf("[E] -----------(getNsec())------------- CLOCK HAS NOT BEEN STOPPED --------------------------------------\n");
-        }
-    #endif
-
     timespec difference;
 	if ((t2.tv_nsec - t1.tv_nsec)<0) {
 		difference.tv_sec = t2.tv_sec - t1.tv_sec - 1;

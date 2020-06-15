@@ -21,15 +21,15 @@ private:
 	ParallelFrameworkParameters* parameters = NULL;
 
 	// Runtime variables
-	unsigned long* idxSteps = NULL;			// Index steps for each dimension
+	unsigned long long* idxSteps = NULL;		// Index steps for each dimension
 	RESULT_TYPE* finalResults = NULL;		// An array of N0 * N1 * ... * N(D-1)
 	DATA_TYPE* listResults = NULL;			// An array of points for which the validation function has returned non-zero value
 	unsigned long listResultsSaved = 0;		// Number of points saved in listResults
 	bool valid = false;
 	unsigned long* toSendVector = NULL;		// An array of D elements, where every entry shows the next element of that dimension to be dispatched
-	unsigned long totalSent = 0;			// Total elements that have been sent for processing
-	unsigned long totalReceived = 0;		// TOtal elements that have been calculated and returned
-	unsigned long totalElements = 0;		// Total elements
+	unsigned long long totalSent = 0;			// Total elements that have been sent for processing
+	unsigned long long totalReceived = 0;		// TOtal elements that have been calculated and returned
+	unsigned long long totalElements = 0;		// Total elements
 
 	// MPI
 	int rank;

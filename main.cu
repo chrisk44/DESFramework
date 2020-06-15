@@ -8,10 +8,10 @@
  * Obviously include only one.
 */
 // #include "mogi1.h"
-// #include "mogi2.h"
+#include "mogi2.h"
 // #include "okada1.h"
 // #include "okada2.h"
-#include "okada3.h"
+// #include "okada3.h"
 
 #define RESULTS_THRESHOLD 1e-13
 
@@ -20,7 +20,7 @@ using namespace std;
 int main(int argc, char** argv){
 
     // Function in mogi*.h or okada*.h included above
-    run();
+    run(argc, argv);
 
     // fflush(stdout);
     // if (!parameters.benchmark) {

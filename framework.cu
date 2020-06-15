@@ -1,3 +1,5 @@
+#include <limits.h>
+
 #include "framework.h"
 
 using namespace std;
@@ -24,7 +26,7 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 		}
 	}
 
-	idxSteps = new unsigned long[parameters.D];
+	idxSteps = new unsigned long long[parameters.D];
 	idxSteps[0] = 1;
 	for (i = 1; i < parameters.D; i++) {
 		idxSteps[i] = idxSteps[i - 1] * limits[i-1].N;
@@ -34,8 +36,9 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 		limits[i].step = abs(limits[i].upperLimit - limits[i].lowerLimit) / limits[i].N;
 	}
 
+	totalReceived = 0;
 	totalSent = 0;
-	totalElements = (long)idxSteps[parameters.D - 1] * limits[parameters.D - 1].N;
+	totalElements = (unsigned long long)(idxSteps[parameters.D - 1]) * (unsigned long long)(limits[parameters.D - 1].N);
 	if(! (parameters.benchmark)){
 		if(parameters.resultSaveType == SAVE_TYPE_ALL){
 			finalResults = new RESULT_TYPE[totalElements];		// Uninitialized
@@ -79,9 +82,10 @@ void ParallelFramework::masterProcess() {
 	int mpiSource;
 	int finished = 0;
 	int numOfProcesses;
-	float totalScore;
+	float totalScore, t, eta;
 	MPI_Comm_size(MPI_COMM_WORLD, &numOfProcesses);
 	int numOfSlaves = numOfProcesses - 1;
+	Stopwatch masterStopwatch;
 
 	SlaveProcessInfo* slaveProcessInfo = new SlaveProcessInfo[numOfSlaves];
 	#define pinfo (slaveProcessInfo[mpiSource-1])
@@ -105,6 +109,7 @@ void ParallelFramework::masterProcess() {
 		slaveProcessInfo[i].stopwatch.reset();
 	}
 
+	masterStopwatch.start();
 	while (totalReceived < totalElements || finished < numOfSlaves) {
 		// Receive request from any worker thread
 		#ifdef DBG_MPI_STEPS
@@ -184,7 +189,7 @@ void ParallelFramework::masterProcess() {
 						for (int i = 0; i < tmpNumOfPoints; i++){
 							printf("[");
 							for(int j=0; j<parameters->D; j++){
-								printf("%f,", tmpResultsList[i*parameters->D + j]);
+								printf("%f,", tmpResultslist[i*parameters.D + j]);
 							}
 							printf("]");
 						}
@@ -200,6 +205,20 @@ void ParallelFramework::masterProcess() {
 				pinfo.lastAssignedElements = pinfo.assignedElements;
 
 				this->totalReceived += tmpNumOfElements;
+
+				masterStopwatch.stop();
+				t = masterStopwatch.getMsec()/1000;
+				eta = t * ((float)totalElements/totalReceived) - t;
+
+				printf("Progress: %ld/%ld, %.2f %%", this->totalReceived, this->totalElements, ((float)this->totalReceived / this->totalElements)*100);
+
+				if(t < 60)			printf(", Elapsed time: %.2f sec", t);
+				else if(t < 3600)	printf(", Elapsed time: %.2f min", t/60);
+				else				printf(", Elapsed time: %.2f hours", t/3600);
+
+				if(eta < 60)		printf(", ETA: %.2f sec\n", eta);
+				else if(eta < 3600)	printf(", ETA: %.2f min\n", eta/60);
+				else				printf(", ETA: %.2f hours\n", eta/3600);
 
 				// Print benchmark results
 				if (parameters->benchmark) {
@@ -281,11 +300,16 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 	sem_t* semResults = cti[0].semResults;
 
 	int numOfElements, carry;
-	unsigned long maxBatchSize = min(getDefaultCPUBatchSize(), getDefaultGPUBatchSize());
+	unsigned long maxBatchSize;
 	unsigned long *startPointIdx = new unsigned long[parameters->D];
 	unsigned long allocatedElements = 0;
 	RESULT_TYPE* localResults = nullptr;
 	MPI_Status status;
+
+	maxBatchSize = min(getDefaultCPUBatchSize(), getDefaultGPUBatchSize());
+	if(maxBatchSize*parameters->D > INT_MAX){
+		maxBatchSize = (INT_MAX - parameters->D) / parameters->D;
+	}
 
 	#ifdef DBG_START_STOP
 		printf("[%d] Coordinator: Max batch size: %d\n", rank, maxBatchSize);

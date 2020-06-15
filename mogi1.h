@@ -1,12 +1,9 @@
+#include <fstream>
+
 #include "framework.h"
 #include "mogi_common.h"
 
 using namespace std;
-
-struct MogiParameters{
-    unsigned long long stations;
-    float displacements[10];
-};
 
 class MyModel : public Model{
 public:
@@ -27,13 +24,8 @@ public:
         unsigned long long stations;
         float *displacements;
 
-        // TBD: If the length of 'displacements' is known at compile time...
-        stations = ((struct MogiParameters*) dataPtr)->stations;
-        displacements = ((struct MogiParameters*) dataPtr)->displacements;
-
-        // // TBD: If the length of 'displacements is not known at compile time'...
-        // stations = ((float*) dataPtr)[0];
-        // displacements = &(((float*) dataPtr)[1]);
+        stations = ((float*) dataPtr)[0];
+        displacements = &(((float*) dataPtr)[1]);
 
         xp = &displacements[0 * stations];
     	yp = &displacements[1 * stations];
@@ -75,24 +67,6 @@ public:
 					break;
 				}
 			}
-
-			// if (bp == 1) {
-			// 	oldPos = atomicAdd(&bytesForSolutions_d, bytesPerSolution);
-			// 	if (oldPos < totalBytesForSolutions) {
-			// 		posInArray = oldPos / sizeof(float);
-			// 		solutions[posInArray + 0] = x[0];
-			// 		solutions[posInArray + 1] = x[1];
-			// 		solutions[posInArray + 2] = x[2];
-			// 		solutions[posInArray + 3] = x[3];
-			// 	} else {
-			// 		/*
-			// 		 * Decrease again the global counter to avoid overflow.
-			// 		 */
-			// 		atomicAdd(&bytesForSolutions_d, -bytesPerSolution);
-			// 		sufficientSpaceForSolutions_d = 0;
-			// 		return;
-			// 	}
-			// }
 		}
 
         return bp;
@@ -103,58 +77,117 @@ public:
     }
 };
 
-void run(){
-    // Initialize framework
-    int result = 0;
+void run(int argc, char** argv){
+    ifstream dispfile, gridfile;
+    ofstream outfile;
+    string tmp;
+    int stations, dims, i, j, result;
+    float *modelDataPtr, *dispPtr;
+    float x, y, z, de, dn, dv, se, sn, sv, k;
+    float low, high, step;
 
-    // Create the model's parameters struct (the model's input data)
-    // TBD: If the length of 'displacements' is known at compile time...
-    MogiParameters mogiParameters;
-    int displacementsLength = 10;
-    mogiParameters.stations = 1;
-    for(int i=0; i<displacementsLength; i++){
-        mogiParameters.displacements[i] = 0;
+    ParallelFrameworkParameters parameters;
+    Limit limits[4];
+
+    Stopwatch sw;
+    int length;
+    DATA_TYPE* list;
+
+    if(argc != 4){
+        printf("[E] Usage: %s <displacements file> <grid file> <k > 0>\n", argv[0]);
+        exit(1);
     }
 
-    // // TBD: If the length of 'displacements is not known at compile time'...
-    // int displacementsLength = 10;        // <-- Determine this at runtime
-    // int stations = 2;                    // <-- Determine this at runtime
-    // float* modelDataPtr = (float*) malloc((displacementsLength+1) * sizeof(float));
-    // modelDataPtr[0] = stations;
-    // for(int i=0; i<displacementsLength; i++){
-    //     modelDataPtr[i+1] = 0;           // <-- Write at index i+1 because the first elements of the array is reserved for 'stations'
-    // }
+    k = atof(argv[3]);
+    if(k <= 0){
+        printf("[E] Scale factor k must be > 0. Exiting.\n");
+        exit(1);
+    }
+
+    printf("Reading displacements from %s\n", argv[1]);
+    printf("Reading grid from %s\n", argv[2]);
+    printf("Scale factor = %f\n", k);
+
+    // Open files
+    dispfile.open(argv[1], ios::in);
+    gridfile.open(argv[2], ios::in);
+
+    stations = 0;
+    dims = 0;
+
+    // Count stations and dimensions
+    while(getline(dispfile, tmp)) stations++;
+    while(getline(gridfile, tmp)) dims++;
+
+    printf("Got %d stations\n", stations);
+    printf("Got %d dimensions\n", dims);
+
+    if(stations < 1){
+        printf("Got 0 displacements. Exiting.\n");
+        exit(2);
+    }
+    if(dims != 4){
+        printf("Got %d dimensions, expected 4. Exiting.\n", dims);
+        exit(2);
+    }
+
+    // Reset the files
+    dispfile.close();
+    gridfile.close();
+    dispfile.open(argv[1], ios::in);
+    gridfile.open(argv[2], ios::in);
+
+    // Create the model's parameters struct (the model's input data)
+    modelDataPtr = new float[1 + stations*9];
+    modelDataPtr[0] = (float) stations;
+
+    // Read each station's displacement data
+    dispPtr = &modelDataPtr[1];
+    i = 0;
+    while(dispfile >> x >> y >> z >> de >> dn >> dv >> se >> sn >> sv){
+        dispPtr[0*stations + i] = x;
+        dispPtr[1*stations + i] = y;
+        dispPtr[2*stations + i] = z;
+        dispPtr[3*stations + i] = de;
+        dispPtr[4*stations + i] = dn;
+        dispPtr[5*stations + i] = dv;
+        dispPtr[6*stations + i] = se * k;
+        dispPtr[7*stations + i] = sn * k;
+        dispPtr[8*stations + i] = sv * k;
+
+        i++;
+    }
+
+    // Read each dimension's grid information
+    i = 0;
+    while(gridfile >> low >> high >> step){
+        // Create the limit (lower is inclusive, upper is exclusive)
+        limits[i] = Limit{ low, high, (unsigned long) ((high-low)/step) };
+        i++;
+    }
+
+    dispfile.close();
+    gridfile.close();
 
     // Create the framework's parameters struct
-    ParallelFrameworkParameters parameters;
     parameters.D = 4;
     parameters.resultSaveType = SAVE_TYPE_LIST;
     parameters.processingType = PROCESSING_TYPE_BOTH;
-    parameters.dataPtr = &mogiParameters;
-    parameters.dataSize = sizeof(mogiParameters);
-    // parameters.dataPtr = (void*) modelDataPtr;
-    // parameters.dataSize = (displacementsLength+1) * sizeof(float);
+    parameters.dataPtr = (void*) modelDataPtr;
+    parameters.dataSize = (1 + stations*9) * sizeof(float);
     parameters.threadBalancing = true;
     parameters.slaveBalancing = true;
     parameters.benchmark = false;
-    parameters.batchSize = 20000000;
-
-    // Create the limits for each dimension (lower is inclusive, upper is exclusive)
-    Limit limits[4];
-    limits[0] = Limit { 0, 1, 50000 };
-    limits[1] = Limit { 0, 1, 50000 };
-    limits[2] = Limit { 0, 1, 50000 };
-    limits[3] = Limit { 0, 1, 50000 };
+    parameters.batchSize = 200000000;
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);
     if (! framework.isValid()) {
-        cout << "Error initializing framework: " << result << endl;
+        cout << "Error initializing framework: " << endl;
         exit(-1);
     }
 
     // Start the computation
-    Stopwatch sw;
     sw.reset();
     sw.start();
     result = framework.run<MyModel>();
@@ -165,13 +198,25 @@ void run(){
     }
     printf("Time: %f ms\n", sw.getMsec());
 
-    int length;
-    DATA_TYPE* list = framework.getList(&length);
+    // Open file to write results
+    outfile.open("results.txt", ios::out | ios::trunc);
+
+    list = framework.getList(&length);
     printf("Results:\n");
-    for(int k=0; k<length; k++){
-        printf("( ");
-        for(int i=0; i<parameters.D; i++)
-            printf("%f ", list[i*k]);
-        printf(")\n");
+    for(i=0; i<length; i++){
+        printf("(");
+        outfile << "(";
+
+        for(j=0; j<parameters.D-1; j++){
+            printf("%f ", list[i*parameters.D + j]);
+            outfile << list[i*parameters.D + j] << " ";
+        }
+
+        printf("%f)\n", list[i*parameters.D + j]);
+        outfile << list[i*parameters.D + j] << ")" << endl;
     }
+
+    outfile.close();
+
+    delete [] modelDataPtr;
 }
