@@ -210,18 +210,17 @@ void run(int argc, char** argv){
     outfile.open("results.txt", ios::out | ios::trunc);
 
     list = framework.getList(&length);
-    printf("Results:\n");
+    printf("Results: %d\n", length);
     for(i=0; i<length; i++){
-        printf("(");
-        outfile << "(";
+        // printf("(");
 
         for(j=0; j<parameters.D-1; j++){
-            printf("%f ", list[i*parameters.D + j]);
+            // printf("%f ", list[i*parameters.D + j]);
             outfile << list[i*parameters.D + j] << " ";
         }
 
-        printf("%f)\n", list[i*parameters.D + j]);
-        outfile << list[i*parameters.D + j] << ")" << endl;
+        // printf("%f)\n", list[i*parameters.D + j]);
+        outfile << list[i*parameters.D + j] << endl;
     }
 
     outfile.close();

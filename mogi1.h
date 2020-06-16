@@ -7,15 +7,15 @@ using namespace std;
 
 class MyModel : public Model{
 public:
-    __host__ RESULT_TYPE validate_cpu(DATA_TYPE* x, void* dataPtr){
+    inline __host__ RESULT_TYPE validate_cpu(DATA_TYPE* x, void* dataPtr){
         return doValidate(x, dataPtr);
     }
 
-    __device__ RESULT_TYPE validate_gpu(DATA_TYPE* x, void* dataPtr){
+    inline __device__ RESULT_TYPE validate_gpu(DATA_TYPE* x, void* dataPtr){
         return doValidate(x, dataPtr);
     }
 
-    __host__ __device__ RESULT_TYPE doValidate(DATA_TYPE* x, void* dataPtr){
+    inline __host__ __device__ RESULT_TYPE doValidate(DATA_TYPE* x, void* dataPtr){
         float *xp, *yp, *zp, *de, *dn, *dv, *se, *sn, *sv;
         float r1, ux1, uy1, uz1, dux, duy, duz;
         unsigned long long bp, m;
@@ -202,18 +202,17 @@ void run(int argc, char** argv){
     outfile.open("results.txt", ios::out | ios::trunc);
 
     list = framework.getList(&length);
-    printf("Results:\n");
+    printf("Results: %d\n", length);
     for(i=0; i<length; i++){
-        printf("(");
-        outfile << "(";
+        // printf("(");
 
         for(j=0; j<parameters.D-1; j++){
-            printf("%f ", list[i*parameters.D + j]);
+            // printf("%f ", list[i*parameters.D + j]);
             outfile << list[i*parameters.D + j] << " ";
         }
 
-        printf("%f)\n", list[i*parameters.D + j]);
-        outfile << list[i*parameters.D + j] << ")" << endl;
+        // printf("%f)\n", list[i*parameters.D + j]);
+        outfile << list[i*parameters.D + j] << endl;
     }
 
     outfile.close();

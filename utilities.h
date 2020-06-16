@@ -26,7 +26,7 @@
 // Computing parameters
 #define BLOCK_SIZE 512
 #define COMPUTE_BATCH_SIZE 500
-#define NUM_OF_STREAMS 8
+#define NUM_OF_STREAMS 1
 #define MAX_DIMENSIONS 10       // TODO: Calculate this accurately
 
 #define RESULT_TYPE float
@@ -57,8 +57,8 @@
 class Model {
 public:
 	// float* point will be a D-dimension vector
-	__host__   virtual RESULT_TYPE validate_cpu(DATA_TYPE* point, void* dataPtr) = 0;
-	__device__ virtual RESULT_TYPE validate_gpu(DATA_TYPE* point, void* dataPtr) = 0;
+	inline __host__   virtual RESULT_TYPE validate_cpu(DATA_TYPE* point, void* dataPtr) = 0;
+	inline __device__ virtual RESULT_TYPE validate_gpu(DATA_TYPE* point, void* dataPtr) = 0;
 
 	virtual bool toBool(RESULT_TYPE result) = 0;
 };

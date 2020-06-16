@@ -44,8 +44,8 @@ public:
 	RESULT_TYPE* getResults();
 	DATA_TYPE* getList(int* length);
 	void getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst);
-	long getIndexFromIndices(unsigned long* pointIdx);
-	long getIndexFromPoint(DATA_TYPE* point);
+	unsigned long getIndexFromIndices(unsigned long* pointIdx);
+	unsigned long getIndexFromPoint(DATA_TYPE* point);
 	bool isValid();
 
 private:
@@ -53,7 +53,7 @@ private:
 	void coordinatorThread(ComputeThreadInfo* cti, int numOfThreads, Model* model);
 	void getDataChunk(unsigned long maxBatchSize, unsigned long* toCalculate, int *numOfElements);
 	void addToIdxVector(unsigned long* start, unsigned long* result, int num, int* overflow);
-	void getPointFromIndex(int index, DATA_TYPE* result);
+	void getPointFromIndex(unsigned long index, DATA_TYPE* result);
 
 	template<class ImplementedModel>
 	void slaveProcess();
@@ -329,11 +329,13 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 			}
 
 			#ifdef DBG_RESULTS
-				printf("[%d] ComputeThread %d: Results are: ", rank, cti.id);
-				for (int i = 0; i < cti.numOfElements; i++) {
-					printf("%f ", cti.results[i]);
+				if(parameters->resultSaveType == SAVE_TYPE_ALL){
+					printf("[%d] ComputeThread %d: Results are: ", rank, cti.id);
+					for (int i = 0; i < cti.numOfElements; i++) {
+						printf("%f ", cti.results[i]);
+					}
+					printf("\n");
 				}
-				printf("\n");
 			#endif
 
 		}

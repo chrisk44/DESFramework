@@ -82,7 +82,8 @@ void ParallelFramework::masterProcess() {
 	int mpiSource;
 	int finished = 0;
 	int numOfProcesses;
-	float totalScore, t, eta;
+	float totalScore;
+	int t, eta;
 	MPI_Comm_size(MPI_COMM_WORLD, &numOfProcesses);
 	int numOfSlaves = numOfProcesses - 1;
 	Stopwatch masterStopwatch;
@@ -189,7 +190,7 @@ void ParallelFramework::masterProcess() {
 						for (int i = 0; i < tmpNumOfPoints; i++){
 							printf("[");
 							for(int j=0; j<parameters->D; j++){
-								printf("%f,", tmpResultslist[i*parameters.D + j]);
+								printf("%f,", tmpResultsList[i*parameters->D + j]);
 							}
 							printf("]");
 						}
@@ -212,13 +213,11 @@ void ParallelFramework::masterProcess() {
 
 				printf("Progress: %ld/%ld, %.2f %%", this->totalReceived, this->totalElements, ((float)this->totalReceived / this->totalElements)*100);
 
-				if(t < 60)			printf(", Elapsed time: %.2f sec", t);
-				else if(t < 3600)	printf(", Elapsed time: %.2f min", t/60);
-				else				printf(", Elapsed time: %.2f hours", t/3600);
+				if(t < 3600)	printf(", Elapsed time: %02d:%02d", t/60, t%60);
+				else			printf(", Elapsed time: %02d:%02d:%02d", t/3600, (t%3600)/60, t%60);
 
-				if(eta < 60)		printf(", ETA: %.2f sec\n", eta);
-				else if(eta < 3600)	printf(", ETA: %.2f min\n", eta/60);
-				else				printf(", ETA: %.2f hours\n", eta/3600);
+				if(eta < 3600)	printf(", ETA: %02d:%02d\n", eta/60, eta%60);
+				else			printf(", ETA: %02d:%02d:%02d\n", eta/3600, (eta%3600)/60, eta%60);
 
 				// Print benchmark results
 				if (parameters->benchmark) {
@@ -562,9 +561,9 @@ void ParallelFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst
 		dst[i] = (int) round(abs(limits[i].lowerLimit - point[i]) / limits[i].step);		// TODO: 1.9999997 will round to 2, verify correctness
 	}
 }
-long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) {
+unsigned long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) {
 	unsigned int i;
-	long index = 0;
+	unsigned long index = 0;
 
 	for (i = 0; i < parameters->D; i++) {
 		// Increase index by i*(index-steps for this dimension)
@@ -573,7 +572,7 @@ long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) {
 
 	return index;
 }
-long ParallelFramework::getIndexFromPoint(DATA_TYPE* point){
+unsigned long ParallelFramework::getIndexFromPoint(DATA_TYPE* point){
 	unsigned long* indices = new unsigned long[parameters->D];
 	unsigned long index;
 
@@ -583,7 +582,7 @@ long ParallelFramework::getIndexFromPoint(DATA_TYPE* point){
 	delete[] indices;
 	return index;
 }
-void ParallelFramework::getPointFromIndex(int index, DATA_TYPE* result){
+void ParallelFramework::getPointFromIndex(unsigned long index, DATA_TYPE* result){
 	for(int i=parameters->D - 1; i>=0; i--){
 		int currentIndex = index / idxSteps[i];
 		result[i] = limits[i].lowerLimit + currentIndex*limits[i].step;
