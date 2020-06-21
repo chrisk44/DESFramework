@@ -22,7 +22,7 @@ __global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
 
 // CUDA kernel to run the computation
 template<class ImplementedModel>
-__global__ void validate_kernel(ImplementedModel** model, unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned int numOfElements, unsigned int offset, void* dataPtr) {
+__global__ void validate_kernel(ImplementedModel** model, unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned int numOfElements, unsigned int offset, void* dataPtr, int* listIndexPtr) {
 	unsigned int threadStart = offset + (((blockIdx.x * BLOCK_SIZE) + threadIdx.x) * COMPUTE_BATCH_SIZE);
 	unsigned int end = min(offset + numOfElements, threadStart + COMPUTE_BATCH_SIZE);
 
@@ -77,14 +77,27 @@ __global__ void validate_kernel(ImplementedModel** model, unsigned long* startin
 			point[d] = shLowerLimit[d] + tmpIndex * shStep[d];//* step[i];
 		}
 
-		// Run the validation function and save the result to the global memory
-		results[i] = (*model)->validate_gpu(point, dataPtr);
+		if(listIndexPtr == nullptr){
+			// We are running as SAVE_TYPE_ALL
+			// Run the validation function and save the result to the global memory
+			results[i] = (*model)->validate_gpu(point, dataPtr);
+		}else{
+			// We are running as SAVE_TYPE_LIST
+			// Run the validation function and pass its result to toBool
+			if((*model)->toBool((*model)->validate_gpu(point, dataPtr))){
+				// Append element to the list
+				tmpIndex = atomicAdd(listIndexPtr, D);
+				for(d = 0; d < D; d++){
+					((DATA_TYPE *)results)[tmpIndex + d] = point[d];
+				}
+			}
+		}
 	}
 }
 
 // CPU kernel to run the computation
 template<class ImplementedModel>
-void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfElements, void* dataPtr) {
+void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfElements, void* dataPtr, int* listIndexPtr) {
 	ImplementedModel model = ImplementedModel();
 
 	omp_set_nested(1);		// We are already in a parallel region since slaveProcess()
@@ -92,22 +105,35 @@ void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* li
 	{
 		DATA_TYPE* point = new DATA_TYPE[D];
 		unsigned long tmpIndex, carry;
-		unsigned int i, j;
+		unsigned int d, i;
 
-		for (j = omp_get_thread_num(); j < numOfElements; j+=omp_get_num_threads()) {
-			// Calculate 'myIndex = startingPointIdx + j' and then the exact point
-			carry = j;
+		for (i = omp_get_thread_num(); i < numOfElements; i+=omp_get_num_threads()) {
+			// Calculate 'myIndex = startingPointIdx + i' and then the exact point
+			carry = i;
 
-			for (i = 0; i < D; i++) {
-				tmpIndex = (startingPointIdx[i] + carry) % limits[i].N;
-				carry = (startingPointIdx[i] + carry) / limits[i].N;
+			for (d = 0; d < D; d++) {
+				tmpIndex = (startingPointIdx[d] + carry) % limits[d].N;
+				carry = (startingPointIdx[d] + carry) / limits[d].N;
 
 				// Calculate the exact coordinate i
-				point[i] = limits[i].lowerLimit + tmpIndex * limits[i].step;
+				point[d] = limits[d].lowerLimit + tmpIndex * limits[d].step;
 			}
 
-			// Run the validation function
-			results[j] = model.validate_cpu(point, dataPtr);
+			if(listIndexPtr == nullptr){
+				// We are running as SAVE_TYPE_ALL
+				// Run the validation function and save the result to the global memory
+				results[i] = model.validate_cpu(point, dataPtr);
+			}else{
+				// We are running as SAVE_TYPE_LIST
+				// Run the validation function and pass its result to toBool
+				if(model.toBool(model.validate_cpu(point, dataPtr))){
+					// Append element to the list
+					tmpIndex = __sync_fetch_and_add(listIndexPtr, D);
+					for(d = 0; d < D; d++){
+						((DATA_TYPE *)results)[tmpIndex + d] = point[d];
+					}
+				}
+			}
 		}
 
 		delete[] point;

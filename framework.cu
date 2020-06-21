@@ -166,6 +166,7 @@ void ParallelFramework::masterProcess() {
 
 					// Find the number of points in list
 					MPI_Get_count(&status, DATA_MPI_TYPE, &tmpNumOfPoints);
+
 					// MPI_Get_count returned the count of DATA_TYPE elements received, so divide with D to get the count of points
 					tmpNumOfPoints /= parameters->D;
 				}
@@ -188,9 +189,9 @@ void ParallelFramework::masterProcess() {
 					}else{
 						printf("[%d] Master: Saving tmpResultsList: ", rank);
 						for (int i = 0; i < tmpNumOfPoints; i++){
-							printf("[");
+							printf("[ ");
 							for(int j=0; j<parameters->D; j++){
-								printf("%f,", tmpResultsList[i*parameters->D + j]);
+								printf("%f ", tmpResultsList[i*parameters->D + j]);
 							}
 							printf("]");
 						}
@@ -297,6 +298,7 @@ void ParallelFramework::masterProcess() {
 
 void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThreads, Model* model){
 	sem_t* semResults = cti[0].semResults;
+	int* globalListIndexPtr = cti[0].listIndexPtr;
 
 	int numOfElements, carry;
 	unsigned long maxBatchSize;
@@ -395,8 +397,13 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 				// Set the starting point as the starting point of the previous thread + numOfElements of the previous thread
 				addToIdxVector(cti[i-1].startPointIdx, cti[i].startPointIdx, cti[i-1].numOfElements, &carry);
 
-				// Set results as the results of the previous thread + numOfElements of the previous thread (compiler takes into account the size of RESULT_TYPE when adding an int)
-				cti[i].results = cti[i-1].results + cti[i-1].numOfElements;
+				if(parameters->resultSaveType == SAVE_TYPE_ALL){
+					// Set results as the results of the previous thread + numOfElements of the previous thread (compiler takes into account the size of RESULT_TYPE when adding an int)
+					cti[i].results = cti[i-1].results + cti[i-1].numOfElements;
+				}else{
+					// All compute threads must have access to the same memory
+					cti[i].results = localResults;
+				}
 			}
 
 			#ifdef DBG_QUEUE
@@ -413,6 +420,9 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 			}
 		}
 
+		// Reset the global listIndex counter
+		*globalListIndexPtr = 0;
+
 		// Start all the worker threads
 		for(int i=0; i<numOfThreads; i++){
 			sem_post(&cti[i].semData);
@@ -425,6 +435,25 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		for(int i=0; i<numOfThreads; i++){
 			sem_wait(semResults);
 		}
+
+		#ifdef DBG_RESULTS
+			if(parameters->resultSaveType == SAVE_TYPE_ALL){
+				printf("[%d] Coordinator: Results: [", rank);
+				for(int i=0; i<numOfElements; i++){
+					printf("%f ", localResults[i]);
+				}
+				printf("]\n");
+			}else{
+				printf("[%d] Coordinator: Results (*globalListIndexPtr = %d):", rank, *globalListIndexPtr);
+				for(int i=0; i<*globalListIndexPtr; i+=parameters->D){
+					printf("[ ");
+					for(int j=0; j<parameters->D; j++){
+						printf("%f ", localResults[i + j]);
+					}
+					printf("]");
+				}
+			}
+		#endif
 
 		// Start 2 threads: 1 to adjust the ratios, one to send the results to master
 		omp_set_nested(1);
@@ -467,35 +496,13 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 					printf("[%d] Coordinator: Sending data to master...\n", rank);
 				#endif
 
+				MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
 				if(parameters->resultSaveType == SAVE_TYPE_ALL){
-					MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
+					// Send all the results
 					MPI_Send(localResults, numOfElements, RESULT_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
 				}else{
-					DATA_TYPE* tmpPoint = new DATA_TYPE[parameters->D];
-					DATA_TYPE* localResultsList = new DATA_TYPE[numOfElements * parameters->D];
-					if(localResultsList == NULL){
-						printf("[%d] Coordinator: Can't allocate memory for localResultsList\n", rank);
-						exit(-1);
-					}
-
-					// Create a list with all the points for which toBool(result) is true
-					long idx = 0;
-					for(int i=0; i<numOfElements; i++){
-						if(model->toBool(localResults[i])){
-							// Convert index to point
-							getPointFromIndex(getIndexFromIndices(startPointIdx) + i, tmpPoint);
-
-							// Append to list
-							memcpy(&localResultsList[idx], tmpPoint, parameters->D * sizeof(DATA_TYPE));
-							idx += parameters->D;
-						}
-					}
-
-					MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
-					MPI_Send(localResultsList, idx, DATA_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
-
-					delete [] tmpPoint;
-					delete [] localResultsList;
+					// Send the list of points
+					MPI_Send(localResults, *globalListIndexPtr, DATA_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
 				}
 			}
 		}

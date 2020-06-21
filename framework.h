@@ -115,6 +115,7 @@ void ParallelFramework::slaveProcess() {
 	/*******************************************************************
 	********************** Initialization ******************************
 	********************************************************************/
+	int listIndex;
 	sem_t semResults;
 	sem_init(&semResults, 0, 0);
 
@@ -123,6 +124,7 @@ void ParallelFramework::slaveProcess() {
 		sem_init(&computeThreadInfo[i].semData, 0, 0);
 		computeThreadInfo[i].semResults = &semResults;
 		computeThreadInfo[i].results = nullptr;
+		computeThreadInfo[i].listIndexPtr = &listIndex;
 		computeThreadInfo[i].startPointIdx = new unsigned long[parameters->D];
 		computeThreadInfo[i].ratio = (float)1/numOfThreads;
 		computeThreadInfo[i].stopwatch.reset();
@@ -163,10 +165,12 @@ void ParallelFramework::slaveProcess() {
 
 template<class ImplementedModel>
 void ParallelFramework::computeThread(ComputeThreadInfo& cti){
+	int gpuListIndex, globalListIndexOld;
 
 	// GPU Memory
 	ImplementedModel** deviceModelAddress;	// GPU Memory to save the address of the 'Model' object on device
 	RESULT_TYPE* deviceResults;				// GPU Memory for results
+	int* deviceListIndexPtr;				// GPU Memory for list index for synchronization when saving the results as a list of points
 	unsigned long* deviceStartingPointIdx;	// GPU Memory to store the start point indices
 	Limit* deviceLimits;					// GPU Memory to store the Limit structures
 	void* deviceDataPtr;					// GPU Memory to store any constant data
@@ -192,7 +196,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 		// Allocate memory on device
 		cudaMalloc(&deviceModelAddress, sizeof(ImplementedModel**));				cce();
-		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));		cce();
+		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));		cce();	// TODO: What if we are saving list of points?
+		cudaMalloc(&deviceListIndexPtr, sizeof(int));								cce();
 		cudaMalloc(&deviceStartingPointIdx, parameters->D * sizeof(unsigned long));	cce();
 		cudaMalloc(&deviceLimits, parameters->D * sizeof(Limit));					cce();
 		if(parameters->dataSize > 0){
@@ -211,6 +216,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		#ifdef DBG_MEMORY
 			printf("[%d] ComputeThread %d: deviceModelAddress: 0x%x\n", rank, cti.id, (void*) deviceModelAddress);
 			printf("[%d] ComputeThread %d: deviceResults: 0x%x\n", rank, cti.id, (void*) deviceResults);
+			printf("[%d] ComputeThread %d: deviceListIndexPtr: 0x%x\n", rank, cti.id, (void*) deviceListIndexPtr);
 			printf("[%d] ComputeThread %d: deviceStartingPointIdx: 0x%x\n", rank, cti.id, (void*) deviceStartingPointIdx);
 			printf("[%d] ComputeThread %d: deviceLimits: 0x%x\n", rank, cti.id, (void*) deviceLimits);
 			printf("[%d] ComputeThread %d: deviceDataPtr: 0x%x\n", rank, cti.id, (void*) deviceDataPtr);
@@ -270,9 +276,9 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 			// If GPU...
 			if (cti.id > -1) {
 
-				// Copy starting point indices to device
-				cudaMemcpy(deviceStartingPointIdx, cti.startPointIdx, parameters->D * sizeof(unsigned long), cudaMemcpyHostToDevice);
-				cce();
+				// Copy starting point indices to device and initialize the list index counter
+				cudaMemcpy(deviceStartingPointIdx, cti.startPointIdx, parameters->D * sizeof(unsigned long), cudaMemcpyHostToDevice);	cce();
+				cudaMemset(deviceListIndexPtr, 0, sizeof(int));
 
 				// Divide the chunk to smaller chunks to scatter accross streams
 				int elementsPerStream = cti.numOfElements / NUM_OF_STREAMS;
@@ -297,11 +303,13 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					int blockSize = min(BLOCK_SIZE, gpuThreads);
 					int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
 					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, 0, streams[i]>>>(		// Note: Point at the start of deviceResults, because the offset is calculated in the kernel
-						deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, elementsPerStream, skip, deviceDataPtr
+						deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, elementsPerStream, skip, deviceDataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr
 					);
 
-					// Queue the memcpy in stream[i]
-					cudaMemcpyAsync(&cti.results[skip], &deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, streams[i]);
+					// Queue the memcpy in stream[i] only if we are saving as SAVE_TYPE_ALL (otherwise the results will be fetched at the end of the current computation)
+					if(parameters->resultSaveType == SAVE_TYPE_ALL){
+						cudaMemcpyAsync(&cti.results[skip], &deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, streams[i]);
+					}
 
 					#ifdef DBG_QUEUE
 						printf("[%d] ComputeThread %d: Queueing %d elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%d\n", rank,
@@ -321,10 +329,22 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					cce();
 				}
 
+				// If we are saving as SAVE_TYPE_LIST, fetch the results
+				if(parameters->resultSaveType == SAVE_TYPE_LIST){
+					// Get the current list index from the GPU
+					cudaMemcpy(&gpuListIndex, deviceListIndexPtr, sizeof(int), cudaMemcpyDeviceToHost);
+
+					// Increment the global list index counter
+					globalListIndexOld = __sync_fetch_and_add(cti.listIndexPtr, gpuListIndex);
+
+					// Get the results from the GPU
+					cudaMemcpy(&cti.results[globalListIndexOld], deviceResults, gpuListIndex * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+				}
+
 
 			} else {
 
-				cpu_kernel<ImplementedModel>(cti.startPointIdx, cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr);
+				cpu_kernel<ImplementedModel>(cti.startPointIdx, cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : cti.listIndexPtr);
 
 			}
 
@@ -370,6 +390,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		// Free the space for the model's address on the device
 		cudaFree(deviceModelAddress);		cce();
 		cudaFree(deviceResults);			cce();
+		cudaFree(deviceListIndexPtr);		cce();
 		cudaFree(deviceStartingPointIdx);	cce();
 		cudaFree(deviceLimits);				cce();
 		cudaFree(deviceDataPtr);			cce();

@@ -72,7 +72,7 @@ public:
         return bp;
     }
 
-    bool toBool(RESULT_TYPE result){
+    inline __host__ __device__ bool toBool(RESULT_TYPE result){
         return result != 0;
     }
 };

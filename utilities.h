@@ -60,7 +60,7 @@ public:
 	inline __host__   virtual RESULT_TYPE validate_cpu(DATA_TYPE* point, void* dataPtr) = 0;
 	inline __device__ virtual RESULT_TYPE validate_gpu(DATA_TYPE* point, void* dataPtr) = 0;
 
-	virtual bool toBool(RESULT_TYPE result) = 0;
+	inline __host__ __device__ virtual bool toBool(RESULT_TYPE result) = 0;
 };
 
 class Stopwatch{
@@ -137,6 +137,7 @@ struct ComputeThreadInfo{
     RESULT_TYPE* results;
     sem_t semData;
     sem_t* semResults;
+    int* listIndexPtr;
 
     Stopwatch stopwatch;
     float ratio;
