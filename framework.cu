@@ -448,7 +448,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 				for(int i=0; i<*globalListIndexPtr; i+=parameters->D){
 					printf("[ ");
 					for(int j=0; j<parameters->D; j++){
-						printf("%f ", localResults[i + j]);
+						printf("%f ", ((DATA_TYPE *)localResults)[i + j]);
 					}
 					printf("]");
 				}

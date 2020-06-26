@@ -338,7 +338,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					globalListIndexOld = __sync_fetch_and_add(cti.listIndexPtr, gpuListIndex);
 
 					// Get the results from the GPU
-					cudaMemcpy(&cti.results[globalListIndexOld], deviceResults, gpuListIndex * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+					cudaMemcpy(&((DATA_TYPE*)cti.results)[globalListIndexOld], deviceResults, gpuListIndex * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
 				}
 
 
@@ -352,7 +352,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 				if(parameters->resultSaveType == SAVE_TYPE_ALL){
 					printf("[%d] ComputeThread %d: Results are: ", rank, cti.id);
 					for (int i = 0; i < cti.numOfElements; i++) {
-						printf("%f ", cti.results[i]);
+						printf("%f ", ((DATA_TYPE *)cti.results)[i]);
 					}
 					printf("\n");
 				}

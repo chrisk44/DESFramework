@@ -41,7 +41,7 @@
 // #define DBG_RATIO           // Messeges about changes in ratios (masterProcess and coordinatorThread)
 // #define DBG_DATA            // Messeges about the exact data being assigned (start points)
 // #define DBG_MEMORY          // Messeges about memory management (addresses, reallocations)
-// #define DBG_RESULTS         // Messeges with the exact results being passed around
+#define DBG_RESULTS         // Messeges with the exact results being passed around
 #define DBG_SNH             // Should not happen
 
 // MPI
