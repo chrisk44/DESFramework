@@ -107,7 +107,7 @@ void ParallelFramework::slaveProcess() {
 		numOfThreads++;
 
 	if(numOfThreads == 0){
-		printf("[%d] [E] SlaveProcess: numOfThreads is 0\n", rank);
+		printf("[%d] SlaveProcess: Error: cudaGetDeviceCount returned 0\n", rank);
 		return;
 	}
 

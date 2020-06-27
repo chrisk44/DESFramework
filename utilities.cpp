@@ -36,7 +36,7 @@ void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
 	int flag = 0;
 	MPI_Irecv(buf, count, datatype, source, tag, comm, &request);
 	while(!flag){
-		usleep(RECV_SLEEP_MS * 1000);
+		usleep(RECV_SLEEP_US);
 		MPI_Test(&request, &flag, status);
 	}
 }

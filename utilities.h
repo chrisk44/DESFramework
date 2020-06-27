@@ -10,13 +10,18 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#define cce() {                               \
+#define cce() {                                          \
   cudaError_t e = cudaGetLastError();                    \
   if (e != cudaSuccess) {                                \
     printf("CUDA error %s:%d: %s\n", __FILE__, __LINE__, \
             cudaGetErrorString(e));                      \
     exit(1);                                             \
   }                                                      \
+}
+
+#define fatal(e){                                        \
+    printf("Error: %s:%d: %s\n", __FILE__, __LINE__, e); \
+    exit(3);                                             \
 }
 
 // Memory parameters
@@ -26,8 +31,11 @@
 // Computing parameters
 #define BLOCK_SIZE 512
 #define COMPUTE_BATCH_SIZE 500
-#define NUM_OF_STREAMS 1
-#define MAX_DIMENSIONS 10       // TODO: Calculate this accurately
+#define NUM_OF_STREAMS 8
+#define MAX_DIMENSIONS 1000       // TODO: Calculate this accurately
+
+#define SLOW_START_BATCH_SIZE_BASE 10000000    // BASE * (2^LIMIT) MUST FIT IN AN UNSIGNED LONG
+#define SLOW_START_LIMIT 5
 
 #define RESULT_TYPE float
 #define DATA_TYPE double
@@ -36,16 +44,17 @@
 
 // Debugging
 #define DBG_START_STOP      // Messages about starting/stopping processes and threads
-// #define DBG_QUEUE           // Messeges about queueing work (coordinator->worker threads, worker->gpu streams)
-// #define DBG_MPI_STEPS       // Messeges after each MPI step
-// #define DBG_RATIO           // Messeges about changes in ratios (masterProcess and coordinatorThread)
-// #define DBG_DATA            // Messeges about the exact data being assigned (start points)
-// #define DBG_MEMORY          // Messeges about memory management (addresses, reallocations)
-#define DBG_RESULTS         // Messeges with the exact results being passed around
+// #define DBG_QUEUE           // Messages about queueing work (coordinator->worker threads, worker->gpu streams)
+// #define DBG_MPI_STEPS       // Messages after each MPI step
+// #define DBG_RATIO           // Messages about changes in ratios (masterProcess and coordinatorThread)
+// #define DBG_DATA            // Messages about the exact data being assigned (start points)
+// #define DBG_MEMORY          // Messages about memory management (addresses, reallocations)
+// #define DBG_RESULTS         // Messages with the exact results being passed around
+#define DBG_TIME            // Print time measuraments for various parts of the code
 #define DBG_SNH             // Should not happen
 
 // MPI
-#define RECV_SLEEP_MS 1     // Time in ms to sleep between checking for data in MPI_Recv
+#define RECV_SLEEP_US 100     // Time in micro-seconds to sleep between checking for data in MPI_Recv
 #define TAG_READY 0
 #define TAG_DATA_COUNT 1
 #define TAG_DATA 2
