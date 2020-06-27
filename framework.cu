@@ -1,4 +1,7 @@
 #include <limits.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <errno.h>
 
 #include "framework.h"
 
@@ -41,7 +44,32 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 	totalElements = (unsigned long long)(idxSteps[parameters.D - 1]) * (unsigned long long)(limits[parameters.D - 1].N);
 	if(! (parameters.benchmark)){
 		if(parameters.resultSaveType == SAVE_TYPE_ALL){
-			finalResults = new RESULT_TYPE[totalElements];		// Uninitialized
+			if(parameters.saveFile == nullptr){
+				// No saveFile given, save everything in memory
+				finalResults = new RESULT_TYPE[totalElements];		// Uninitialized
+			}else{
+				// Open save file
+				saveFile = open(parameters.saveFile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+				if(saveFile == -1){
+					fatal("open failed");
+				}
+
+				// Enlarge the file
+				if(ftruncate(saveFile, totalElements * sizeof(RESULT_TYPE)) == -1){
+					fatal("ftruncate failed");
+				}
+
+				// Map the save file in memory
+				finalResults = (RESULT_TYPE*) mmap(nullptr, totalElements * sizeof(RESULT_TYPE), PROT_WRITE, MAP_SHARED, saveFile, 0);
+				if(finalResults == MAP_FAILED){
+					printf("errno: %d\n", errno);
+					fatal("mmap failed");
+				}
+
+				//#ifdef DBG_MEMORY
+					printf("[INIT] finalResults: 0x%lx\n", finalResults);
+				//#endif
+			}
 		}// else listResults will be allocated through realloc when they are needed
 	}
 
@@ -61,7 +89,15 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 
 ParallelFramework::~ParallelFramework() {
 	delete [] idxSteps;
-	delete [] finalResults;
+	if(parameters->saveFile == nullptr){
+		delete [] finalResults;
+	}else{
+		// Unmap the save file
+		munmap(finalResults, totalElements * sizeof(RESULT_TYPE));
+
+		// Close the file
+		close(saveFile);
+	}
 	delete [] toSendVector;
 	if(listResults != NULL){
 		free(listResults);
@@ -542,7 +578,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 				#ifdef DBG_TIME
 					sw1.start();
 				#endif
-				
+
 				// Calculate a score for each thread (=numOfElements/time)
 				float tmpScore;
 				float totalScore = 0;

@@ -8,11 +8,11 @@
  * Obviously include only one.
 */
 // #include "mogi1.h"
-#include "mogi2.h"
+// #include "mogi2.h"
 // #include "okada1.h"
 // #include "okada2.h"
 // #include "okada3.h"
-// #include "test.h"
+#include "test.h"
 
 #define RESULTS_THRESHOLD 1e-13
 

@@ -50,7 +50,7 @@
 // #define DBG_DATA            // Messages about the exact data being assigned (start points)
 // #define DBG_MEMORY          // Messages about memory management (addresses, reallocations)
 // #define DBG_RESULTS         // Messages with the exact results being passed around
-#define DBG_TIME            // Print time measuraments for various parts of the code
+// #define DBG_TIME            // Print time measuraments for various parts of the code
 #define DBG_SNH             // Should not happen
 
 // MPI
@@ -113,6 +113,7 @@ struct ParallelFrameworkParameters {
 	unsigned int batchSize;
 	ProcessingType processingType = PROCESSING_TYPE_BOTH;
     ResultSaveType resultSaveType = SAVE_TYPE_ALL;
+    char* saveFile = nullptr;
     bool threadBalancing = true;
     bool slaveBalancing = true;
 	bool benchmark = false;

@@ -19,7 +19,7 @@ public:
         return x[0] > 0 && x[1] > 0 ? 1 : 0;
     }
 
-    bool toBool(RESULT_TYPE result){
+    inline __host__ __device__ bool toBool(RESULT_TYPE result){
         return result != 0;
     }
 };
@@ -28,10 +28,12 @@ void run(int argc, char** argv){
     ofstream outfile;
     int result, i, j;
 
+    //char saveFile[] = "./customResults.txt";
+
     ParallelFrameworkParameters parameters;
     Limit limits[2];
-    limits[0] = Limit { -1, 0.001, 10000 };
-    limits[1] = Limit { -10, 0.01, 10000 };
+    limits[0] = Limit { -1, 0.001, 100 };
+    limits[1] = Limit { -10, 0.01, 100 };
 
     Stopwatch sw;
     int length;
@@ -40,6 +42,7 @@ void run(int argc, char** argv){
     // Create the framework's parameters struct
     parameters.D = 2;
     parameters.resultSaveType = SAVE_TYPE_LIST;
+    //parameters.saveFile = saveFile;
     parameters.processingType = PROCESSING_TYPE_CPU;
     parameters.threadBalancing = true;
     parameters.slaveBalancing = true;
