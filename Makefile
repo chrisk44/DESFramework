@@ -10,7 +10,7 @@ MPI_ARGS=--bind-to none
 MPI_ARGS_REMOTE=-npernode 1 --hostfile hostfile #--mca mpi_yield_when_idle 1 # Not needed when using MMPI_Recv
 MPI_ARGS_LOCAL=-n $(N) # --mca mpi_yield_when_idle 1
 
-APP_ARGS=./data/mogi2_inputs/displ.txt ./data/mogi2_inputs/grid5/grid5.txt 2
+APP_ARGS=./data/okada1_inputs/displ.txt ./data/okada1_inputs/grid6/grid6.txt 2
 
 SRC=main.cu framework.cu kernels.cu utilities.cpp
 TARGET=parallelFramework

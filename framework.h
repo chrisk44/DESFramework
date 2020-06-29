@@ -17,17 +17,17 @@ using namespace std;
 class ParallelFramework {
 private:
 	// Parameters
-	Limit* limits = NULL;			// This must be an array of length = parameters.D
+	Limit* limits = NULL;						// This must be an array of length = parameters.D
 	ParallelFrameworkParameters* parameters = NULL;
 
 	// Runtime variables
 	unsigned long long* idxSteps = NULL;		// Index steps for each dimension
-	int saveFile;							// File descriptor for save file
-	RESULT_TYPE* finalResults = NULL;		// An array of N0 * N1 * ... * N(D-1)
-	DATA_TYPE* listResults = NULL;			// An array of points for which the validation function has returned non-zero value
-	unsigned long listResultsSaved = 0;		// Number of points saved in listResults
+	int saveFile;								// File descriptor for save file
+	RESULT_TYPE* finalResults = NULL;			// An array of N0 * N1 * ... * N(D-1)
+	DATA_TYPE* listResults = NULL;				// An array of points for which the validation function has returned non-zero value
+	unsigned long listResultsSaved = 0;			// Number of points saved in listResults
 	bool valid = false;
-	unsigned long* toSendVector = NULL;		// An array of D elements, where every entry shows the next element of that dimension to be dispatched
+	unsigned long* toSendVector = NULL;			// An array of D elements, where every entry shows the next element of that dimension to be dispatched
 	unsigned long long totalSent = 0;			// Total elements that have been sent for processing
 	unsigned long long totalReceived = 0;		// TOtal elements that have been calculated and returned
 	unsigned long long totalElements = 0;		// Total elements
@@ -128,7 +128,6 @@ void ParallelFramework::slaveProcess() {
 		computeThreadInfo[i].listIndexPtr = &listIndex;
 		computeThreadInfo[i].startPointIdx = new unsigned long[parameters->D];
 		computeThreadInfo[i].ratio = (float)1/numOfThreads;
-		computeThreadInfo[i].stopwatch.reset();
 	}
 
 	ImplementedModel model_p = ImplementedModel();
@@ -380,7 +379,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 	/*******************************************************************
 	 *************************** Finalize ******************************
-	********************************************************************/
+	 *******************************************************************/
 
 	// Finalize GPU
 	if (cti.id > -1) {

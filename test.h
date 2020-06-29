@@ -57,7 +57,6 @@ void run(int argc, char** argv){
     }
 
     // Start the computation
-    sw.reset();
     sw.start();
     result = framework.run<MyModel>();
     sw.stop();

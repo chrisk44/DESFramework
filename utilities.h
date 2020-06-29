@@ -30,12 +30,14 @@
 
 // Computing parameters
 #define BLOCK_SIZE 512
-#define COMPUTE_BATCH_SIZE 500
-#define NUM_OF_STREAMS 8
-#define MAX_DIMENSIONS 1000       // TODO: Calculate this accurately
+#define COMPUTE_BATCH_SIZE 1000
+#define NUM_OF_STREAMS 1
+#define MAX_DIMENSIONS 20       // TODO: Calculate this accurately
 
-#define SLOW_START_BATCH_SIZE_BASE 10000000    // BASE * (2^LIMIT) MUST FIT IN AN UNSIGNED LONG
-#define SLOW_START_LIMIT 5
+// Batch size slow-start and ratio limits
+#define SLOW_START_BATCH_SIZE_BASE 1000000    // BASE * (2^LIMIT) MUST FIT IN AN UNSIGNED LONG
+#define SLOW_START_LIMIT 6
+#define MIN_MS_FOR_RATIO_ADJUSTMENT 50
 
 #define RESULT_TYPE float
 #define DATA_TYPE double
@@ -79,7 +81,6 @@ private:
 public:
     void start();
     void stop();
-    void reset();
     float getNsec();
     float getMsec();
 };

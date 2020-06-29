@@ -47,7 +47,6 @@ void Stopwatch::start(){
 void Stopwatch::stop(){
     clock_gettime(CLOCK_MONOTONIC_RAW, &t2);
 }
-void Stopwatch::reset(){}
 float Stopwatch::getNsec(){
     timespec difference;
 	if ((t2.tv_nsec - t1.tv_nsec)<0) {

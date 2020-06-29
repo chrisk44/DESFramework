@@ -163,6 +163,9 @@ void run(int argc, char** argv){
     while(gridfile >> low >> high >> step){
         // Create the limit (lower is inclusive, upper is exclusive)
         limits[i] = Limit{ low, high, (unsigned long) ((high-low)/step) };
+        if(limits[i].N == 0)
+            limits[i].N = 1;
+
         i++;
     }
 
@@ -188,7 +191,6 @@ void run(int argc, char** argv){
     }
 
     // Start the computation
-    sw.reset();
     sw.start();
     result = framework.run<MyModel>();
     sw.stop();

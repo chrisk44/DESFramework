@@ -192,6 +192,9 @@ void run(int argc, char** argv){
     while(gridfile >> low >> high >> step){
         // Create the limit (lower is inclusive, upper is exclusive)
         limits[i] = Limit{ low, high, (unsigned long) ((high-low)/step) };
+        if(limits[i].N == 0)
+            limits[i].N = 1;
+
         i++;
     }
 
@@ -217,7 +220,6 @@ void run(int argc, char** argv){
     }
 
     // Start the computation
-    sw.reset();
     sw.start();
     result = framework.run<MyModel>();
     sw.stop();
@@ -231,7 +233,7 @@ void run(int argc, char** argv){
     outfile.open("results.txt", ios::out | ios::trunc);
 
     list = framework.getList(&length);
-    printf("Results:\n");
+    printf("Results: %d\n", length);
     for(i=0; i<length; i++){
         printf("(");
         outfile << "(";
