@@ -265,6 +265,7 @@ void run(int argc, char** argv){
     i = 0;
     while(gridfile >> low >> high >> step){
         // Create the limit (lower is inclusive, upper is exclusive)
+        high += step;
         limits[i] = Limit{ low, high, (unsigned long) ((high-low)/step) };
         i++;
     }

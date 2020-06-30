@@ -374,12 +374,19 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		float time_data, time_split, time_assign, time_start, time_wait, time_scores, time_results;
 	#endif
 
-	maxBatchSize = min(getDefaultCPUBatchSize(), getDefaultGPUBatchSize());
+	if(parameters->processingType == PROCESSING_TYPE_CPU)
+		maxBatchSize = getDefaultCPUBatchSize();
+	else if(parameters->processingType == PROCESSING_TYPE_GPU)
+		maxBatchSize = getDefaultGPUBatchSize();
+	else
+		maxBatchSize = min(getDefaultCPUBatchSize(), getDefaultGPUBatchSize());
+
 	if(maxBatchSize*parameters->D > INT_MAX && parameters->resultSaveType == SAVE_TYPE_LIST){
 		maxBatchSize = (INT_MAX - parameters->D) / parameters->D;
 	}else if(maxBatchSize > INT_MAX && parameters->resultSaveType == SAVE_TYPE_ALL){
 		maxBatchSize = INT_MAX;
 	}
+
 
 	#ifdef DBG_START_STOP
 		printf("[%d] Coordinator: Max batch size: %d\n", rank, maxBatchSize);
@@ -560,49 +567,51 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		#endif
 
 		// Calculate a score for each thread (=numOfElements/time)
-		float tmpScore;
-		float totalScore = 0;
-		for(int i=0; i<numOfThreads; i++){
-			if(parameters->benchmark){
-				printf("[%d] Coordinator: Thread %d time: %f ms\n", rank, cti[i].id, cti[i].stopwatch.getMsec());
-			}
-
-			tmpScore = cti[i].numOfElements / cti[i].stopwatch.getMsec();
-			totalScore += tmpScore;
-
-			if(tmpScore < 0){
-				// Negative time
-				totalScore = -1;
-				break;
-			}else if(cti[i].stopwatch.getMsec() < MIN_MS_FOR_RATIO_ADJUSTMENT){
-				// Too fast execution
-				totalScore = -2;
-				break;
-			}
-		}
-
-		// Adjust the ratio for each thread
-		if(totalScore > 0){
+		if(parameters->threadBalancing){
+			float tmpScore;
+			float totalScore = 0;
 			for(int i=0; i<numOfThreads; i++){
-				cti[i].ratio = cti[i].numOfElements / (totalScore * cti[i].stopwatch.getMsec());
+				if(parameters->benchmark){
+					printf("[%d] Coordinator: Thread %d time: %f ms\n", rank, cti[i].id, cti[i].stopwatch.getMsec());
+				}
 
+				tmpScore = cti[i].numOfElements / cti[i].stopwatch.getMsec();
+				totalScore += tmpScore;
+
+				if(tmpScore < 0){
+					// Negative time
+					totalScore = -1;
+					break;
+				}else if(cti[i].stopwatch.getMsec() < MIN_MS_FOR_RATIO_ADJUSTMENT){
+					// Too fast execution
+					totalScore = -2;
+					break;
+				}
+			}
+
+			// Adjust the ratio for each thread
+			if(totalScore > 0){
+				for(int i=0; i<numOfThreads; i++){
+					cti[i].ratio = cti[i].numOfElements / (totalScore * cti[i].stopwatch.getMsec());
+
+					#ifdef DBG_RATIO
+						printf("[%d] Coordinator: Adjusting thread %d ratio to %f\n", rank, cti[i].id, cti[i].ratio);
+					#endif
+				}
+			}else if(totalScore == -1){
+				printf("[%d] Coordinator: Error: Skipping ratio correction due to negative time\n", rank);
+			}else{
 				#ifdef DBG_RATIO
-					printf("[%d] Coordinator: Adjusting thread %d ratio to %f\n", rank, cti[i].id, cti[i].ratio);
+					printf("[%d] Coordinator: Skipping ratio correction due to fast execution\n", rank);
 				#endif
 			}
-		}else if(totalScore == -1){
-			printf("[%d] Coordinator: Error: Skipping ratio correction due to negative time\n", rank);
-		}else{
-			#ifdef DBG_RATIO
-				printf("[%d] Coordinator: Skipping ratio correction due to fast execution\n", rank);
+
+			#ifdef DBG_TIME
+				sw.stop();
+				time_scores = sw.getMsec();
+				sw.start();
 			#endif
 		}
-
-		#ifdef DBG_TIME
-			sw.stop();
-			time_scores = sw.getMsec();
-			sw.start();
-		#endif
 
 		// Send all results to master
 		#ifdef DBG_MPI_STEPS

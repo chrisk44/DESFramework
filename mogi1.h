@@ -162,10 +162,8 @@ void run(int argc, char** argv){
     i = 0;
     while(gridfile >> low >> high >> step){
         // Create the limit (lower is inclusive, upper is exclusive)
+        high += step;
         limits[i] = Limit{ low, high, (unsigned long) ((high-low)/step) };
-        if(limits[i].N == 0)
-            limits[i].N = 1;
-
         i++;
     }
 
@@ -182,6 +180,9 @@ void run(int argc, char** argv){
     parameters.slaveBalancing = true;
     parameters.benchmark = false;
     parameters.batchSize = 200000000;
+    parameters.computeBatchSize = 200;
+    parameters.blockSize = 256;
+    parameters.gpuStreams = 16;
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);

@@ -25,19 +25,15 @@
 }
 
 // Memory parameters
-#define MEM_CPU_SPARE_BYTES 100*1024*1024
 #define MEM_GPU_SPARE_BYTES 100*1024*1024
 
 // Computing parameters
-#define BLOCK_SIZE 512
-#define COMPUTE_BATCH_SIZE 1000
-#define NUM_OF_STREAMS 1
 #define MAX_DIMENSIONS 20       // TODO: Calculate this accurately
 
 // Batch size slow-start and ratio limits
 #define SLOW_START_BATCH_SIZE_BASE 1000000    // BASE * (2^LIMIT) MUST FIT IN AN UNSIGNED LONG
 #define SLOW_START_LIMIT 6
-#define MIN_MS_FOR_RATIO_ADJUSTMENT 50
+#define MIN_MS_FOR_RATIO_ADJUSTMENT 0
 
 #define RESULT_TYPE float
 #define DATA_TYPE double
@@ -120,6 +116,9 @@ struct ParallelFrameworkParameters {
 	bool benchmark = false;
     void* dataPtr = nullptr;
     unsigned long dataSize = 0;
+    int blockSize = 1024;
+    int computeBatchSize = 1000;
+    int gpuStreams = 8;
 	// ...
 };
 

@@ -176,7 +176,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 	void* deviceDataPtr;					// GPU Memory to store any constant data
 
 	// GPU Runtime
-	cudaStream_t streams[NUM_OF_STREAMS];
+	cudaStream_t streams[parameters->gpuStreams];
 	int allocatedElements = 0;
 
 	/*******************************************************************
@@ -189,7 +189,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		cudaSetDevice(cti.id);
 
 		// Create streams
-		for(int i=0; i<NUM_OF_STREAMS; i++){
+		for(int i=0; i<parameters->gpuStreams; i++){
 			cudaStreamCreate(&streams[i]);
 			cce();
 		}
@@ -281,7 +281,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 				cudaMemset(deviceListIndexPtr, 0, sizeof(int));
 
 				// Divide the chunk to smaller chunks to scatter accross streams
-				int elementsPerStream = cti.numOfElements / NUM_OF_STREAMS;
+				int elementsPerStream = cti.numOfElements / parameters->gpuStreams;
 				bool onlyOne = false;
 				int skip = 0;
 				if(elementsPerStream == 0){
@@ -290,20 +290,21 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 				}
 
 				// Queue the chunks to the streams
-				for(int i=0; i<NUM_OF_STREAMS; i++){
+				for(int i=0; i<parameters->gpuStreams; i++){
 					// Adjust elementsPerStream for last stream (= total-queued)
-					if(i == NUM_OF_STREAMS - 1){
+					if(i == parameters->gpuStreams - 1){
 						elementsPerStream = cti.numOfElements - skip;
 					}else{
 						elementsPerStream = min(elementsPerStream, cti.numOfElements - skip);
 					}
 
 					// Queue the kernel in stream[i] (each GPU thread gets COMPUTE_BATCH_SIZE elements to calculate)
-					int gpuThreads = (elementsPerStream + COMPUTE_BATCH_SIZE - 1) / COMPUTE_BATCH_SIZE;
-					int blockSize = min(BLOCK_SIZE, gpuThreads);
+					int gpuThreads = (elementsPerStream + parameters->computeBatchSize - 1) / parameters->computeBatchSize;
+					int blockSize = min(parameters->blockSize, gpuThreads);
 					int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
 					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, 0, streams[i]>>>(		// Note: Point at the start of deviceResults, because the offset is calculated in the kernel
-						deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, elementsPerStream, skip, deviceDataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr
+						deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, elementsPerStream, skip,
+						deviceDataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr, parameters->computeBatchSize
 					);
 
 					// Queue the memcpy in stream[i] only if we are saving as SAVE_TYPE_ALL (otherwise the results will be fetched at the end of the current computation)
@@ -324,7 +325,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 				}
 
 				// Wait for all streams to finish
-				for(int i=0; i<NUM_OF_STREAMS; i++){
+				for(int i=0; i<parameters->gpuStreams; i++){
 					cudaStreamSynchronize(streams[i]);
 					cce();
 				}
@@ -396,7 +397,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		cudaFree(deviceDataPtr);			cce();
 
 		// Make sure streams are finished and destroy them
-		for(int i=0;i<NUM_OF_STREAMS;i++){
+		for(int i=0;i<parameters->gpuStreams;i++){
 			cudaStreamDestroy(streams[i]);
 			cce();
 		}

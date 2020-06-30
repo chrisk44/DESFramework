@@ -1,0 +1,28 @@
+			ParallelFramework		TOPINV
+mogi1
+grid1			0.4s				 0.1s
+grid2			0.4s				 0.1s
+grid3			0.4s				 0.2s
+grid4			 2s					 0.4s
+grid5			15s					 4.3s
+
+mogi2
+grid1
+grid2
+grid3
+grid4
+grid5
+
+okada1
+grid1			 2s					 0.1s
+grid2			1.6s				 0.7s
+grid3			3.6s				 2.2s
+grid4		   22.3s				 14s
+grid5			96s					 47s
+grid6		   320s					171s
+
+okada2
+grid1			2.3s				  1s
+grid2			14s					  4s
+grid3			184s				  87s
+

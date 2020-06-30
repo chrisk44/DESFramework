@@ -7,9 +7,9 @@
  * Each one of these contain a model and a run() function to run the framework for that model.
  * Obviously include only one.
 */
-// #include "mogi1.h"
+#include "mogi1.h"
 // #include "mogi2.h"
-#include "okada1.h"
+// #include "okada1.h"
 // #include "okada2.h"
 // #include "okada3.h"
 // #include "test.h"

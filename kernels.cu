@@ -22,9 +22,9 @@ __global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
 
 // CUDA kernel to run the computation
 template<class ImplementedModel>
-__global__ void validate_kernel(ImplementedModel** model, unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned int numOfElements, unsigned int offset, void* dataPtr, int* listIndexPtr) {
-	unsigned int threadStart = offset + (((blockIdx.x * BLOCK_SIZE) + threadIdx.x) * COMPUTE_BATCH_SIZE);
-	unsigned int end = min(offset + numOfElements, threadStart + COMPUTE_BATCH_SIZE);
+__global__ void validate_kernel(ImplementedModel** model, unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned int numOfElements, unsigned int offset, void* dataPtr, int* listIndexPtr, int computeBatchSize) {
+	unsigned int threadStart = offset + (((blockIdx.x * blockDim.x) + threadIdx.x) * computeBatchSize);
+	unsigned int end = min(offset + numOfElements, threadStart + computeBatchSize);
 
 	DATA_TYPE point[MAX_DIMENSIONS];
 	unsigned long tmpIndex, carry;
