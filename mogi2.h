@@ -171,7 +171,7 @@ void run(int argc, char** argv){
     while(gridfile >> low >> high >> step){
         // Create the limit (lower is inclusive, upper is exclusive)
         high += step;
-        limits[i] = Limit{ low, high, (unsigned long) ((high-low)/step) };
+        limits[i] = Limit{ low, high, (unsigned int) ((high-low)/step) };
         i++;
     }
 

@@ -192,7 +192,7 @@ void run(int argc, char** argv){
     while(gridfile >> low >> high >> step){
         // Create the limit (lower is inclusive, upper is exclusive)
         high += step;
-        limits[i] = Limit{ low, high, (unsigned long) ((high-low)/step) };
+        limits[i] = Limit{ low, high, (unsigned int) ((high-low)/step) };
         i++;
     }
 
@@ -202,14 +202,14 @@ void run(int argc, char** argv){
     // Create the framework's parameters struct
     parameters.D = 10;
     parameters.resultSaveType = SAVE_TYPE_LIST;
-    parameters.processingType = PROCESSING_TYPE_CPU;
+    parameters.processingType = PROCESSING_TYPE_BOTH;
     parameters.dataPtr = (void*) modelDataPtr;
     parameters.dataSize = (1 + stations*8) * sizeof(float);
     parameters.threadBalancing = true;
     parameters.slaveBalancing = true;
     parameters.benchmark = false;
     parameters.batchSize = 200000000;
-    parameters.computeBatchSize = 2000;
+    parameters.computeBatchSize = 200;
     parameters.blockSize = 256;
     parameters.gpuStreams = 8;
 

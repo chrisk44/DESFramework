@@ -172,6 +172,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 	RESULT_TYPE* deviceResults;				// GPU Memory for results
 	int* deviceListIndexPtr;				// GPU Memory for list index for synchronization when saving the results as a list of points
 	unsigned long* deviceStartingPointIdx;	// GPU Memory to store the start point indices
+	unsigned long long* deviceIdxSteps;		// GPU Memory to store idxSteps
 	Limit* deviceLimits;					// GPU Memory to store the Limit structures
 	void* deviceDataPtr;					// GPU Memory to store any constant data
 
@@ -196,10 +197,11 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 		// Allocate memory on device
 		cudaMalloc(&deviceModelAddress, sizeof(ImplementedModel**));				cce();
-		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));		cce();	// TODO: What if we are saving list of points?
+		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));		cce();
 		cudaMalloc(&deviceListIndexPtr, sizeof(int));								cce();
 		cudaMalloc(&deviceStartingPointIdx, parameters->D * sizeof(unsigned long));	cce();
 		cudaMalloc(&deviceLimits, parameters->D * sizeof(Limit));					cce();
+		cudaMalloc(&deviceIdxSteps, parameters->D * sizeof(unsigned long long));			cce();
 		if(parameters->dataSize > 0){
 			cudaMalloc(&deviceDataPtr, parameters->dataSize);							cce();
 		}
@@ -207,10 +209,11 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		// Instantiate the model object on the device, and write its address in 'deviceModelAddress' on the device
 		create_model_kernel<ImplementedModel><<< 1, 1 >>>(deviceModelAddress);		cce();
 
-		// Copy limits and constant data to device
-		cudaMemcpy(deviceLimits, limits, parameters->D * sizeof(Limit), cudaMemcpyHostToDevice);	cce();
+		// Copy limits, idxSteps, and constant data to device
+		cudaMemcpy(deviceLimits, limits, parameters->D * sizeof(Limit), cudaMemcpyHostToDevice);					cce();
+		cudaMemcpy(deviceIdxSteps, idxSteps, parameters->D * sizeof(unsigned long long), cudaMemcpyHostToDevice);	cce();
 		if(parameters->dataSize > 0){
-			cudaMemcpy(deviceDataPtr, parameters->dataPtr, parameters->dataSize, cudaMemcpyHostToDevice);	cce();
+			cudaMemcpy(deviceDataPtr, parameters->dataPtr, parameters->dataSize, cudaMemcpyHostToDevice);			cce();
 		}
 
 		#ifdef DBG_MEMORY
@@ -303,8 +306,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					int blockSize = min(parameters->blockSize, gpuThreads);
 					int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
 					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, 0, streams[i]>>>(		// Note: Point at the start of deviceResults, because the offset is calculated in the kernel
-						deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, parameters->D, elementsPerStream, skip,
-						deviceDataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr, parameters->computeBatchSize
+						deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, getIndexFromIndices(cti.startPointIdx),
+						parameters->D, deviceIdxSteps, elementsPerStream, skip, deviceDataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr, parameters->computeBatchSize
 					);
 
 					// Queue the memcpy in stream[i] only if we are saving as SAVE_TYPE_ALL (otherwise the results will be fetched at the end of the current computation)
@@ -345,7 +348,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 			} else {
 
-				cpu_kernel<ImplementedModel>(cti.startPointIdx, cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : cti.listIndexPtr);
+				cpu_kernel<ImplementedModel>(cti.startPointIdx, cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : cti.listIndexPtr,
+				idxSteps, getIndexFromIndices(cti.startPointIdx));
 
 			}
 
@@ -394,6 +398,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		cudaFree(deviceListIndexPtr);		cce();
 		cudaFree(deviceStartingPointIdx);	cce();
 		cudaFree(deviceLimits);				cce();
+		cudaFree(deviceIdxSteps);			cce();
 		cudaFree(deviceDataPtr);			cce();
 
 		// Make sure streams are finished and destroy them

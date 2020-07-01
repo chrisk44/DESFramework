@@ -31,7 +31,7 @@
 #define MAX_DIMENSIONS 30       // TODO: Calculate this accurately
 
 // Batch size slow-start and ratio limits
-#define SLOW_START_BATCH_SIZE_BASE 1000000    // BASE * (2^LIMIT) MUST FIT IN AN UNSIGNED LONG
+#define SLOW_START_BATCH_SIZE_BASE 4000000    // BASE * (2^LIMIT) MUST FIT IN AN UNSIGNED LONG
 #define SLOW_START_LIMIT 6
 #define MIN_MS_FOR_RATIO_ADJUSTMENT 0
 
@@ -90,7 +90,7 @@ void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
 struct Limit {
 	DATA_TYPE lowerLimit;
 	DATA_TYPE upperLimit;
-	unsigned long N;
+	unsigned int N;
     DATA_TYPE step;
 };
 

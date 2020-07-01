@@ -22,46 +22,66 @@ __global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
 
 // CUDA kernel to run the computation
 template<class ImplementedModel>
-__global__ void validate_kernel(ImplementedModel** model, unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned int numOfElements, unsigned int offset, void* dataPtr, int* listIndexPtr, int computeBatchSize) {
+__global__ void validate_kernel(ImplementedModel** model, const unsigned long* startingPointIdx, RESULT_TYPE* results, const Limit* limits, unsigned long startingPointLinearIndex,
+	const unsigned int D, const unsigned long long* idxSteps, const unsigned int numOfElements, const unsigned int offset, void* dataPtr,
+	int* listIndexPtr, const int computeBatchSize) {
 	unsigned int threadStart = offset + (((blockIdx.x * blockDim.x) + threadIdx.x) * computeBatchSize);
 	unsigned int end = min(offset + numOfElements, threadStart + computeBatchSize);
 
 	DATA_TYPE point[MAX_DIMENSIONS];
-	unsigned long currentIndex[MAX_DIMENSIONS];
-	unsigned long carry;
-	unsigned int d;
+	unsigned int currentIndex[MAX_DIMENSIONS];
+	int d, tmp;
 
 	// Load data on shared memory
-	__shared__ unsigned long shStartingPointIdx[MAX_DIMENSIONS];
-	__shared__ DATA_TYPE shStep[MAX_DIMENSIONS];
-	__shared__ unsigned int shN[MAX_DIMENSIONS];
-	__shared__ DATA_TYPE shLowerLimit[MAX_DIMENSIONS];
-	if(blockDim.x < D){
-		// If threads are <D, thread 0 will load everything
-		if(threadIdx.x == 0){
-			for(d=0 ; d<D; d++){
-				shStartingPointIdx[d] = startingPointIdx[d];
-				shStep[d] = limits[d].step;
-				shN[d] = limits[d].N;
-				shLowerLimit[d] = limits[d].lowerLimit;
-			}
-		}
-	}else if(threadIdx.x < D){
-		shStartingPointIdx[threadIdx.x] = startingPointIdx[threadIdx.x];
-		shStep[threadIdx.x] = limits[threadIdx.x].step;
-		shN[threadIdx.x] = limits[threadIdx.x].N;
-		shLowerLimit[threadIdx.x] = limits[threadIdx.x].lowerLimit;
-	}
-	__syncthreads();
+	// // __shared__ unsigned int shStartingPointIdx[MAX_DIMENSIONS];
+	// __shared__ DATA_TYPE shStep[MAX_DIMENSIONS];
+	// __shared__ unsigned int shN[MAX_DIMENSIONS];
+	// __shared__ DATA_TYPE shLowerLimit[MAX_DIMENSIONS];
+	// // __shared__ unsigned long long shIdxSteps[MAX_DIMENSIONS];
+	// if(blockDim.x < D){
+	// 	// If threads are <D, thread 0 will load everything
+	// 	if(threadIdx.x == 0){
+	// 		for(d=0 ; d<D; d++){
+	// 			// shStartingPointIdx[d] = startingPointIdx[d];
+	// 			shStep[d] = limits[d].step;
+	// 			shN[d] = limits[d].N;
+	// 			shLowerLimit[d] = limits[d].lowerLimit;
+	// 			// shIdxSteps[d] = idxSteps[d];
+	// 		}
+	// 	}
+	// }else if(threadIdx.x < D){
+	// 	// shStartingPointIdx[threadIdx.x] = startingPointIdx[threadIdx.x];
+	// 	shStep[threadIdx.x] = limits[threadIdx.x].step;
+	// 	shN[threadIdx.x] = limits[threadIdx.x].N;
+	// 	shLowerLimit[threadIdx.x] = limits[threadIdx.x].lowerLimit;
+	// 	// shIdxSteps[threadIdx.x] = idxSteps[threadIdx.x];
+	// }
+	// __syncthreads();
 
 	// Initialize currentIndex and point
-	carry = threadStart;
-	for (d = 0; d < D; d++) {
-		currentIndex[d] = (shStartingPointIdx[d] + carry) % shN[d];
-		carry = (shStartingPointIdx[d] + carry) / shN[d];
+	// int carry = threadStart;
+	// for (d = 0; d < D; d++) {
+	// 	tmp = startingPointIdx[d];
+	// 	if(carry == 0){
+	// 		currentIndex[d] = tmp;
+	// 	}else{
+	// 		currentIndex[d] = (tmp + carry) % limits[d].N;
+	// 		carry = (tmp + carry) / limits[d].N;
+	// 	}
+	//
+	// 	// Calculate the exact coordinate i
+	// 	point[d] = limits[d].lowerLimit + currentIndex[d] * limits[d].step;
+	// }
+	unsigned long remainder;
+	remainder = threadStart + startingPointLinearIndex;
+	for (d = D-1; d>=0; d--){
+		tmp = idxSteps[d];
+
+		currentIndex[d] = remainder / tmp;
+		remainder -= currentIndex[d] * tmp;
 
 		// Calculate the exact coordinate i
-		point[d] = shLowerLimit[d] + currentIndex[d] * shStep[d];
+		point[d] = limits[d].lowerLimit + currentIndex[d] * limits[d].step;
 	}
 
 	while(threadStart < end){
@@ -75,9 +95,9 @@ __global__ void validate_kernel(ImplementedModel** model, unsigned long* startin
 			// Run the validation function and pass its result to toBool
 			if((*model)->toBool((*model)->validate_gpu(point, dataPtr))){
 				// Append element to the list
-				carry = atomicAdd(listIndexPtr, D);
+				tmp = atomicAdd(listIndexPtr, D);
 				for(d = 0; d < D; d++){
-					((DATA_TYPE *)results)[carry + d] = point[d];
+					((DATA_TYPE *)results)[tmp + d] = point[d];
 				}
 			}
 		}
@@ -91,13 +111,13 @@ __global__ void validate_kernel(ImplementedModel** model, unsigned long* startin
 			if(currentIndex[d] < limits[d].N){
 				// No need to recalculate the rest of the dimensions
 
-				// point[d] += limits[d].step is also an option
-				point[d] = shLowerLimit[d] + shStep[d] * currentIndex[d];
+				point[d] += limits[d].step; // is also an option
+				// point[d] = limits[d].lowerLimit + limits[d].step * currentIndex[d];
 				break;
 			}else{
 				// This dimension overflowed, initialize it and increment the next one
 				currentIndex[d] = 0;
-				point[d] = shLowerLimit[d];
+				point[d] = limits[d].lowerLimit;
 				d++;
 			}
 		}
@@ -108,7 +128,8 @@ __global__ void validate_kernel(ImplementedModel** model, unsigned long* startin
 
 // CPU kernel to run the computation
 template<class ImplementedModel>
-void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfElements, void* dataPtr, int* listIndexPtr) {
+void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfElements, void* dataPtr, int* listIndexPtr,
+	unsigned long long* idxSteps, unsigned long startingPointLinearIndex) {
 	ImplementedModel model = ImplementedModel();
 
 	omp_set_nested(1);		// We are already in a parallel region since slaveProcess()
@@ -117,7 +138,7 @@ void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* li
 		DATA_TYPE* point = new DATA_TYPE[D];
 		unsigned long* currentIndex = new unsigned long[D];
 		unsigned long carry;
-		unsigned int d, processed, localNumOfElements, elementsPerThread, start, end;
+		int d, processed, localNumOfElements, elementsPerThread, start, end;
 
 		// Calculate start and end
 		elementsPerThread = numOfElements / omp_get_num_threads();
@@ -129,14 +150,32 @@ void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* li
 		localNumOfElements = end - start;
 
 		// Initialize currentIndex and point
-		carry = start;
-		for (d = 0; d < D; d++) {
-			currentIndex[d] = (startingPointIdx[d] + carry) % limits[d].N;
-			carry = (startingPointIdx[d] + carry) / limits[d].N;
+		// carry = start;
+		// for (d = 0; d < D; d++) {
+		// 	currentIndex[d] = (startingPointIdx[d] + carry) % limits[d].N;
+		// 	carry = (startingPointIdx[d] + carry) / limits[d].N;
+		//
+		// 	// Calculate the exact coordinate i
+		// 	point[d] = limits[d].lowerLimit + currentIndex[d] * limits[d].step;
+		// }
+		long newIndex, remainder;
+		remainder = start + startingPointLinearIndex;
+		for (d = D-1; d>=0; d--){
+
+			newIndex = remainder / idxSteps[d];
+			currentIndex[d] = newIndex;
+			remainder -= newIndex*idxSteps[d];
 
 			// Calculate the exact coordinate i
 			point[d] = limits[d].lowerLimit + currentIndex[d] * limits[d].step;
 		}
+		// usleep(10000*omp_get_thread_num());
+		// printf("Staring point indices: ");
+		// for(d=0; d<D; d++) printf("%ld ", currentIndex[d]);
+		// printf("\n");
+		// printf("Staring point: ");
+		// for(d=0; d<D; d++) printf("%f ", point[d]);
+		// printf("\n");
 
 		processed = 0;
 		while(processed < localNumOfElements){
@@ -166,8 +205,8 @@ void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* li
 				if(currentIndex[d] < limits[d].N){
 					// No need to recalculate the rest of the dimensions
 
-					// point[d] += limits[d].step is also an option
-					point[d] = limits[d].lowerLimit + limits[d].step * currentIndex[d];
+					point[d] += limits[d].step; // is also an option
+					// point[d] = limits[d].lowerLimit + limits[d].step * currentIndex[d];
 					break;
 				}else{
 					// This dimension overflowed, initialize it and increment the next one
