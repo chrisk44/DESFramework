@@ -202,13 +202,16 @@ void run(int argc, char** argv){
     // Create the framework's parameters struct
     parameters.D = 10;
     parameters.resultSaveType = SAVE_TYPE_LIST;
-    parameters.processingType = PROCESSING_TYPE_BOTH;
+    parameters.processingType = PROCESSING_TYPE_CPU;
     parameters.dataPtr = (void*) modelDataPtr;
     parameters.dataSize = (1 + stations*8) * sizeof(float);
     parameters.threadBalancing = true;
     parameters.slaveBalancing = true;
     parameters.benchmark = false;
     parameters.batchSize = 200000000;
+    parameters.computeBatchSize = 2000;
+    parameters.blockSize = 256;
+    parameters.gpuStreams = 8;
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);
@@ -233,15 +236,15 @@ void run(int argc, char** argv){
     list = framework.getList(&length);
     printf("Results: %d\n", length);
     for(i=0; i<length; i++){
-        printf("(");
+        // printf("(");
         outfile << "(";
 
         for(j=0; j<parameters.D-1; j++){
-            printf("%f ", list[i*parameters.D + j]);
+            // printf("%f ", list[i*parameters.D + j]);
             outfile << list[i*parameters.D + j] << " ";
         }
 
-        printf("%f)\n", list[i*parameters.D + j]);
+        // printf("%f)\n", list[i*parameters.D + j]);
         outfile << list[i*parameters.D + j] << ")" << endl;
     }
 

@@ -28,7 +28,7 @@
 #define MEM_GPU_SPARE_BYTES 100*1024*1024
 
 // Computing parameters
-#define MAX_DIMENSIONS 20       // TODO: Calculate this accurately
+#define MAX_DIMENSIONS 30       // TODO: Calculate this accurately
 
 // Batch size slow-start and ratio limits
 #define SLOW_START_BATCH_SIZE_BASE 1000000    // BASE * (2^LIMIT) MUST FIT IN AN UNSIGNED LONG

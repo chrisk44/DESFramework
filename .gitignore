@@ -1,3 +1,4 @@
 parallelFramework
-*results.txt
+*results*.txt
+time.txt
 data/*

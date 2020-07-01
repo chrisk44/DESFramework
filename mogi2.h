@@ -188,7 +188,7 @@ void run(int argc, char** argv){
     parameters.slaveBalancing = true;
     parameters.benchmark = false;
     parameters.batchSize = 200000000;
-    parameters.computeBatchSize = 1000;
+    parameters.computeBatchSize = 500;
     parameters.blockSize = 256;
     parameters.gpuStreams = 8;
 
