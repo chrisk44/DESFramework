@@ -171,7 +171,6 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 	ImplementedModel** deviceModelAddress;	// GPU Memory to save the address of the 'Model' object on device
 	RESULT_TYPE* deviceResults;				// GPU Memory for results
 	int* deviceListIndexPtr;				// GPU Memory for list index for synchronization when saving the results as a list of points
-	unsigned long* deviceStartingPointIdx;	// GPU Memory to store the start point indices
 	unsigned long long* deviceIdxSteps;		// GPU Memory to store idxSteps
 	Limit* deviceLimits;					// GPU Memory to store the Limit structures
 	void* deviceDataPtr;					// GPU Memory to store any constant data
@@ -199,7 +198,6 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		cudaMalloc(&deviceModelAddress, sizeof(ImplementedModel**));				cce();
 		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));		cce();
 		cudaMalloc(&deviceListIndexPtr, sizeof(int));								cce();
-		cudaMalloc(&deviceStartingPointIdx, parameters->D * sizeof(unsigned long));	cce();
 		cudaMalloc(&deviceLimits, parameters->D * sizeof(Limit));					cce();
 		cudaMalloc(&deviceIdxSteps, parameters->D * sizeof(unsigned long long));			cce();
 		if(parameters->dataSize > 0){
@@ -220,7 +218,6 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 			printf("[%d] ComputeThread %d: deviceModelAddress: 0x%x\n", rank, cti.id, (void*) deviceModelAddress);
 			printf("[%d] ComputeThread %d: deviceResults: 0x%x\n", rank, cti.id, (void*) deviceResults);
 			printf("[%d] ComputeThread %d: deviceListIndexPtr: 0x%x\n", rank, cti.id, (void*) deviceListIndexPtr);
-			printf("[%d] ComputeThread %d: deviceStartingPointIdx: 0x%x\n", rank, cti.id, (void*) deviceStartingPointIdx);
 			printf("[%d] ComputeThread %d: deviceLimits: 0x%x\n", rank, cti.id, (void*) deviceLimits);
 			printf("[%d] ComputeThread %d: deviceDataPtr: 0x%x\n", rank, cti.id, (void*) deviceDataPtr);
 		#endif
@@ -279,8 +276,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 			// If GPU...
 			if (cti.id > -1) {
 
-				// Copy starting point indices to device and initialize the list index counter
-				cudaMemcpy(deviceStartingPointIdx, cti.startPointIdx, parameters->D * sizeof(unsigned long), cudaMemcpyHostToDevice);	cce();
+				// Initialize the list index counter
 				cudaMemset(deviceListIndexPtr, 0, sizeof(int));
 
 				// Divide the chunk to smaller chunks to scatter accross streams
@@ -306,7 +302,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					int blockSize = min(parameters->blockSize, gpuThreads);
 					int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
 					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, 0, streams[i]>>>(		// Note: Point at the start of deviceResults, because the offset is calculated in the kernel
-						deviceModelAddress, deviceStartingPointIdx, deviceResults, deviceLimits, getIndexFromIndices(cti.startPointIdx),
+						deviceModelAddress, deviceResults, deviceLimits, getIndexFromIndices(cti.startPointIdx),
 						parameters->D, deviceIdxSteps, elementsPerStream, skip, deviceDataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr, parameters->computeBatchSize
 					);
 
@@ -348,7 +344,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 			} else {
 
-				cpu_kernel<ImplementedModel>(cti.startPointIdx, cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : cti.listIndexPtr,
+				cpu_kernel<ImplementedModel>(cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : cti.listIndexPtr,
 				idxSteps, getIndexFromIndices(cti.startPointIdx));
 
 			}
@@ -396,7 +392,6 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		cudaFree(deviceModelAddress);		cce();
 		cudaFree(deviceResults);			cce();
 		cudaFree(deviceListIndexPtr);		cce();
-		cudaFree(deviceStartingPointIdx);	cce();
 		cudaFree(deviceLimits);				cce();
 		cudaFree(deviceIdxSteps);			cce();
 		cudaFree(deviceDataPtr);			cce();

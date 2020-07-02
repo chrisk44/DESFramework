@@ -182,7 +182,7 @@ void run(int argc, char** argv){
     parameters.batchSize = 200000000;
     parameters.computeBatchSize = 200;
     parameters.blockSize = 256;
-    parameters.gpuStreams = 16;
+    parameters.gpuStreams = 8;
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework(limits, parameters);

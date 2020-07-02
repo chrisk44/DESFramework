@@ -41,7 +41,7 @@
 #define DATA_MPI_TYPE MPI_DOUBLE
 
 // Debugging
-#define DBG_START_STOP      // Messages about starting/stopping processes and threads
+// #define DBG_START_STOP      // Messages about starting/stopping processes and threads
 // #define DBG_QUEUE           // Messages about queueing work (coordinator->worker threads, worker->gpu streams)
 // #define DBG_MPI_STEPS       // Messages after each MPI step
 // #define DBG_RATIO           // Messages about changes in ratios (masterProcess and coordinatorThread)
@@ -116,8 +116,8 @@ struct ParallelFrameworkParameters {
 	bool benchmark = false;
     void* dataPtr = nullptr;
     unsigned long dataSize = 0;
-    int blockSize = 1024;
-    int computeBatchSize = 1000;
+    int blockSize = 256;
+    int computeBatchSize = 200;
     int gpuStreams = 8;
 	// ...
 };

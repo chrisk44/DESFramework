@@ -22,7 +22,7 @@ __global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
 
 // CUDA kernel to run the computation
 template<class ImplementedModel>
-__global__ void validate_kernel(ImplementedModel** model, const unsigned long* startingPointIdx, RESULT_TYPE* results, const Limit* limits, unsigned long startingPointLinearIndex,
+__global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, const Limit* limits, unsigned long startingPointLinearIndex,
 	const unsigned int D, const unsigned long long* idxSteps, const unsigned int numOfElements, const unsigned int offset, void* dataPtr,
 	int* listIndexPtr, const int computeBatchSize) {
 	unsigned int threadStart = offset + (((blockIdx.x * blockDim.x) + threadIdx.x) * computeBatchSize);
@@ -30,49 +30,8 @@ __global__ void validate_kernel(ImplementedModel** model, const unsigned long* s
 
 	DATA_TYPE point[MAX_DIMENSIONS];
 	unsigned int currentIndex[MAX_DIMENSIONS];
-	int d, tmp;
-
-	// Load data on shared memory
-	// // __shared__ unsigned int shStartingPointIdx[MAX_DIMENSIONS];
-	// __shared__ DATA_TYPE shStep[MAX_DIMENSIONS];
-	// __shared__ unsigned int shN[MAX_DIMENSIONS];
-	// __shared__ DATA_TYPE shLowerLimit[MAX_DIMENSIONS];
-	// // __shared__ unsigned long long shIdxSteps[MAX_DIMENSIONS];
-	// if(blockDim.x < D){
-	// 	// If threads are <D, thread 0 will load everything
-	// 	if(threadIdx.x == 0){
-	// 		for(d=0 ; d<D; d++){
-	// 			// shStartingPointIdx[d] = startingPointIdx[d];
-	// 			shStep[d] = limits[d].step;
-	// 			shN[d] = limits[d].N;
-	// 			shLowerLimit[d] = limits[d].lowerLimit;
-	// 			// shIdxSteps[d] = idxSteps[d];
-	// 		}
-	// 	}
-	// }else if(threadIdx.x < D){
-	// 	// shStartingPointIdx[threadIdx.x] = startingPointIdx[threadIdx.x];
-	// 	shStep[threadIdx.x] = limits[threadIdx.x].step;
-	// 	shN[threadIdx.x] = limits[threadIdx.x].N;
-	// 	shLowerLimit[threadIdx.x] = limits[threadIdx.x].lowerLimit;
-	// 	// shIdxSteps[threadIdx.x] = idxSteps[threadIdx.x];
-	// }
-	// __syncthreads();
-
-	// Initialize currentIndex and point
-	// int carry = threadStart;
-	// for (d = 0; d < D; d++) {
-	// 	tmp = startingPointIdx[d];
-	// 	if(carry == 0){
-	// 		currentIndex[d] = tmp;
-	// 	}else{
-	// 		currentIndex[d] = (tmp + carry) % limits[d].N;
-	// 		carry = (tmp + carry) / limits[d].N;
-	// 	}
-	//
-	// 	// Calculate the exact coordinate i
-	// 	point[d] = limits[d].lowerLimit + currentIndex[d] * limits[d].step;
-	// }
-	unsigned long remainder;
+	int d;
+	unsigned long tmp, remainder;
 	remainder = threadStart + startingPointLinearIndex;
 	for (d = D-1; d>=0; d--){
 		tmp = idxSteps[d];
@@ -128,7 +87,7 @@ __global__ void validate_kernel(ImplementedModel** model, const unsigned long* s
 
 // CPU kernel to run the computation
 template<class ImplementedModel>
-void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfElements, void* dataPtr, int* listIndexPtr,
+void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfElements, void* dataPtr, int* listIndexPtr,
 	unsigned long long* idxSteps, unsigned long startingPointLinearIndex) {
 	ImplementedModel model = ImplementedModel();
 
@@ -150,14 +109,6 @@ void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* li
 		localNumOfElements = end - start;
 
 		// Initialize currentIndex and point
-		// carry = start;
-		// for (d = 0; d < D; d++) {
-		// 	currentIndex[d] = (startingPointIdx[d] + carry) % limits[d].N;
-		// 	carry = (startingPointIdx[d] + carry) / limits[d].N;
-		//
-		// 	// Calculate the exact coordinate i
-		// 	point[d] = limits[d].lowerLimit + currentIndex[d] * limits[d].step;
-		// }
 		long newIndex, remainder;
 		remainder = start + startingPointLinearIndex;
 		for (d = D-1; d>=0; d--){
@@ -169,13 +120,6 @@ void cpu_kernel(unsigned long* startingPointIdx, RESULT_TYPE* results, Limit* li
 			// Calculate the exact coordinate i
 			point[d] = limits[d].lowerLimit + currentIndex[d] * limits[d].step;
 		}
-		// usleep(10000*omp_get_thread_num());
-		// printf("Staring point indices: ");
-		// for(d=0; d<D; d++) printf("%ld ", currentIndex[d]);
-		// printf("\n");
-		// printf("Staring point: ");
-		// for(d=0; d<D; d++) printf("%f ", point[d]);
-		// printf("\n");
 
 		processed = 0;
 		while(processed < localNumOfElements){
