@@ -178,6 +178,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 	// GPU Runtime
 	cudaStream_t streams[parameters->gpuStreams];
 	int allocatedElements = 0;
+	cudaDeviceProp deviceProp;
+	bool useSharedMemory;
 
 	/*******************************************************************
 	************************* Initialization ***************************
@@ -187,6 +189,10 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 	if (cti.id > -1) {
 		// Select gpu[id]
 		cudaSetDevice(cti.id);
+
+		// Get device's properties for shared memory
+		cudaGetDeviceProperties(&deviceProp, cti.id);
+		useSharedMemory = parameters->dataSize <= deviceProp.sharedMemPerBlock;
 
 		// Create streams
 		for(int i=0; i<parameters->gpuStreams; i++){
@@ -301,9 +307,11 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					int gpuThreads = (elementsPerStream + parameters->computeBatchSize - 1) / parameters->computeBatchSize;
 					int blockSize = min(parameters->blockSize, gpuThreads);
 					int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
-					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, 0, streams[i]>>>(		// Note: Point at the start of deviceResults, because the offset is calculated in the kernel
+					// Note: Point at the start of deviceResults, because the offset is calculated in the kernel
+					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, useSharedMemory ? parameters->dataSize : 0, streams[i]>>>(
 						deviceModelAddress, deviceResults, deviceLimits, getIndexFromIndices(cti.startPointIdx),
-						parameters->D, deviceIdxSteps, elementsPerStream, skip, deviceDataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr, parameters->computeBatchSize
+						parameters->D, deviceIdxSteps, elementsPerStream, skip, deviceDataPtr, parameters->dataSize, useSharedMemory,
+						parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr, parameters->computeBatchSize
 					);
 
 					// Queue the memcpy in stream[i] only if we are saving as SAVE_TYPE_ALL (otherwise the results will be fetched at the end of the current computation)

@@ -24,7 +24,7 @@ __global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
 template<class ImplementedModel>
 __global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, const Limit* limits, unsigned long startingPointLinearIndex,
 	const unsigned int D, const unsigned long long* idxSteps, const unsigned int numOfElements, const unsigned int offset, void* dataPtr,
-	int* listIndexPtr, const int computeBatchSize) {
+	int dataSize, bool useSharedMemory, int* listIndexPtr, const int computeBatchSize) {
 	unsigned int threadStart = offset + (((blockIdx.x * blockDim.x) + threadIdx.x) * computeBatchSize);
 	unsigned int end = min(offset + numOfElements, threadStart + computeBatchSize);
 
@@ -32,6 +32,26 @@ __global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, 
 	unsigned int currentIndex[MAX_DIMENSIONS];
 	int d;
 	unsigned long tmp, remainder;
+
+	extern __shared__ char shDataPtr[];
+	if(useSharedMemory){
+		if(blockDim.x >= dataSize){
+			if(threadIdx.x < dataSize){
+				shDataPtr[threadIdx.x] = ((char*)dataPtr)[threadIdx.x];
+			}
+		}else{
+			if(threadIdx.x == 0){
+				for(int d=0; d<dataSize; d++){
+					shDataPtr[d] = ((char*)dataPtr)[d];
+				}
+			}
+		}
+
+		dataPtr = shDataPtr;
+
+		__syncthreads();
+	}
+
 	remainder = threadStart + startingPointLinearIndex;
 	for (d = D-1; d>=0; d--){
 		tmp = idxSteps[d];

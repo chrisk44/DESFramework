@@ -381,6 +381,8 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 	else
 		maxBatchSize = min(getDefaultCPUBatchSize(), getDefaultGPUBatchSize());
 
+	maxBatchSize = min((unsigned long)parameters->batchSize, (unsigned long)maxBatchSize);
+
 	if(maxBatchSize*parameters->D > INT_MAX && parameters->resultSaveType == SAVE_TYPE_LIST){
 		maxBatchSize = (INT_MAX - parameters->D) / parameters->D;
 	}else if(maxBatchSize > INT_MAX && parameters->resultSaveType == SAVE_TYPE_ALL){
