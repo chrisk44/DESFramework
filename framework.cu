@@ -48,65 +48,69 @@ void ParallelFramework::init(Limit* _limits, ParallelFrameworkParameters& _param
 		limits[i].step = abs(limits[i].upperLimit - limits[i].lowerLimit) / limits[i].N;
 	}
 
-	totalReceived = 0;
-	totalSent = 0;
-	totalElements = (unsigned long long)(idxSteps[parameters->D - 1]) * (unsigned long long)(limits[parameters->D - 1].N);
-	if(! (parameters->benchmark)){
-		if(parameters->resultSaveType == SAVE_TYPE_ALL){
-			if(parameters->saveFile == nullptr){
-				// No saveFile given, save everything in memory
-				finalResults = new RESULT_TYPE[totalElements];		// Uninitialized
-			}else{
-				// Open save file
-				saveFile = open(parameters->saveFile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-				if(saveFile == -1){
-					fatal("open failed");
-				}
+	if(rank == 0){
+		totalReceived = 0;
+		totalSent = 0;
+		totalElements = (unsigned long long)(idxSteps[parameters->D - 1]) * (unsigned long long)(limits[parameters->D - 1].N);
+		if(! (parameters->benchmark)){
+			if(parameters->resultSaveType == SAVE_TYPE_ALL){
+				if(parameters->saveFile == nullptr){
+					// No saveFile given, save everything in memory
+					finalResults = new RESULT_TYPE[totalElements];		// Uninitialized
+				}else{
+					// Open save file
+					saveFile = open(parameters->saveFile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+					if(saveFile == -1){
+						fatal("open failed");
+					}
 
-				// Enlarge the file
-				if(ftruncate(saveFile, totalElements * sizeof(RESULT_TYPE)) == -1){
-					fatal("ftruncate failed");
-				}
+					// Enlarge the file
+					if(ftruncate(saveFile, totalElements * sizeof(RESULT_TYPE)) == -1){
+						fatal("ftruncate failed");
+					}
 
-				// Map the save file in memory
-				finalResults = (RESULT_TYPE*) mmap(nullptr, totalElements * sizeof(RESULT_TYPE), PROT_WRITE, MAP_SHARED, saveFile, 0);
-				if(finalResults == MAP_FAILED){
-					fatal("mmap failed");
-				}
+					// Map the save file in memory
+					finalResults = (RESULT_TYPE*) mmap(nullptr, totalElements * sizeof(RESULT_TYPE), PROT_WRITE, MAP_SHARED, saveFile, 0);
+					if(finalResults == MAP_FAILED){
+						fatal("mmap failed");
+					}
 
-				#ifdef DBG_MEMORY
-					printf("[Init] finalResults: 0x%lx\n", finalResults);
-				#endif
-			}
-		}// else listResults will be allocated through realloc when they are needed
+					#ifdef DBG_MEMORY
+						printf("[Init] finalResults: 0x%lx\n", finalResults);
+					#endif
+				}
+			}// else listResults will be allocated through realloc when they are needed
+		}
+
+		toSendVector = new unsigned long[parameters->D];
+		for (i = 0; i < parameters->D; i++) {
+			toSendVector[i] = 0;
+		}
+
+		if (this->parameters->batchSize == 0)
+			this->parameters->batchSize = totalElements;
 	}
-
-	toSendVector = new unsigned long[parameters->D];
-	for (i = 0; i < parameters->D; i++) {
-		toSendVector[i] = 0;
-	}
-
-	if (this->parameters->batchSize == 0)
-		this->parameters->batchSize = totalElements;
 
 	valid = true;
 }
 
 ParallelFramework::~ParallelFramework() {
 	delete [] idxSteps;
-	if(parameters->saveFile == nullptr){
-		delete [] finalResults;
-	}else{
-		// Unmap the save file
-		munmap(finalResults, totalElements * sizeof(RESULT_TYPE));
+	if(rank == 0){
+		if(parameters->saveFile == nullptr){
+			delete [] finalResults;
+		}else{
+			// Unmap the save file
+			munmap(finalResults, totalElements * sizeof(RESULT_TYPE));
 
-		// Close the file
-		close(saveFile);
-	}
-	delete [] toSendVector;
-	if(listResults != NULL){
-		free(listResults);
-		listResultsSaved = 0;
+			// Close the file
+			close(saveFile);
+		}
+		delete [] toSendVector;
+		if(listResults != NULL){
+			free(listResults);
+			listResultsSaved = 0;
+		}
 	}
 	valid = false;
 }

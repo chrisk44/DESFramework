@@ -22,7 +22,7 @@ private:
 
 	// Runtime variables
 	unsigned long long* idxSteps = NULL;		// Index steps for each dimension
-	int saveFile;								// File descriptor for save file
+	int saveFile = -1;							// File descriptor for save file
 	RESULT_TYPE* finalResults = NULL;			// An array of N0 * N1 * ... * N(D-1)
 	DATA_TYPE* listResults = NULL;				// An array of points for which the validation function has returned non-zero value
 	unsigned long listResultsSaved = 0;			// Number of points saved in listResults
