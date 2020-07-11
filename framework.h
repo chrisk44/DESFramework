@@ -33,11 +33,12 @@ private:
 	unsigned long long totalElements = 0;		// Total elements
 
 	// MPI
-	int rank;
+	int rank = -1;
 
 public:
-	ParallelFramework(Limit* limits, ParallelFrameworkParameters& parameters);
+	ParallelFramework();
 	~ParallelFramework();
+	void init(Limit* limits, ParallelFrameworkParameters& parameters);
 
 	template<class ImplementedModel>
 	int run();
@@ -48,6 +49,7 @@ public:
 	unsigned long getIndexFromIndices(unsigned long* pointIdx);
 	unsigned long getIndexFromPoint(DATA_TYPE* point);
 	bool isValid();
+	int getRank();
 
 private:
 	void masterProcess();
@@ -65,9 +67,10 @@ private:
 
 template<class ImplementedModel>
 int ParallelFramework::run() {
-	// Initialize MPI
-	MPI_Init(nullptr, nullptr);
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	if(!valid){
+		printf("[%d] run() called for invalid framework\n", rank);
+		return -1;
+	}
 
 	if(rank == 0){
 
@@ -84,12 +87,6 @@ int ParallelFramework::run() {
 	}
 
 	MPI_Finalize();
-
-	// If we are a slave, stop here
-	if(rank != 0){
-		printf("[%d] run() exiting\n", rank);
-		exit(0);
-	}
 
 	return 0;
 }

@@ -7,17 +7,26 @@
 
 using namespace std;
 
-ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters& parameters) {
-	unsigned int i;
+ParallelFramework::ParallelFramework() {
+	// Initialize MPI
+	MPI_Init(nullptr, nullptr);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
 	valid = false;
+}
+void ParallelFramework::init(Limit* _limits, ParallelFrameworkParameters& _parameters){
+	unsigned int i;
+
+	parameters = &_parameters;
+	limits = _limits;
 
 	// Verify parameters
-	if (parameters.D == 0 || parameters.D>MAX_DIMENSIONS) {
+	if (parameters->D == 0 || parameters->D>MAX_DIMENSIONS) {
 		cout << "[Init] Error: Dimension must be between 1 and " << MAX_DIMENSIONS << endl;
 		return;
 	}
 
-	for (i = 0; i < parameters.D; i++) {
+	for (i = 0; i < parameters->D; i++) {
 		if (limits[i].lowerLimit > limits[i].upperLimit) {
 			cout << "[Init] Error: Limits for dimension " << i << ": Lower limit can't be higher than upper limit" << endl;
 			return;
@@ -29,27 +38,27 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 		}
 	}
 
-	idxSteps = new unsigned long long[parameters.D];
+	idxSteps = new unsigned long long[parameters->D];
 	idxSteps[0] = 1;
-	for (i = 1; i < parameters.D; i++) {
+	for (i = 1; i < parameters->D; i++) {
 		idxSteps[i] = idxSteps[i - 1] * limits[i-1].N;
 	}
 
-	for (i = 0; i < parameters.D; i++) {
+	for (i = 0; i < parameters->D; i++) {
 		limits[i].step = abs(limits[i].upperLimit - limits[i].lowerLimit) / limits[i].N;
 	}
 
 	totalReceived = 0;
 	totalSent = 0;
-	totalElements = (unsigned long long)(idxSteps[parameters.D - 1]) * (unsigned long long)(limits[parameters.D - 1].N);
-	if(! (parameters.benchmark)){
-		if(parameters.resultSaveType == SAVE_TYPE_ALL){
-			if(parameters.saveFile == nullptr){
+	totalElements = (unsigned long long)(idxSteps[parameters->D - 1]) * (unsigned long long)(limits[parameters->D - 1].N);
+	if(! (parameters->benchmark)){
+		if(parameters->resultSaveType == SAVE_TYPE_ALL){
+			if(parameters->saveFile == nullptr){
 				// No saveFile given, save everything in memory
 				finalResults = new RESULT_TYPE[totalElements];		// Uninitialized
 			}else{
 				// Open save file
-				saveFile = open(parameters.saveFile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+				saveFile = open(parameters->saveFile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 				if(saveFile == -1){
 					fatal("open failed");
 				}
@@ -72,13 +81,10 @@ ParallelFramework::ParallelFramework(Limit* limits, ParallelFrameworkParameters&
 		}// else listResults will be allocated through realloc when they are needed
 	}
 
-	toSendVector = new unsigned long[parameters.D];
-	for (i = 0; i < parameters.D; i++) {
+	toSendVector = new unsigned long[parameters->D];
+	for (i = 0; i < parameters->D; i++) {
 		toSendVector[i] = 0;
 	}
-
-	this->limits = limits;
-	this->parameters = &parameters;
 
 	if (this->parameters->batchSize == 0)
 		this->parameters->batchSize = totalElements;
@@ -762,4 +768,7 @@ void ParallelFramework::addToIdxVector(unsigned long* start, unsigned long* resu
 	if(overflow != nullptr){
 		*overflow = carry;
 	}
+}
+int ParallelFramework::getRank(){
+	return this->rank;
 }

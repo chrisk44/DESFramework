@@ -50,7 +50,8 @@ void run(int argc, char** argv){
     parameters.batchSize = 20147;
 
     // Initialize the framework object
-    ParallelFramework framework = ParallelFramework(limits, parameters);
+    ParallelFramework framework = ParallelFramework();
+    framework.init(limits, parameters);
     if (! framework.isValid()) {
         cout << "Error initializing framework: " << endl;
         exit(-1);
@@ -64,6 +65,9 @@ void run(int argc, char** argv){
         cout << "Error running the computation: " << result << endl;
         exit(-1);
     }
+    if(framework.getRank() != 0)
+        exit(0);
+
     printf("Time: %f ms\n", sw.getMsec());
 
     // Open file to write results
