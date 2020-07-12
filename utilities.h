@@ -41,11 +41,11 @@
 #define DATA_MPI_TYPE MPI_DOUBLE
 
 // Debugging
-// #define DBG_START_STOP      // Messages about starting/stopping processes and threads
-// #define DBG_QUEUE           // Messages about queueing work (coordinator->worker threads, worker->gpu streams)
-// #define DBG_MPI_STEPS       // Messages after each MPI step
-// #define DBG_RATIO           // Messages about changes in ratios (masterProcess and coordinatorThread)
-// #define DBG_DATA            // Messages about the exact data being assigned (start points)
+#define DBG_START_STOP      // Messages about starting/stopping processes and threads
+#define DBG_QUEUE           // Messages about queueing work (coordinator->worker threads, worker->gpu streams)
+#define DBG_MPI_STEPS       // Messages after each MPI step
+#define DBG_RATIO           // Messages about changes in ratios (masterProcess and coordinatorThread)
+#define DBG_DATA            // Messages about the exact data being assigned (start points)
 // #define DBG_MEMORY          // Messages about memory management (addresses, reallocations)
 // #define DBG_RESULTS         // Messages with the exact results being passed around
 // #define DBG_TIME            // Print time measuraments for various parts of the code
@@ -111,7 +111,7 @@ enum ResultSaveType {
 
 struct ParallelFrameworkParameters {
 	unsigned int D;
-	unsigned int batchSize;
+	unsigned long batchSize;
 	ProcessingType processingType = PROCESSING_TYPE_BOTH;
     ResultSaveType resultSaveType = SAVE_TYPE_ALL;
     char* saveFile = nullptr;
@@ -120,6 +120,7 @@ struct ParallelFrameworkParameters {
 	bool benchmark = false;
     void* dataPtr = nullptr;
     unsigned long dataSize = 0;
+    bool overrideMemoryRestrictions = false;
     int blockSize = 256;
     int computeBatchSize = 200;
     int gpuStreams = 8;
@@ -145,7 +146,7 @@ struct SlaveProcessInfo {
 
 struct ComputeThreadInfo{
     int id;
-    int numOfElements;
+    unsigned long numOfElements;
     unsigned long startPoint;
     RESULT_TYPE* results;
     sem_t semData;

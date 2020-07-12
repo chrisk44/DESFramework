@@ -23,10 +23,10 @@ __global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
 // CUDA kernel to run the computation
 template<class ImplementedModel>
 __global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, const Limit* limits, unsigned long startingPointLinearIndex,
-	const unsigned int D, const unsigned long long* idxSteps, const unsigned int numOfElements, const unsigned int offset, void* dataPtr,
+	const unsigned int D, const unsigned long long* idxSteps, const unsigned long numOfElements, const unsigned long offset, void* dataPtr,
 	int dataSize, bool useSharedMemory, int* listIndexPtr, const int computeBatchSize) {
-	unsigned int threadStart = offset + (((blockIdx.x * blockDim.x) + threadIdx.x) * computeBatchSize);
-	unsigned int end = min(offset + numOfElements, threadStart + computeBatchSize);
+	unsigned long threadStart = offset + (((blockIdx.x * blockDim.x) + threadIdx.x) * computeBatchSize);
+	unsigned long end = min(offset + numOfElements, threadStart + computeBatchSize);
 
 	DATA_TYPE point[MAX_DIMENSIONS];
 	unsigned int currentIndex[MAX_DIMENSIONS];
@@ -107,7 +107,7 @@ __global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, 
 
 // CPU kernel to run the computation
 template<class ImplementedModel>
-void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfElements, void* dataPtr, int* listIndexPtr,
+void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
 	unsigned long long* idxSteps, unsigned long startingPointLinearIndex) {
 	ImplementedModel model = ImplementedModel();
 
@@ -116,8 +116,8 @@ void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, int numOfEl
 	{
 		DATA_TYPE* point = new DATA_TYPE[D];
 		unsigned long* currentIndex = new unsigned long[D];
-		unsigned long carry;
-		int d, processed, localNumOfElements, elementsPerThread, start, end;
+		unsigned long carry, processed, localNumOfElements, elementsPerThread, start, end;
+		int d;
 
 		// Calculate start and end
 		elementsPerThread = numOfElements / omp_get_num_threads();

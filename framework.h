@@ -170,7 +170,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 	// GPU Runtime
 	cudaStream_t streams[parameters->gpuStreams];
-	int allocatedElements = 0;
+	unsigned long allocatedElements = 0;
 	cudaDeviceProp deviceProp;
 	bool useSharedMemory;
 
@@ -236,24 +236,25 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		// If more data available...
 		if (cti.numOfElements > 0) {
 			#ifdef DBG_START_STOP
-				printf("[%d] ComputeThread %d: Running for %d elements...\n", rank, cti.id, cti.numOfElements);
+				printf("[%d] ComputeThread %d: Running for %ld elements...\n", rank, cti.id, cti.numOfElements);
 			#endif
 			#ifdef DBG_DATA
-				printf("[%d] ComputeThread %d: Got %d elements starting from %ld\n", rank, cti.id, cti.numOfElements, cti.startPoint);
+				printf("[%d] ComputeThread %d: Got %ld elements starting from %ld\n", rank, cti.id, cti.numOfElements, cti.startPoint);
 			#endif
 			fflush(stdout);
 
 			/*****************************************************************
 			 If batchSize was increased, allocate more memory for the results
 			******************************************************************/
-			if (allocatedElements < cti.numOfElements && cti.id > -1) {
+			if (allocatedElements < cti.numOfElements && cti.id > -1 && allocatedElements < getDefaultGPUBatchSize()) {
+
 				#ifdef DBG_MEMORY
-					printf("[%d] ComputeThread %d: Allocating more GPU memory (%d -> %d elements, %ld MB)\n", rank,
+					printf("[%d] ComputeThread %d: Allocating more GPU memory (%ld -> %ld elements, %ld MB)\n", rank,
 							cti.id, allocatedElements, cti.numOfElements, (cti.numOfElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
 					fflush(stdout);
 				#endif
 
-				allocatedElements = cti.numOfElements;
+				allocatedElements = min(cti.numOfElements, getDefaultGPUBatchSize());
 
 				// Reallocate memory on device
 				cudaFree(deviceResults);
@@ -276,9 +277,9 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 				cudaMemset(deviceListIndexPtr, 0, sizeof(int));
 
 				// Divide the chunk to smaller chunks to scatter accross streams
-				int elementsPerStream = cti.numOfElements / parameters->gpuStreams;
+				unsigned long elementsPerStream = cti.numOfElements / parameters->gpuStreams;
 				bool onlyOne = false;
-				int skip = 0;
+				unsigned long skip = 0;
 				if(elementsPerStream == 0){
 					elementsPerStream = cti.numOfElements;
 					onlyOne = true;
@@ -310,7 +311,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					}
 
 					#ifdef DBG_QUEUE
-						printf("[%d] ComputeThread %d: Queueing %d elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%d\n", rank,
+						printf("[%d] ComputeThread %d: Queueing %ld elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%ld\n", rank,
 								cti.id, elementsPerStream, i, gpuThreads, numOfBlocks, blockSize, skip);
 					#endif
 
@@ -359,7 +360,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 		}
 		// else if computation is complete...
-		else if(cti.numOfElements == -1){
+		else if(cti.startPoint == 0){
 			// No more data, exit
 			break;
 		}

@@ -38,6 +38,11 @@ void ParallelFramework::init(Limit* _limits, ParallelFrameworkParameters& _param
 		}
 	}
 
+	if(parameters->overrideMemoryRestrictions && parameters->resultSaveType != SAVE_TYPE_LIST){
+		cout << "[Init] Error: Can't override memory restrictions when saving as SAVE_TYPE_ALL" << endl;
+		return;
+	}
+
 	idxSteps = new unsigned long long[parameters->D];
 	idxSteps[0] = 1;
 	for (i = 1; i < parameters->D; i++) {
@@ -127,7 +132,16 @@ void ParallelFramework::masterProcess() {
 	SlaveProcessInfo* slaveProcessInfo = new SlaveProcessInfo[numOfSlaves];
 	#define pinfo (slaveProcessInfo[mpiSource-1])
 
-	void* tmpResultsMem = malloc(parameters->resultSaveType == SAVE_TYPE_ALL ? parameters->batchSize * sizeof(RESULT_TYPE) : parameters->batchSize * parameters->D * sizeof(DATA_TYPE));
+	void* tmpResultsMem;
+	if(parameters->overrideMemoryRestrictions){
+		tmpResultsMem = malloc(getDefaultCPUBatchSize() * sizeof(DATA_TYPE));
+	}else{
+		tmpResultsMem = malloc(parameters->resultSaveType == SAVE_TYPE_ALL ? parameters->batchSize * sizeof(RESULT_TYPE) : parameters->batchSize * parameters->D * sizeof(DATA_TYPE));
+	}
+	if(tmpResultsMem == nullptr){
+		printf("[%d] Master: Error: Can't allocate memory for tmpResultsMem\n", rank);
+		exit(-1);
+	}
 	RESULT_TYPE* tmpResults = (RESULT_TYPE*) tmpResultsMem;
 	DATA_TYPE* tmpResultsList = (DATA_TYPE*) tmpResultsMem;
 	int tmpNumOfPoints;	// This need to be int because of MPI
@@ -179,15 +193,15 @@ void ParallelFramework::masterProcess() {
 
 				// Get next data batch to calculate
 				pinfo.work.startPoint = getDataChunk(
-					parameters->resultSaveType == SAVE_TYPE_ALL ? min((int)(pinfo.ratio * parameters->batchSize), (int)pinfo.maxBatchSize) : (int)pinfo.maxBatchSize,
+					parameters->resultSaveType == SAVE_TYPE_ALL ? min((unsigned long)(pinfo.ratio * parameters->batchSize), (unsigned long)pinfo.maxBatchSize) : (unsigned long)pinfo.maxBatchSize,
 					&pinfo.work.numOfElements
 				);
 
 				#ifdef DBG_MPI_STEPS
-					printf("[%d] Master: Sending %d elements to %d with index %d\n", rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
+					printf("[%d] Master: Sending %ld elements to %d with index %ld\n", rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
 				#endif
 				#ifdef DBG_DATA
-					printf("[%d] Master: Sending %d elements to %d with index %d\n", rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
+					printf("[%d] Master: Sending %ld elements to %d with index %ld\n", rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
 				#endif
 
 				// Send the batch to the slave process
@@ -210,9 +224,9 @@ void ParallelFramework::masterProcess() {
 
 				// Receive the results
 				if(parameters->resultSaveType == SAVE_TYPE_ALL){
-					MMPI_Recv(tmpResults, pinfo.maxBatchSize, RESULT_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
+					MMPI_Recv(tmpResults, pinfo.work.numOfElements, RESULT_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
 				}else{
-					MMPI_Recv(tmpResultsList, pinfo.maxBatchSize * parameters->D, DATA_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
+					MMPI_Recv(tmpResultsList, parameters->overrideMemoryRestrictions ? INT_MAX : pinfo.work.numOfElements * parameters->D, DATA_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
 
 					// Find the number of points in list
 					MPI_Get_count(&status, DATA_MPI_TYPE, &tmpNumOfPoints);
@@ -248,7 +262,7 @@ void ParallelFramework::masterProcess() {
 						for (int i = 0; i < pinfo.work.numOfElements; i++) {
 							printf("%f ", tmpResults[i]);
 						}
-						printf(" at %d\n", pinfo.work.startPoint);
+						printf(" at %ld\n", pinfo.work.startPoint);
 					}else{
 						printf("[%d] Master: Saving tmpResultsList: ", rank);
 						for (int i = 0; i < tmpNumOfPoints; i++){
@@ -288,7 +302,7 @@ void ParallelFramework::masterProcess() {
 
 				// Print benchmark results
 				if (parameters->benchmark) {
-					printf("[%d] Master: Slave %d benchmark: %d elements, %f ms\n", rank, mpiSource, pinfo.work.numOfElements, pinfo.stopwatch.getMsec());
+					printf("[%d] Master: Slave %d benchmark: %ld elements, %f ms\n", rank, mpiSource, pinfo.work.numOfElements, pinfo.stopwatch.getMsec());
 				}
 
 				if(parameters->slaveBalancing && numOfSlaves > 1){
@@ -335,7 +349,7 @@ void ParallelFramework::masterProcess() {
 				#endif
 
 				if(pinfo.work.numOfElements != 0){
-					printf("[%d] Master: Error: Slave %d exited with %d assigned elements!!\n", rank, mpiSource, pinfo.work.numOfElements);
+					printf("[%d] Master: Error: Slave %d exited with %ld assigned elements!!\n", rank, mpiSource, pinfo.work.numOfElements);
 				}
 
 				pinfo.work.startPoint = totalElements;
@@ -366,24 +380,28 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		float time_data, time_split, time_assign, time_start, time_wait, time_scores, time_results;
 	#endif
 
-	if(parameters->processingType == PROCESSING_TYPE_CPU)
-		maxBatchSize = getDefaultCPUBatchSize();
-	else if(parameters->processingType == PROCESSING_TYPE_GPU)
-		maxBatchSize = getDefaultGPUBatchSize();
-	else
-		maxBatchSize = min(getDefaultCPUBatchSize(), getDefaultGPUBatchSize());
+	if(parameters->overrideMemoryRestrictions){
+		maxBatchSize = parameters->batchSize;
+	}else{
+		if(parameters->processingType == PROCESSING_TYPE_CPU)
+			maxBatchSize = getDefaultCPUBatchSize();
+		else if(parameters->processingType == PROCESSING_TYPE_GPU)
+			maxBatchSize = getDefaultGPUBatchSize();
+		else
+			maxBatchSize = min(getDefaultCPUBatchSize(), getDefaultGPUBatchSize());
 
-	maxBatchSize = min((unsigned long)parameters->batchSize, (unsigned long)maxBatchSize);
+		maxBatchSize = min((unsigned long)parameters->batchSize, (unsigned long)maxBatchSize);
 
-	if(maxBatchSize*parameters->D > INT_MAX && parameters->resultSaveType == SAVE_TYPE_LIST){
-		maxBatchSize = (INT_MAX - parameters->D) / parameters->D;
-	}else if(maxBatchSize > INT_MAX && parameters->resultSaveType == SAVE_TYPE_ALL){
-		maxBatchSize = INT_MAX;
+		if(maxBatchSize*parameters->D > INT_MAX && parameters->resultSaveType == SAVE_TYPE_LIST){
+			maxBatchSize = (INT_MAX - parameters->D) / parameters->D;
+		}else if(maxBatchSize > INT_MAX && parameters->resultSaveType == SAVE_TYPE_ALL){
+			maxBatchSize = INT_MAX;
+		}
 	}
 
 
 	#ifdef DBG_START_STOP
-		printf("[%d] Coordinator: Max batch size: %d\n", rank, maxBatchSize);
+		printf("[%d] Coordinator: Max batch size: %ld\n", rank, maxBatchSize);
 	#endif
 
 	while(true){
@@ -402,10 +420,10 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		MMPI_Recv(&work, 2, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, &status);
 
 		#ifdef DBG_DATA
-			printf("[%d] Coordinator: Received %d elements starting from %ld\n", rank, work.numOfElements, work.startPoint);
+			printf("[%d] Coordinator: Received %ld elements starting from %ld\n", rank, work.numOfElements, work.startPoint);
 		#endif
 		#ifdef DBG_MPI_STEPS
-			printf("[%d] Coordinator: Received %d elements\n", rank, work.numOfElements);
+			printf("[%d] Coordinator: Received %ld elements\n", rank, work.numOfElements);
 		#endif
 
 		// If no results, break
@@ -415,7 +433,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		// Make sure we have enough allocated memory for localResults
 		if(work.numOfElements > allocatedElements){
 			#ifdef DBG_MEMORY
-				printf("[%d] Coordinator: Allocating more memory for localResults: %d (0x%x) -> ", rank, allocatedElements, localResults);
+				printf("[%d] Coordinator: Allocating more memory for localResults: %ld (0x%x) -> ", rank, allocatedElements, localResults);
 			#endif
 
 			allocatedElements = work.numOfElements;
@@ -425,7 +443,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 			}
 
 			#ifdef DBG_MEMORY
-				printf("%d (0x%x)\n", allocatedElements, localResults);
+				printf("%ld (0x%x)\n", allocatedElements, localResults);
 			#endif
 		}
 
@@ -436,7 +454,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		#endif
 
 		// Split the data into pieces for each thread
-		int total = 0;
+		unsigned long total = 0;
 		for(int i=0; i<numOfThreads; i++){
 			cti[i].numOfElements = work.numOfElements * cti[i].ratio;
 			total += cti[i].numOfElements;
@@ -489,7 +507,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 			}
 
 			#ifdef DBG_QUEUE
-				printf("[%d] Coordinator: Thread %d -> Assigning %d elements starting from %ld with results at 0x%x\n", rank, i, cti[i].numOfElements, cti[i].startPoint, cti[i].results);
+				printf("[%d] Coordinator: Thread %d -> Assigning %ld elements starting from %ld with results at 0x%x\n", rank, i, cti[i].numOfElements, cti[i].startPoint, cti[i].results);
 			#endif
 		}
 
@@ -627,7 +645,8 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 
 	// Notify worker threads to finish
 	for(int i=0; i<numOfThreads; i++){
-		cti[i].numOfElements = -1;
+		cti[i].numOfElements = 0;
+		cti[i].startPoint = 0;
 		sem_post(&cti[i].semData);
 	}
 

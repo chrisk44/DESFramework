@@ -1,4 +1,5 @@
 #include <fstream>
+#include <limits.h>
 
 #include "framework.h"
 #include "mogi_common.h"
@@ -187,10 +188,11 @@ void run(int argc, char** argv){
     parameters.threadBalancing = true;
     parameters.slaveBalancing = true;
     parameters.benchmark = false;
-    parameters.batchSize = 200000000;
+    parameters.batchSize = ULONG_MAX;
     parameters.computeBatchSize = 200;
     parameters.blockSize = 256;
     parameters.gpuStreams = 8;
+    parameters.overrideMemoryRestrictions = true;
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework();
@@ -210,7 +212,7 @@ void run(int argc, char** argv){
     }
     if(framework.getRank() != 0)
         exit(0);
-    
+
     printf("Time: %f ms\n", sw.getMsec());
 
     // Open file to write results
