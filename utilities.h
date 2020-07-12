@@ -53,8 +53,7 @@
 
 // MPI
 #define RECV_SLEEP_US 100     // Time in micro-seconds to sleep between checking for data in MPI_Recv
-#define TAG_READY 0
-#define TAG_DATA_COUNT 1
+#define TAG_READY 1
 #define TAG_DATA 2
 #define TAG_RESULTS 3
 #define TAG_MAX_DATA_COUNT 4
@@ -94,6 +93,11 @@ struct Limit {
     DATA_TYPE step;
 };
 
+struct AssignedWork {
+    unsigned long startPoint;
+    unsigned long numOfElements;
+};
+
 enum ProcessingType {
 	PROCESSING_TYPE_CPU,
 	PROCESSING_TYPE_GPU,
@@ -128,8 +132,7 @@ struct SlaveProcessInfo {
     int id;
 	unsigned long maxBatchSize;
 	unsigned long currentBatchSize;
-    unsigned long computingIndex;
-    int assignedElements;
+    AssignedWork work;
 	unsigned int jobsCompleted;
 	unsigned elementsCalculated;
 	bool finished;

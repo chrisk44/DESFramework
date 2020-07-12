@@ -130,7 +130,7 @@ void ParallelFramework::masterProcess() {
 	void* tmpResultsMem = malloc(parameters->resultSaveType == SAVE_TYPE_ALL ? parameters->batchSize * sizeof(RESULT_TYPE) : parameters->batchSize * parameters->D * sizeof(DATA_TYPE));
 	RESULT_TYPE* tmpResults = (RESULT_TYPE*) tmpResultsMem;
 	DATA_TYPE* tmpResultsList = (DATA_TYPE*) tmpResultsMem;
-	int tmpNumOfElements, tmpNumOfPoints;	// These need to be int because of MPI
+	int tmpNumOfPoints;	// This need to be int because of MPI
 
 	#ifdef DBG_TIME
 		Stopwatch sw;
@@ -139,8 +139,6 @@ void ParallelFramework::masterProcess() {
 	for(int i=0; i<numOfSlaves; i++){
 		slaveProcessInfo[i].id = i + 1;
 		slaveProcessInfo[i].currentBatchSize = parameters->batchSize;
-		slaveProcessInfo[i].computingIndex = 0;
-		slaveProcessInfo[i].assignedElements = 0;
 		slaveProcessInfo[i].jobsCompleted = 0;
 		slaveProcessInfo[i].elementsCalculated = 0;
 		slaveProcessInfo[i].finished = false;
@@ -180,25 +178,23 @@ void ParallelFramework::masterProcess() {
 				}
 
 				// Get next data batch to calculate
-				pinfo.computingIndex = getDataChunk(
+				pinfo.work.startPoint = getDataChunk(
 					parameters->resultSaveType == SAVE_TYPE_ALL ? min((int)(pinfo.ratio * parameters->batchSize), (int)pinfo.maxBatchSize) : (int)pinfo.maxBatchSize,
-					&tmpNumOfElements
+					&pinfo.work.numOfElements
 				);
 
 				#ifdef DBG_MPI_STEPS
-					printf("[%d] Master: Sending %d elements to %d with index %d\n", rank, tmpNumOfElements, mpiSource, pinfo.computingIndex);
+					printf("[%d] Master: Sending %d elements to %d with index %d\n", rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
 				#endif
 				#ifdef DBG_DATA
-					printf("[%d] Master: Sending %d elements to %d with index %d\n", rank, tmpNumOfElements, mpiSource, pinfo.computingIndex);
+					printf("[%d] Master: Sending %d elements to %d with index %d\n", rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
 				#endif
 
 				// Send the batch to the slave process
-				MPI_Send(&tmpNumOfElements, 1, MPI_INT, mpiSource, TAG_DATA_COUNT, MPI_COMM_WORLD);
-				MPI_Send(&pinfo.computingIndex, 1, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, MPI_COMM_WORLD);
+				MPI_Send(&pinfo.work, 2, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, MPI_COMM_WORLD);
 
-				// Update details for process
+				// Start stopwatch for process
 				pinfo.stopwatch.start();
-				pinfo.assignedElements = tmpNumOfElements;
 
 				#ifdef DBG_TIME
 					sw.stop();
@@ -215,9 +211,6 @@ void ParallelFramework::masterProcess() {
 				// Receive the results
 				if(parameters->resultSaveType == SAVE_TYPE_ALL){
 					MMPI_Recv(tmpResults, pinfo.maxBatchSize, RESULT_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
-
-					// Find the length of the results
-					MPI_Get_count(&status, RESULT_MPI_TYPE, &tmpNumOfElements);	// This is equal to pinfo.assignedElements
 				}else{
 					MMPI_Recv(tmpResultsList, pinfo.maxBatchSize * parameters->D, DATA_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
 
@@ -228,7 +221,7 @@ void ParallelFramework::masterProcess() {
 					tmpNumOfPoints /= parameters->D;
 				}
 
-				this->totalReceived += tmpNumOfElements;
+				this->totalReceived += pinfo.work.numOfElements;
 
 				masterStopwatch.stop();
 				t = masterStopwatch.getMsec()/1000;
@@ -244,7 +237,7 @@ void ParallelFramework::masterProcess() {
 
 				#ifdef DBG_MPI_STEPS
 					if(parameters->resultSaveType == SAVE_TYPE_ALL)
-						printf("[%d] Master: Saving %ld results from slave %d to finalResults[%ld]...\n", rank, tmpNumOfElements, mpiSource, pinfo.computingIndex);
+						printf("[%d] Master: Saving %ld results from slave %d to finalResults[%ld]...\n", rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
 					else
 						printf("[%d] Master: Saving %ld points from slave %d to listResults[%ld]...\n", rank, tmpNumOfPoints, mpiSource, listResultsSaved);
 
@@ -252,10 +245,10 @@ void ParallelFramework::masterProcess() {
 				#ifdef DBG_RESULTS
 					if(parameters->resultSaveType == SAVE_TYPE_ALL){
 						printf("[%d] Master: Saving tmpResults: ", rank);
-						for (int i = 0; i < tmpNumOfElements; i++) {
+						for (int i = 0; i < pinfo.work.numOfElements; i++) {
 							printf("%f ", tmpResults[i]);
 						}
-						printf(" at %d\n", pinfo.computingIndex);
+						printf(" at %d\n", pinfo.work.startPoint);
 					}else{
 						printf("[%d] Master: Saving tmpResultsList: ", rank);
 						for (int i = 0; i < tmpNumOfPoints; i++){
@@ -272,7 +265,7 @@ void ParallelFramework::masterProcess() {
 				// Copy the received results to finalResults or listResults
 				if( ! (parameters->benchmark)){
 					if(parameters->resultSaveType == SAVE_TYPE_ALL){
-						memcpy(&finalResults[pinfo.computingIndex], tmpResults, tmpNumOfElements*sizeof(RESULT_TYPE));
+						memcpy(&finalResults[pinfo.work.startPoint], tmpResults, pinfo.work.numOfElements*sizeof(RESULT_TYPE));
 					}else if(tmpNumOfPoints > 0){
 						// Reallocate listResults
 						listResultsSaved += tmpNumOfPoints;
@@ -288,14 +281,14 @@ void ParallelFramework::masterProcess() {
 
 				// Update pinfo
 				pinfo.jobsCompleted++;
-				pinfo.elementsCalculated += tmpNumOfElements;
+				pinfo.elementsCalculated += pinfo.work.numOfElements;
 				pinfo.stopwatch.stop();
-				pinfo.lastScore = pinfo.assignedElements / pinfo.stopwatch.getMsec();
-				pinfo.lastAssignedElements = pinfo.assignedElements;
+				pinfo.lastScore = pinfo.work.numOfElements / pinfo.stopwatch.getMsec();
+				pinfo.lastAssignedElements = pinfo.work.numOfElements;
 
 				// Print benchmark results
 				if (parameters->benchmark) {
-					printf("[%d] Master: Slave %d benchmark: %d elements, %f ms\n", rank, mpiSource, pinfo.assignedElements, pinfo.stopwatch.getMsec());
+					printf("[%d] Master: Slave %d benchmark: %d elements, %f ms\n", rank, mpiSource, pinfo.work.numOfElements, pinfo.stopwatch.getMsec());
 				}
 
 				if(parameters->slaveBalancing && numOfSlaves > 1){
@@ -327,7 +320,7 @@ void ParallelFramework::masterProcess() {
 				}
 
 				// Reset pinfo
-				pinfo.assignedElements = 0;
+				pinfo.work.numOfElements = 0;
 
 				#ifdef DBG_TIME
 					sw.stop();
@@ -341,11 +334,11 @@ void ParallelFramework::masterProcess() {
 					printf("[%d] Master: Slave %d exiting\n", rank, mpiSource);
 				#endif
 
-				if(pinfo.assignedElements != 0){
-					printf("[%d] Master: Error: Slave %d exited with %d assigned elements!!\n", rank, mpiSource, pinfo.assignedElements);
+				if(pinfo.work.numOfElements != 0){
+					printf("[%d] Master: Error: Slave %d exited with %d assigned elements!!\n", rank, mpiSource, pinfo.work.numOfElements);
 				}
 
-				pinfo.computingIndex = totalElements;
+				pinfo.work.startPoint = totalElements;
 				pinfo.finished = true;
 
 				finished++;
@@ -362,9 +355,8 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 	sem_t* semResults = cti[0].semResults;
 	int* globalListIndexPtr = cti[0].listIndexPtr;
 
-	int numOfElements;
+	AssignedWork work;
 	unsigned long maxBatchSize;
-	unsigned long startPoint;
 	unsigned long allocatedElements = 0;
 	RESULT_TYPE* localResults = nullptr;
 	MPI_Status status;
@@ -407,27 +399,26 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		MPI_Send(&maxBatchSize, 1, MPI_UNSIGNED_LONG, 0, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD);
 
 		// Receive a batch of data from master
-		MMPI_Recv(&numOfElements, 1, MPI_INT, 0, TAG_DATA_COUNT, MPI_COMM_WORLD, &status);
-		MMPI_Recv(&startPoint, 1, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, &status);
+		MMPI_Recv(&work, 2, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, &status);
 
 		#ifdef DBG_DATA
-			printf("[%d] Coordinator: Received %d elements starting from %ld\n", rank, numOfElements, startingPointLinearIndex);
+			printf("[%d] Coordinator: Received %d elements starting from %ld\n", rank, work.numOfElements, work.startPoint);
 		#endif
 		#ifdef DBG_MPI_STEPS
-			printf("[%d] Coordinator: Received %d elements\n", rank, numOfElements);
+			printf("[%d] Coordinator: Received %d elements\n", rank, work.numOfElements);
 		#endif
 
 		// If no results, break
-		if(numOfElements == 0)
+		if(work.numOfElements == 0)
 			break;
 
 		// Make sure we have enough allocated memory for localResults
-		if(numOfElements > allocatedElements){
+		if(work.numOfElements > allocatedElements){
 			#ifdef DBG_MEMORY
 				printf("[%d] Coordinator: Allocating more memory for localResults: %d (0x%x) -> ", rank, allocatedElements, localResults);
 			#endif
 
-			allocatedElements = numOfElements;
+			allocatedElements = work.numOfElements;
 			localResults = (RESULT_TYPE*) realloc(localResults, allocatedElements * sizeof(RESULT_TYPE));
 			if(localResults == nullptr){
 				fatal("Can't allocate memory for localResults");
@@ -447,19 +438,19 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		// Split the data into pieces for each thread
 		int total = 0;
 		for(int i=0; i<numOfThreads; i++){
-			cti[i].numOfElements = numOfElements * cti[i].ratio;
+			cti[i].numOfElements = work.numOfElements * cti[i].ratio;
 			total += cti[i].numOfElements;
 		}
-		if(total < numOfElements){
+		if(total < work.numOfElements){
 			// Something was left out, assign it to first thread
-			cti[0].numOfElements += numOfElements - total;
-		}else if(total > numOfElements){
+			cti[0].numOfElements += work.numOfElements - total;
+		}else if(total > work.numOfElements){
 			// More elements were given, remove from the first threads
 			for(int i=0; i<numOfThreads; i++){
 				// If thread i has enough elements, remove all the extra from it
-				if(cti[i].numOfElements > total-numOfElements){
-					cti[i].numOfElements -= total-numOfElements;
-					total = numOfElements;
+				if(cti[i].numOfElements > total - work.numOfElements){
+					cti[i].numOfElements -= total - work.numOfElements;
+					total = work.numOfElements;
 					break;
 				}
 
@@ -480,7 +471,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 
 			if(i==0){
 				// Set the starting point as the sessions starting point
-				cti[i].startPoint = startPoint;
+				cti[i].startPoint = work.startPoint;
 
 				// Set results as the start of global results
 				cti[i].results = localResults;
@@ -498,7 +489,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 			}
 
 			#ifdef DBG_QUEUE
-				printf("[%d] Coordinator: Thread %d -> Assigning %d elements starting from %ld with results at 0x%x\n", rank, i, cti[i].numOfElements, cti[i].startingPointLinearIndex, cti[i].results);
+				printf("[%d] Coordinator: Thread %d -> Assigning %d elements starting from %ld with results at 0x%x\n", rank, i, cti[i].numOfElements, cti[i].startPoint, cti[i].results);
 			#endif
 		}
 
@@ -539,7 +530,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		#ifdef DBG_RESULTS
 			if(parameters->resultSaveType == SAVE_TYPE_ALL){
 				printf("[%d] Coordinator: Results: [", rank);
-				for(int i=0; i<numOfElements; i++){
+				for(int i=0; i<work.numOfElements; i++){
 					printf("%f ", localResults[i]);
 				}
 				printf("]\n");
@@ -610,7 +601,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
 		if(parameters->resultSaveType == SAVE_TYPE_ALL){
 			// Send all the results
-			MPI_Send(localResults, numOfElements, RESULT_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
+			MPI_Send(localResults, work.numOfElements, RESULT_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
 		}else{
 			// Send the list of points
 			MPI_Send(localResults, *globalListIndexPtr, DATA_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
@@ -643,7 +634,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 	free(localResults);
 }
 
-unsigned long ParallelFramework::getDataChunk(unsigned long batchSize, int* numOfElements) {
+unsigned long ParallelFramework::getDataChunk(unsigned long batchSize, unsigned long* numOfElements) {
 	unsigned long toSend;
 
 	if (totalSent >= totalElements) {

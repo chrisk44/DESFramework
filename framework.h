@@ -53,7 +53,7 @@ public:
 private:
 	void masterProcess();
 	void coordinatorThread(ComputeThreadInfo* cti, int numOfThreads, Model* model);
-	unsigned long getDataChunk(unsigned long maxBatchSize, int *numOfElements);
+	unsigned long getDataChunk(unsigned long maxBatchSize, unsigned long *numOfElements);
 	void getPointFromIndex(unsigned long index, DATA_TYPE* result);
 
 	template<class ImplementedModel>
@@ -239,7 +239,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 				printf("[%d] ComputeThread %d: Running for %d elements...\n", rank, cti.id, cti.numOfElements);
 			#endif
 			#ifdef DBG_DATA
-				printf("[%d] ComputeThread %d: Got %d elements starting from %ld\n", rank, cti.id, cti.numOfElements, cti.startingPointLinearIndex);
+				printf("[%d] ComputeThread %d: Got %d elements starting from %ld\n", rank, cti.id, cti.numOfElements, cti.startPoint);
 			#endif
 			fflush(stdout);
 
