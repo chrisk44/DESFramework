@@ -28,7 +28,7 @@
 #define MEM_GPU_SPARE_BYTES 100*1024*1024
 
 // Computing parameters
-#define MAX_DIMENSIONS 30       // TODO: Calculate this accurately
+#define MAX_DIMENSIONS 30
 
 // Batch size slow-start and ratio limits
 #define SLOW_START_BATCH_SIZE_BASE 4000000    // BASE * (2^LIMIT) MUST FIT IN AN UNSIGNED LONG
@@ -143,7 +143,7 @@ struct SlaveProcessInfo {
 struct ComputeThreadInfo{
     int id;
     int numOfElements;
-    unsigned long* startPointIdx;
+    unsigned long startPoint;
     RESULT_TYPE* results;
     sem_t semData;
     sem_t* semResults;

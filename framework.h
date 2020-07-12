@@ -27,8 +27,7 @@ private:
 	DATA_TYPE* listResults = NULL;				// An array of points for which the validation function has returned non-zero value
 	unsigned long listResultsSaved = 0;			// Number of points saved in listResults
 	bool valid = false;
-	unsigned long* toSendVector = NULL;			// An array of D elements, where every entry shows the next element of that dimension to be dispatched
-	unsigned long long totalSent = 0;			// Total elements that have been sent for processing
+	unsigned long long totalSent = 0;			// Total elements that have been sent for processing, also the index from which the next assigned batch will start
 	unsigned long long totalReceived = 0;		// TOtal elements that have been calculated and returned
 	unsigned long long totalElements = 0;		// Total elements
 
@@ -54,8 +53,7 @@ public:
 private:
 	void masterProcess();
 	void coordinatorThread(ComputeThreadInfo* cti, int numOfThreads, Model* model);
-	void getDataChunk(unsigned long maxBatchSize, unsigned long* toCalculate, int *numOfElements);
-	void addToIdxVector(unsigned long* start, unsigned long* result, int num, int* overflow);
+	unsigned long getDataChunk(unsigned long maxBatchSize, int *numOfElements);
 	void getPointFromIndex(unsigned long index, DATA_TYPE* result);
 
 	template<class ImplementedModel>
@@ -123,7 +121,6 @@ void ParallelFramework::slaveProcess() {
 		computeThreadInfo[i].semResults = &semResults;
 		computeThreadInfo[i].results = nullptr;
 		computeThreadInfo[i].listIndexPtr = &listIndex;
-		computeThreadInfo[i].startPointIdx = new unsigned long[parameters->D];
 		computeThreadInfo[i].ratio = (float)1/numOfThreads;
 	}
 
@@ -155,7 +152,6 @@ void ParallelFramework::slaveProcess() {
 	sem_destroy(&semResults);
 	for(int i=0; i<numOfThreads; i++){
 		sem_destroy(&computeThreadInfo[i].semData);
-		delete[] computeThreadInfo[i].startPointIdx;
 	}
 	delete[] computeThreadInfo;
 }
@@ -243,10 +239,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 				printf("[%d] ComputeThread %d: Running for %d elements...\n", rank, cti.id, cti.numOfElements);
 			#endif
 			#ifdef DBG_DATA
-				printf("[%d] ComputeThread %d: Got %d elements starting from  ", rank, cti.id, cti.numOfElements);
-				for (unsigned int i = 0; i < parameters->D; i++)
-					printf("%d ", cti.startPointIdx[i]);
-				printf("\n");
+				printf("[%d] ComputeThread %d: Got %d elements starting from %ld\n", rank, cti.id, cti.numOfElements, cti.startingPointLinearIndex);
 			#endif
 			fflush(stdout);
 
@@ -306,7 +299,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
 					// Note: Point at the start of deviceResults, because the offset is calculated in the kernel
 					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, useSharedMemory ? parameters->dataSize : 0, streams[i]>>>(
-						deviceModelAddress, deviceResults, deviceLimits, getIndexFromIndices(cti.startPointIdx),
+						deviceModelAddress, deviceResults, deviceLimits, cti.startPoint,
 						parameters->D, deviceIdxSteps, elementsPerStream, skip, deviceDataPtr, parameters->dataSize, useSharedMemory,
 						parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr, parameters->computeBatchSize
 					);
@@ -350,7 +343,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 			} else {
 
 				cpu_kernel<ImplementedModel>(cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : cti.listIndexPtr,
-				idxSteps, getIndexFromIndices(cti.startPointIdx));
+				idxSteps, cti.startPoint);
 
 			}
 

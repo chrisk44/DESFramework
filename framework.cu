@@ -82,11 +82,6 @@ void ParallelFramework::init(Limit* _limits, ParallelFrameworkParameters& _param
 			}// else listResults will be allocated through realloc when they are needed
 		}
 
-		toSendVector = new unsigned long[parameters->D];
-		for (i = 0; i < parameters->D; i++) {
-			toSendVector[i] = 0;
-		}
-
 		if (this->parameters->batchSize == 0)
 			this->parameters->batchSize = totalElements;
 	}
@@ -106,7 +101,6 @@ ParallelFramework::~ParallelFramework() {
 			// Close the file
 			close(saveFile);
 		}
-		delete [] toSendVector;
 		if(listResults != NULL){
 			free(listResults);
 			listResultsSaved = 0;
@@ -133,9 +127,9 @@ void ParallelFramework::masterProcess() {
 	SlaveProcessInfo* slaveProcessInfo = new SlaveProcessInfo[numOfSlaves];
 	#define pinfo (slaveProcessInfo[mpiSource-1])
 
-	RESULT_TYPE* tmpResults = new RESULT_TYPE[parameters->batchSize];
-	DATA_TYPE* tmpResultsList = new DATA_TYPE[parameters->batchSize * parameters->D];
-	unsigned long* tmpToCalculate = new unsigned long[parameters->D];
+	void* tmpResultsMem = malloc(parameters->resultSaveType == SAVE_TYPE_ALL ? parameters->batchSize * sizeof(RESULT_TYPE) : parameters->batchSize * parameters->D * sizeof(DATA_TYPE));
+	RESULT_TYPE* tmpResults = (RESULT_TYPE*) tmpResultsMem;
+	DATA_TYPE* tmpResultsList = (DATA_TYPE*) tmpResultsMem;
 	int tmpNumOfElements, tmpNumOfPoints;	// These need to be int because of MPI
 
 	#ifdef DBG_TIME
@@ -143,7 +137,6 @@ void ParallelFramework::masterProcess() {
 	#endif
 
 	for(int i=0; i<numOfSlaves; i++){
-		// TODO: Add any more initializations
 		slaveProcessInfo[i].id = i + 1;
 		slaveProcessInfo[i].currentBatchSize = parameters->batchSize;
 		slaveProcessInfo[i].computingIndex = 0;
@@ -187,23 +180,21 @@ void ParallelFramework::masterProcess() {
 				}
 
 				// Get next data batch to calculate
-				getDataChunk(parameters->resultSaveType == SAVE_TYPE_ALL ? min((int)(pinfo.ratio * parameters->batchSize), (int)pinfo.maxBatchSize) : (int)pinfo.maxBatchSize, tmpToCalculate, &tmpNumOfElements);
-				pinfo.computingIndex = getIndexFromIndices(tmpToCalculate);
+				pinfo.computingIndex = getDataChunk(
+					parameters->resultSaveType == SAVE_TYPE_ALL ? min((int)(pinfo.ratio * parameters->batchSize), (int)pinfo.maxBatchSize) : (int)pinfo.maxBatchSize,
+					&tmpNumOfElements
+				);
 
 				#ifdef DBG_MPI_STEPS
 					printf("[%d] Master: Sending %d elements to %d with index %d\n", rank, tmpNumOfElements, mpiSource, pinfo.computingIndex);
 				#endif
 				#ifdef DBG_DATA
-					printf("[%d] Master: Sending data to %d: ", rank, mpiSource);
-					for (unsigned int i = 0; i < parameters->D; i++) {
-						printf("%d ", tmpToCalculate[i]);
-					}
-					printf("\n");
+					printf("[%d] Master: Sending %d elements to %d with index %d\n", rank, tmpNumOfElements, mpiSource, pinfo.computingIndex);
 				#endif
 
 				// Send the batch to the slave process
 				MPI_Send(&tmpNumOfElements, 1, MPI_INT, mpiSource, TAG_DATA_COUNT, MPI_COMM_WORLD);
-				MPI_Send(tmpToCalculate, parameters->D, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, MPI_COMM_WORLD);
+				MPI_Send(&pinfo.computingIndex, 1, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, MPI_COMM_WORLD);
 
 				// Update details for process
 				pinfo.stopwatch.start();
@@ -363,8 +354,7 @@ void ParallelFramework::masterProcess() {
 		}
 	}
 
-	delete[] tmpResults;
-	delete[] tmpToCalculate;
+	free(tmpResultsMem);
 	delete[] slaveProcessInfo;
 }
 
@@ -372,9 +362,9 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 	sem_t* semResults = cti[0].semResults;
 	int* globalListIndexPtr = cti[0].listIndexPtr;
 
-	int numOfElements, carry;
+	int numOfElements;
 	unsigned long maxBatchSize;
-	unsigned long *startPointIdx = new unsigned long[parameters->D];
+	unsigned long startPoint;
 	unsigned long allocatedElements = 0;
 	RESULT_TYPE* localResults = nullptr;
 	MPI_Status status;
@@ -418,13 +408,10 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 
 		// Receive a batch of data from master
 		MMPI_Recv(&numOfElements, 1, MPI_INT, 0, TAG_DATA_COUNT, MPI_COMM_WORLD, &status);
-		MMPI_Recv(startPointIdx, parameters->D, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, &status);
+		MMPI_Recv(&startPoint, 1, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, &status);
 
 		#ifdef DBG_DATA
-			printf("[%d] Coordinator: Received %d elements starting at: ", rank, numOfElements);
-			for(int i=0; i<parameters->D; i++)
-				printf("%ld ", startPointIdx[i]);
-			printf("\n");
+			printf("[%d] Coordinator: Received %d elements starting from %ld\n", rank, numOfElements, startingPointLinearIndex);
 		#endif
 		#ifdef DBG_MPI_STEPS
 			printf("[%d] Coordinator: Received %d elements\n", rank, numOfElements);
@@ -490,17 +477,16 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 
 		// Assign work to the worker threads
 		for(int i=0; i<numOfThreads; i++){
-			carry = 0;
 
 			if(i==0){
 				// Set the starting point as the sessions starting point
-				memcpy(cti[i].startPointIdx, startPointIdx, parameters->D * sizeof(unsigned long));
+				cti[i].startPoint = startPoint;
 
 				// Set results as the start of global results
 				cti[i].results = localResults;
 			}else{
 				// Set the starting point as the starting point of the previous thread + numOfElements of the previous thread
-				addToIdxVector(cti[i-1].startPointIdx, cti[i].startPointIdx, cti[i-1].numOfElements, &carry);
+				cti[i].startPoint = cti[i-1].startPoint + cti[i-1].numOfElements;
 
 				if(parameters->resultSaveType == SAVE_TYPE_ALL){
 					// Set results as the results of the previous thread + numOfElements of the previous thread (compiler takes into account the size of RESULT_TYPE when adding an int)
@@ -512,17 +498,8 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 			}
 
 			#ifdef DBG_QUEUE
-				printf("[%d] Coordinator: Thread %d -> Assigning %d elements starting at: ", rank, i, cti[i].numOfElements);
-				for(int j=0; j < (parameters->D); j++){
-					printf("%ld ", cti[i].startPointIdx[j]);
-				}
-				printf(" with results at 0x%x\n", cti[i].results);
+				printf("[%d] Coordinator: Thread %d -> Assigning %d elements starting from %ld with results at 0x%x\n", rank, i, cti[i].numOfElements, cti[i].startingPointLinearIndex, cti[i].results);
 			#endif
-
-			if(carry!=0){
-				printf("[%d] Coordinator: Error: addToIdxVector() for thread %d returned overflow = %d\n", rank, i, carry);
-				break;
-			}
 		}
 
 		#ifdef DBG_TIME
@@ -663,29 +640,30 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		sem_post(&cti[i].semData);
 	}
 
-	delete[] startPointIdx;
 	free(localResults);
 }
 
-void ParallelFramework::getDataChunk(unsigned long batchSize, unsigned long* toCalculate, int* numOfElements) {
+unsigned long ParallelFramework::getDataChunk(unsigned long batchSize, int* numOfElements) {
+	unsigned long toSend;
+
 	if (totalSent >= totalElements) {
 		*numOfElements = 0;
-		return;
+		return 0;
 	}
 
 	// Adjust batchSize if it's more than the available elements
 	if (totalElements - totalSent < batchSize)
 		batchSize = totalElements - totalSent;
 
-	// Copy toSendVector to the output
-	memcpy(toCalculate, toSendVector, parameters->D * sizeof(long));
-
 	// Set output numOfElements
 	*numOfElements = batchSize;
 
-	// Increase toSendVector for next call here
-	addToIdxVector(toSendVector, toSendVector, batchSize, nullptr);
+	// Increase totalSent which also shows the linear index from which the next assignment will start
+	toSend = totalSent;
 	totalSent += batchSize;
+
+	// Return the old value of totalSent
+	return toSend;
 }
 
 RESULT_TYPE* ParallelFramework::getResults() {
@@ -753,26 +731,6 @@ void ParallelFramework::getPointFromIndex(unsigned long index, DATA_TYPE* result
 	}
 }
 
-void ParallelFramework::addToIdxVector(unsigned long* start, unsigned long* result, int num, int* overflow){
-    unsigned int i;
-	unsigned int newIndex;
-	unsigned int carry = num;
-
-	for (i = 0; i < parameters->D; i++) {
-		newIndex = (start[i] + carry) % limits[i].N;
-		carry = (start[i] + carry) / limits[i].N;
-
-		result[i] = newIndex;
-
-		if(carry == 0 && start==result)
-			break;
-		// else we need to write the rest of the indices from start to result
-	}
-
-	if(overflow != nullptr){
-		*overflow = carry;
-	}
-}
 int ParallelFramework::getRank(){
 	return this->rank;
 }
