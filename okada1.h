@@ -93,8 +93,7 @@ public:
                 duz = fabsf(uz1 - dv[m]);
 
                 if ((dux > se[m]) || (duy > sn[m]) || (duz > sv[m])) {
-                  bp = 0;
-                  break;
+                    return 0;
                 }
             }
         }
@@ -202,16 +201,17 @@ void run(int argc, char** argv){
     // Create the framework's parameters struct
     parameters.D = 10;
     parameters.resultSaveType = SAVE_TYPE_LIST;
-    parameters.processingType = PROCESSING_TYPE_BOTH;
+    parameters.processingType = PROCESSING_TYPE_GPU;
     parameters.dataPtr = (void*) modelDataPtr;
     parameters.dataSize = (1 + stations*8) * sizeof(float);
     parameters.threadBalancing = true;
     parameters.slaveBalancing = true;
     parameters.benchmark = false;
-    parameters.batchSize = 200000000;
+    parameters.batchSize = ULONG_MAX;
     parameters.computeBatchSize = 200;
     parameters.blockSize = 256;
     parameters.gpuStreams = 8;
+    parameters.overrideMemoryRestrictions = true;
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework();

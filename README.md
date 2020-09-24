@@ -1,4 +1,4 @@
-# ParallelFramework
+# DES Framework
 
 ## linux branch
 * Ubuntu 19.10

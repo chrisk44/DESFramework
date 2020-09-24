@@ -90,8 +90,8 @@ __global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, 
 			if(currentIndex[d] < limits[d].N){
 				// No need to recalculate the rest of the dimensions
 
-				point[d] += limits[d].step; // is also an option
-				// point[d] = limits[d].lowerLimit + limits[d].step * currentIndex[d];
+				// point[d] += limits[d].step; // is also an option
+				point[d] = limits[d].lowerLimit + limits[d].step * currentIndex[d];
 				break;
 			}else{
 				// This dimension overflowed, initialize it and increment the next one
@@ -169,8 +169,8 @@ void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned lo
 				if(currentIndex[d] < limits[d].N){
 					// No need to recalculate the rest of the dimensions
 
-					point[d] += limits[d].step; // is also an option
-					// point[d] = limits[d].lowerLimit + limits[d].step * currentIndex[d];
+					// point[d] += limits[d].step; // is also an option
+					point[d] = limits[d].lowerLimit + limits[d].step * currentIndex[d];
 					break;
 				}else{
 					// This dimension overflowed, initialize it and increment the next one

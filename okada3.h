@@ -167,8 +167,7 @@ public:
                 duz = fabsf(uz - dv[m]);
 
                 if ((dux > se[m]) || (duy > sn[m]) || (duz > sv[m])) {
-                    bp = 0;
-                    break;
+                    return 0;
                 }
             }
         }
@@ -282,7 +281,8 @@ void run(int argc, char** argv){
     parameters.threadBalancing = true;
     parameters.slaveBalancing = true;
     parameters.benchmark = false;
-    parameters.batchSize = 200000000;
+    parameters.batchSize = ULONG_MAX;
+    parameters.overrideMemoryRestrictions = true;
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework();

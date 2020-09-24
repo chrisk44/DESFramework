@@ -30,11 +30,6 @@
 // Computing parameters
 #define MAX_DIMENSIONS 30
 
-// Batch size slow-start and ratio limits
-#define SLOW_START_BATCH_SIZE_BASE 4000000    // BASE * (2^LIMIT) MUST FIT IN AN UNSIGNED LONG
-#define SLOW_START_LIMIT 6
-#define MIN_MS_FOR_RATIO_ADJUSTMENT 0
-
 #define RESULT_TYPE float
 #define DATA_TYPE double
 #define RESULT_MPI_TYPE MPI_FLOAT
@@ -42,10 +37,10 @@
 
 // Debugging
 #define DBG_START_STOP      // Messages about starting/stopping processes and threads
-#define DBG_QUEUE           // Messages about queueing work (coordinator->worker threads, worker->gpu streams)
-#define DBG_MPI_STEPS       // Messages after each MPI step
-#define DBG_RATIO           // Messages about changes in ratios (masterProcess and coordinatorThread)
-#define DBG_DATA            // Messages about the exact data being assigned (start points)
+// #define DBG_QUEUE           // Messages about queueing work (coordinator->worker threads, worker->gpu streams)
+// #define DBG_MPI_STEPS       // Messages after each MPI step
+// #define DBG_RATIO           // Messages about changes in ratios (masterProcess and coordinatorThread)
+// #define DBG_DATA            // Messages about the exact data being assigned (start points)
 // #define DBG_MEMORY          // Messages about memory management (addresses, reallocations)
 // #define DBG_RESULTS         // Messages with the exact results being passed around
 // #define DBG_TIME            // Print time measuraments for various parts of the code
@@ -124,6 +119,9 @@ struct ParallelFrameworkParameters {
     int blockSize = 256;
     int computeBatchSize = 200;
     int gpuStreams = 8;
+    unsigned long slowStartBase = 5000000;
+    int slowStartLimit = 3;
+    int minMsForRatioAdjustment = 0;
 	// ...
 };
 

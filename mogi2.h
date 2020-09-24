@@ -8,15 +8,15 @@ using namespace std;
 
 class MyModel : public Model{
 public:
-    __host__ RESULT_TYPE validate_cpu(DATA_TYPE* x, void* dataPtr){
+    __host__ float validate_cpu(double* x, void* dataPtr){
         return doValidate(x, dataPtr);
     }
 
-    __device__ RESULT_TYPE validate_gpu(DATA_TYPE* x, void* dataPtr){
+    __device__ float validate_gpu(double* x, void* dataPtr){
         return doValidate(x, dataPtr);
     }
 
-    __host__ __device__ RESULT_TYPE doValidate(DATA_TYPE* x, void* dataPtr){
+    __host__ __device__ float doValidate(double* x, void* dataPtr){
         float *xp, *yp, *zp, *de, *dn, *dv, *se, *sn, *sv;
         float dist, r1, r2, ux, ux1, ux2, uy, uy1, uy2, uz, uz1, uz2, dux, duy, duz;
         unsigned long long bp, m;
@@ -72,8 +72,7 @@ public:
 				duz = fabsf(uz - dv[m]);
 
 				if (duz > sv[m]) {
-					bp = 0;
-					break;
+                    return 0;
 				}
 			}
 		}
@@ -81,7 +80,7 @@ public:
         return bp;
     }
 
-    inline __host__ __device__ bool toBool(RESULT_TYPE result){
+    inline __host__ __device__ bool toBool(float result){
         return result != 0;
     }
 };
@@ -185,14 +184,16 @@ void run(int argc, char** argv){
     parameters.processingType = PROCESSING_TYPE_BOTH;
     parameters.dataPtr = (void*) modelDataPtr;
     parameters.dataSize = (1 + stations*9) * sizeof(float);
-    parameters.threadBalancing = true;
-    parameters.slaveBalancing = true;
-    parameters.benchmark = false;
-    parameters.batchSize = ULONG_MAX;
     parameters.computeBatchSize = 200;
     parameters.blockSize = 256;
     parameters.gpuStreams = 8;
     parameters.overrideMemoryRestrictions = true;
+
+    parameters.benchmark = false;
+    parameters.threadBalancing = true;
+    parameters.slaveBalancing = true;
+    parameters.batchSize = 100000000;
+    parameters.slowStartLimit = 5;
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework();
@@ -220,6 +221,17 @@ void run(int argc, char** argv){
 
     list = framework.getList(&length);
     printf("Results: %d\n", length);
+    for(i=0; i<min(length, 5); i++){
+        printf("(");
+        for(j=0; j<parameters.D-1; j++)
+            printf("%lf ", list[i*parameters.D + j]);
+
+        printf("%lf)\n", list[i*parameters.D + j]);
+    }
+    if(length > 5){
+        printf("...%d more results\n", length-5);
+    }
+
     for(i=0; i<length; i++){
         // printf("(");
 

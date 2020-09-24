@@ -27,9 +27,9 @@ private:
 	DATA_TYPE* listResults = NULL;				// An array of points for which the validation function has returned non-zero value
 	unsigned long listResultsSaved = 0;			// Number of points saved in listResults
 	bool valid = false;
-	unsigned long long totalSent = 0;			// Total elements that have been sent for processing, also the index from which the next assigned batch will start
-	unsigned long long totalReceived = 0;		// TOtal elements that have been calculated and returned
-	unsigned long long totalElements = 0;		// Total elements
+	unsigned long totalSent = 0;			// Total elements that have been sent for processing, also the index from which the next assigned batch will start
+	unsigned long totalReceived = 0;		// TOtal elements that have been calculated and returned
+	unsigned long totalElements = 0;		// Total elements
 
 	// MPI
 	int rank = -1;
@@ -53,7 +53,6 @@ public:
 private:
 	void masterProcess();
 	void coordinatorThread(ComputeThreadInfo* cti, int numOfThreads, Model* model);
-	unsigned long getDataChunk(unsigned long maxBatchSize, unsigned long *numOfElements);
 	void getPointFromIndex(unsigned long index, DATA_TYPE* result);
 
 	template<class ImplementedModel>
@@ -236,10 +235,10 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		// If more data available...
 		if (cti.numOfElements > 0) {
 			#ifdef DBG_START_STOP
-				printf("[%d] ComputeThread %d: Running for %ld elements...\n", rank, cti.id, cti.numOfElements);
+				printf("[%d] ComputeThread %d: Running for %lu elements...\n", rank, cti.id, cti.numOfElements);
 			#endif
 			#ifdef DBG_DATA
-				printf("[%d] ComputeThread %d: Got %ld elements starting from %ld\n", rank, cti.id, cti.numOfElements, cti.startPoint);
+				printf("[%d] ComputeThread %d: Got %lu elements starting from %lu\n", rank, cti.id, cti.numOfElements, cti.startPoint);
 			#endif
 			fflush(stdout);
 
@@ -249,7 +248,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 			if (allocatedElements < cti.numOfElements && cti.id > -1 && allocatedElements < getDefaultGPUBatchSize()) {
 
 				#ifdef DBG_MEMORY
-					printf("[%d] ComputeThread %d: Allocating more GPU memory (%ld -> %ld elements, %ld MB)\n", rank,
+					printf("[%d] ComputeThread %d: Allocating more GPU memory (%lu -> %lu elements, %lu MB)\n", rank,
 							cti.id, allocatedElements, cti.numOfElements, (cti.numOfElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
 					fflush(stdout);
 				#endif
@@ -311,8 +310,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					}
 
 					#ifdef DBG_QUEUE
-						printf("[%d] ComputeThread %d: Queueing %ld elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%ld\n", rank,
-								cti.id, elementsPerStream, i, gpuThreads, numOfBlocks, blockSize, skip);
+						// printf("[%d] ComputeThread %d: Queueing %lu elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%lu\n", rank,
+						// 		cti.id, elementsPerStream, i, gpuThreads, numOfBlocks, blockSize, skip);
 					#endif
 
 					// Increase skip
