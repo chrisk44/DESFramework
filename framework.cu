@@ -258,7 +258,7 @@ void ParallelFramework::masterProcess() {
 				eta = t * ((float)totalElements/totalReceived) - t;
 
 				printf("Progress: %lu/%lu, %.2f %%", this->totalReceived, this->totalElements, ((float)this->totalReceived / this->totalElements)*100);
-				
+
 				if(t < 3600)	printf(", Elapsed time: %02d:%02d", t/60, t%60);
 				else			printf(", Elapsed time: %02d:%02d:%02d", t/3600, (t%3600)/60, t%60);
 

@@ -163,8 +163,6 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 	ImplementedModel** deviceModelAddress;	// GPU Memory to save the address of the 'Model' object on device
 	RESULT_TYPE* deviceResults;				// GPU Memory for results
 	int* deviceListIndexPtr;				// GPU Memory for list index for synchronization when saving the results as a list of points
-	unsigned long long* deviceIdxSteps;		// GPU Memory to store idxSteps
-	Limit* deviceLimits;					// GPU Memory to store the Limit structures
 	void* deviceDataPtr;					// GPU Memory to store any constant data
 
 	// GPU Runtime
@@ -172,6 +170,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 	unsigned long allocatedElements = 0;
 	cudaDeviceProp deviceProp;
 	bool useSharedMemoryForData;
+	bool useConstantMemoryForData;
 	int maxSharedPoints;
 	int availableSharedMemory;
 
@@ -187,18 +186,23 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		// Get device's properties for shared memory
 		cudaGetDeviceProperties(&deviceProp, cti.id);
 
+		// Use constant memory for data if it fits
+		useConstantMemoryForData = parameters->dataSize > 0 &&
+			parameters->dataSize <= (MAX_CONSTANT_MEMORY - parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
+
 		// Max use 1/4 of the available shared memory for data, the rest will be used for each thread to store their point (x) and index vector (i)
-		useSharedMemoryForData = parameters->dataSize <= deviceProp.sharedMemPerBlock / 4;
+		useSharedMemoryForData = parameters->dataSize > 0 && !useConstantMemoryForData &&
+								 parameters->dataSize <= deviceProp.sharedMemPerBlock / 4;
 
 		// How many bytes are left in shared memory after using it for the model's data
-		availableSharedMemory = deviceProp.sharedMemPerBlock -
-				(useSharedMemoryForData ? parameters->dataSize : 0);
+		availableSharedMemory = deviceProp.sharedMemPerBlock - (useSharedMemoryForData ? parameters->dataSize : 0);
 
 		// How many points can fit in shared memory (for each point we need D*DATA_TYPEs (for x) and D*u_int (for indices)) (minus 1 is to allow the threads to align their memory)
 		maxSharedPoints = availableSharedMemory / (parameters->D * (sizeof(DATA_TYPE) + sizeof(unsigned int))) - 1;
 
 		#ifdef DBG_START_STOP
 			printf("[%d] ComputeThread %d: useSharedMemoryForData = %d\n", rank, cti.id, useSharedMemoryForData);
+			printf("[%d] ComputeThread %d: useConstantMemoryForData = %d\n", rank, cti.id, useConstantMemoryForData);
 			printf("[%d] ComputeThread %d: availableSharedMemory = %d\n", rank, cti.id, availableSharedMemory);
 			printf("[%d] ComputeThread %d: maxSharedPoints = %d\n", rank, cti.id, maxSharedPoints);
 		#endif
@@ -210,30 +214,49 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		}
 
 		// Allocate memory on device
-		cudaMalloc(&deviceModelAddress, sizeof(ImplementedModel**));				cce();
-		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));		cce();
-		cudaMalloc(&deviceListIndexPtr, sizeof(int));								cce();
-		cudaMalloc(&deviceLimits, parameters->D * sizeof(Limit));					cce();
-		cudaMalloc(&deviceIdxSteps, parameters->D * sizeof(unsigned long long));			cce();
-		if(parameters->dataSize > 0){
-			cudaMalloc(&deviceDataPtr, parameters->dataSize);							cce();
+		cudaMalloc(&deviceModelAddress, sizeof(ImplementedModel**));			cce();
+		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));	cce();
+		cudaMalloc(&deviceListIndexPtr, sizeof(int));							cce();
+		// If we have data but can't fit it in constant memory, allocate global memory
+		if(parameters->dataSize > 0 && !useConstantMemoryForData){
+			cudaMalloc(&deviceDataPtr, parameters->dataSize);					cce();
 		}
 
 		// Instantiate the model object on the device, and write its address in 'deviceModelAddress' on the device
-		create_model_kernel<ImplementedModel><<< 1, 1 >>>(deviceModelAddress);		cce();
+		create_model_kernel<ImplementedModel><<<1, 1>>>(deviceModelAddress);	cce();
 
 		// Copy limits, idxSteps, and constant data to device
-		cudaMemcpy(deviceLimits, limits, parameters->D * sizeof(Limit), cudaMemcpyHostToDevice);					cce();
-		cudaMemcpy(deviceIdxSteps, idxSteps, parameters->D * sizeof(unsigned long long), cudaMemcpyHostToDevice);	cce();
+		#ifdef DBG_MEMORY
+			printf("[%d] ComputeThread %d: Copying limits at constant memory with offset %d\n", rank, cti.id, 0);
+			printf("[%d] ComputeThread %d: Copying idxSteps at constant memory with offset %d\n", rank, cti.id, parameters->D * sizeof(Limit));
+		#endif
+		cudaMemcpyToSymbolWrapper<ImplementedModel>(limits, parameters->D * sizeof(Limit), 0);				cce();
+		cudaMemcpyToSymbolWrapper<ImplementedModel>(idxSteps, parameters->D * sizeof(unsigned long long),
+													parameters->D * sizeof(Limit));							cce();
+
+		// If we have data for the model...
 		if(parameters->dataSize > 0){
-			cudaMemcpy(deviceDataPtr, parameters->dataPtr, parameters->dataSize, cudaMemcpyHostToDevice);			cce();
+			// If we can use constant memory, copy it there
+			if(useConstantMemoryForData){
+				#ifdef DBG_MEMORY
+					printf("[%d] ComputeThread %d: Copying data at constant memory with offset %d\n",
+										rank, cti.id, parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
+				#endif
+				cudaMemcpyToSymbolWrapper<ImplementedModel>(parameters->dataPtr, parameters->dataSize,
+													  parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
+				cce()
+			}
+			// else copy the data to the global memory, either to be read from there or to be copied to shared memory
+			else{
+				cudaMemcpy(deviceDataPtr, parameters->dataPtr, parameters->dataSize, cudaMemcpyHostToDevice);
+				cce();
+			}
 		}
 
 		#ifdef DBG_MEMORY
 			printf("[%d] ComputeThread %d: deviceModelAddress: 0x%x\n", rank, cti.id, (void*) deviceModelAddress);
 			printf("[%d] ComputeThread %d: deviceResults: 0x%x\n", rank, cti.id, (void*) deviceResults);
 			printf("[%d] ComputeThread %d: deviceListIndexPtr: 0x%x\n", rank, cti.id, (void*) deviceListIndexPtr);
-			printf("[%d] ComputeThread %d: deviceLimits: 0x%x\n", rank, cti.id, (void*) deviceLimits);
 			printf("[%d] ComputeThread %d: deviceDataPtr: 0x%x\n", rank, cti.id, (void*) deviceDataPtr);
 		#endif
 	}
@@ -328,9 +351,11 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 					// Note: Point at the start of deviceResults, because the offset (because of computeBatchSize) is calculated in the kernel
 					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, deviceProp.sharedMemPerBlock, streams[i]>>>(
-						deviceModelAddress, deviceResults, deviceLimits, cti.startPoint,
-						parameters->D, deviceIdxSteps, elementsPerStream, skip, deviceDataPtr, parameters->dataSize, useSharedMemoryForData,
-						parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr, parameters->computeBatchSize
+						deviceModelAddress, deviceResults, cti.startPoint,
+						parameters->D, elementsPerStream, skip, deviceDataPtr,
+						parameters->dataSize, useSharedMemoryForData, useConstantMemoryForData,
+						parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr,
+						parameters->computeBatchSize
 					);
 
 					// Queue the memcpy in stream[i] only if we are saving as SAVE_TYPE_ALL (otherwise the results will be fetched at the end of the current computation)
@@ -414,8 +439,6 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		cudaFree(deviceModelAddress);		cce();
 		cudaFree(deviceResults);			cce();
 		cudaFree(deviceListIndexPtr);		cce();
-		cudaFree(deviceLimits);				cce();
-		cudaFree(deviceIdxSteps);			cce();
 		cudaFree(deviceDataPtr);			cce();
 
 		// Make sure streams are finished and destroy them

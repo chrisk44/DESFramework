@@ -8,6 +8,14 @@
 
 using namespace std;
 
+#define MAX_CONSTANT_MEMORY (65536 - 24)			// Don't know why...
+__device__ __constant__ char constantMemoryPtr[MAX_CONSTANT_MEMORY];
+
+template<class ImplementedModel>
+void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offset){
+	cudaMemcpyToSymbol(constantMemoryPtr, src, count, offset, cudaMemcpyHostToDevice);
+}
+
 // CUDA kernel to create the 'Model' object on device
 template<class ImplementedModel>
 __global__ void create_model_kernel(ImplementedModel** deviceModelAddress) {
@@ -22,52 +30,56 @@ __global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
 
 // CUDA kernel to run the computation
 template<class ImplementedModel>
-__global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, const Limit* limits, unsigned long startingPointLinearIndex,
-	const unsigned int D, const unsigned long long* idxSteps, const unsigned long numOfElements, const unsigned long offset, void* dataPtr,
-	int dataSize, bool useSharedMemoryForData, int* listIndexPtr, const int computeBatchSize) {
+__global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, unsigned long startingPointLinearIndex,
+	const unsigned int D, const unsigned long numOfElements, const unsigned long offset, void* dataPtr,
+	int dataSize, bool useSharedMemoryForData, bool useConstantMemoryForData, int* listIndexPtr,
+	const int computeBatchSize) {
+
 	unsigned long threadStart = offset + (((blockIdx.x * blockDim.x) + threadIdx.x) * computeBatchSize);
 	unsigned long end = min(offset + numOfElements, threadStart + computeBatchSize);
 
 	int d;
 	unsigned long tmp, remainder;
 
-	// Shared memory layout is: ?Model-data?, point(thread0)[], point(thread1)[], ..., indices(thread0)[], indices(thread1)[]...
+	// Constant Memory
+	Limit* limits = (Limit*) constantMemoryPtr;
+	unsigned long long* idxSteps = (unsigned long long*) &constantMemoryPtr[D*sizeof(Limit)];
+	if(useConstantMemoryForData)
+		dataPtr = (void*) &constantMemoryPtr[D * (sizeof(Limit) + sizeof(unsigned long long))];
+
+	// Shared memory layout is: point(thread0)[], point(thread1)[], ..., indices (with stride)..., ?Model-data
 	extern __shared__ char sharedMem[];
 	DATA_TYPE *point;
 	unsigned int *currentIndex;
 
 	// If we are using shared memory for the model's data, fetch them
 	if(useSharedMemoryForData){
+		char* sharedDataPtr = &sharedMem[blockDim.x * D * (sizeof(DATA_TYPE) + sizeof(unsigned int))];
 		// If we have enough threads in the block, use them to bring the data simultaneously
 		if(blockDim.x >= dataSize){
 			if(threadIdx.x < dataSize){
-				sharedMem[threadIdx.x] = ((char*)dataPtr)[threadIdx.x];
+				sharedDataPtr[threadIdx.x] = ((char*)dataPtr)[threadIdx.x];
 			}
 		}else{										// TODO: IMPROVEMENT: Use multiple threads where each one loads more bytes of data (useful when the threads are less than dataSize)
 			if(threadIdx.x == 0){
 				for(int d=0; d<dataSize; d++){
-					sharedMem[d] = ((char*)dataPtr)[d];
+					sharedDataPtr[d] = ((char*)dataPtr)[d];
 				}
 			}
 		}
 
-		dataPtr = sharedMem;
+		dataPtr = sharedDataPtr;
 
 		__syncthreads();
 	}
 
 	point = (DATA_TYPE*) &sharedMem[
-		(useSharedMemoryForData ? dataSize : 0) +	// Bypass the model's data
-		threadIdx.x * D * sizeof(DATA_TYPE) +		// Bypass the previous threads' points
-		dataSize % sizeof(DATA_TYPE)				// Align for DATA_TYPE
+		threadIdx.x * D * sizeof(DATA_TYPE)			// Bypass the previous threads' points
 	];
 
 	currentIndex = (unsigned int*) &sharedMem[
-		(useSharedMemoryForData ? dataSize : 0) +	// Bypass the model's data
 		blockDim.x * D * sizeof(DATA_TYPE) +		// Bypass all threads' points
-		threadIdx.x * sizeof(unsigned int) + 		// Bypass one element for each previous threads
-		dataSize % sizeof(DATA_TYPE) +				// Align for DATA_TYPE
-		dataSize % sizeof(unsigned int)				// Align for unsigned int
+		threadIdx.x * sizeof(unsigned int) 			// Bypass one element for each previous threads
 	];
 
 	remainder = threadStart + startingPointLinearIndex;
