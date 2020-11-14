@@ -171,7 +171,9 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 	cudaStream_t streams[parameters->gpuStreams];
 	unsigned long allocatedElements = 0;
 	cudaDeviceProp deviceProp;
-	bool useSharedMemory;
+	bool useSharedMemoryForData;
+	int maxSharedPoints;
+	int availableSharedMemory;
 
 	/*******************************************************************
 	************************* Initialization ***************************
@@ -184,7 +186,22 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 		// Get device's properties for shared memory
 		cudaGetDeviceProperties(&deviceProp, cti.id);
-		useSharedMemory = parameters->dataSize <= deviceProp.sharedMemPerBlock;
+
+		// Max use 1/4 of the available shared memory for data, the rest will be used for each thread to store their point (x) and index vector (i)
+		useSharedMemoryForData = parameters->dataSize <= deviceProp.sharedMemPerBlock / 4;
+
+		// How many bytes are left in shared memory after using it for the model's data
+		availableSharedMemory = deviceProp.sharedMemPerBlock -
+				(useSharedMemoryForData ? parameters->dataSize : 0);
+
+		// How many points can fit in shared memory (for each point we need D*DATA_TYPEs (for x) and D*u_int (for indices)) (minus 1 is to allow the threads to align their memory)
+		maxSharedPoints = availableSharedMemory / (parameters->D * (sizeof(DATA_TYPE) + sizeof(unsigned int))) - 1;
+
+		#ifdef DBG_START_STOP
+			printf("[%d] ComputeThread %d: useSharedMemoryForData = %d\n", rank, cti.id, useSharedMemoryForData);
+			printf("[%d] ComputeThread %d: availableSharedMemory = %d\n", rank, cti.id, availableSharedMemory);
+			printf("[%d] ComputeThread %d: maxSharedPoints = %d\n", rank, cti.id, maxSharedPoints);
+		#endif
 
 		// Create streams
 		for(int i=0; i<parameters->gpuStreams; i++){
@@ -248,12 +265,16 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 			if (allocatedElements < cti.numOfElements && cti.id > -1 && allocatedElements < getDefaultGPUBatchSize()) {
 
 				#ifdef DBG_MEMORY
-					printf("[%d] ComputeThread %d: Allocating more GPU memory (%lu -> %lu elements, %lu MB)\n", rank,
-							cti.id, allocatedElements, cti.numOfElements, (cti.numOfElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
+					printf("[%d] ComputeThread %d: Allocating more GPU memory (%lu", rank, cti.id, allocatedElements);
 					fflush(stdout);
 				#endif
 
 				allocatedElements = min(cti.numOfElements, getDefaultGPUBatchSize());
+
+				#ifdef DBG_MEMORY
+					printf(" -> %lu elements, %lu MB)\n", allocatedElements, (allocatedElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
+					fflush(stdout);
+				#endif
 
 				// Reallocate memory on device
 				cudaFree(deviceResults);
@@ -295,12 +316,20 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 					// Queue the kernel in stream[i] (each GPU thread gets COMPUTE_BATCH_SIZE elements to calculate)
 					int gpuThreads = (elementsPerStream + parameters->computeBatchSize - 1) / parameters->computeBatchSize;
-					int blockSize = min(parameters->blockSize, gpuThreads);
+
+					// Minimum of (minimum of user-defined block size and number of threads to go to this stream) and number of points that can fit in shared memory
+					int blockSize = min(min(parameters->blockSize, gpuThreads), maxSharedPoints);
 					int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
-					// Note: Point at the start of deviceResults, because the offset is calculated in the kernel
-					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, useSharedMemory ? parameters->dataSize : 0, streams[i]>>>(
+
+					#ifdef DBG_QUEUE
+						printf("[%d] ComputeThread %d: Queueing %lu elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%lu\n", rank,
+								cti.id, elementsPerStream, i, gpuThreads, numOfBlocks, blockSize, skip);
+					#endif
+
+					// Note: Point at the start of deviceResults, because the offset (because of computeBatchSize) is calculated in the kernel
+					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, deviceProp.sharedMemPerBlock, streams[i]>>>(
 						deviceModelAddress, deviceResults, deviceLimits, cti.startPoint,
-						parameters->D, deviceIdxSteps, elementsPerStream, skip, deviceDataPtr, parameters->dataSize, useSharedMemory,
+						parameters->D, deviceIdxSteps, elementsPerStream, skip, deviceDataPtr, parameters->dataSize, useSharedMemoryForData,
 						parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr, parameters->computeBatchSize
 					);
 
@@ -308,11 +337,6 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					if(parameters->resultSaveType == SAVE_TYPE_ALL){
 						cudaMemcpyAsync(&cti.results[skip], &deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, streams[i]);
 					}
-
-					#ifdef DBG_QUEUE
-						// printf("[%d] ComputeThread %d: Queueing %lu elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%lu\n", rank,
-						// 		cti.id, elementsPerStream, i, gpuThreads, numOfBlocks, blockSize, skip);
-					#endif
 
 					// Increase skip
 					skip += elementsPerStream;

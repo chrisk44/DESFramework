@@ -181,18 +181,18 @@ void run(int argc, char** argv){
     // Create the framework's parameters struct
     parameters.D = 8;
     parameters.resultSaveType = SAVE_TYPE_LIST;
-    parameters.processingType = PROCESSING_TYPE_BOTH;
+    parameters.processingType = PROCESSING_TYPE_GPU;
     parameters.dataPtr = (void*) modelDataPtr;
     parameters.dataSize = (1 + stations*9) * sizeof(float);
     parameters.computeBatchSize = 200;
-    parameters.blockSize = 256;
+    parameters.blockSize = 1024;
     parameters.gpuStreams = 8;
     parameters.overrideMemoryRestrictions = true;
 
     parameters.benchmark = false;
     parameters.threadBalancing = true;
     parameters.slaveBalancing = true;
-    parameters.batchSize = 100000000;
+    parameters.batchSize = ULONG_MAX;
     parameters.slowStartLimit = 5;
 
     // Initialize the framework object

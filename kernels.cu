@@ -24,43 +24,61 @@ __global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
 template<class ImplementedModel>
 __global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, const Limit* limits, unsigned long startingPointLinearIndex,
 	const unsigned int D, const unsigned long long* idxSteps, const unsigned long numOfElements, const unsigned long offset, void* dataPtr,
-	int dataSize, bool useSharedMemory, int* listIndexPtr, const int computeBatchSize) {
+	int dataSize, bool useSharedMemoryForData, int* listIndexPtr, const int computeBatchSize) {
 	unsigned long threadStart = offset + (((blockIdx.x * blockDim.x) + threadIdx.x) * computeBatchSize);
 	unsigned long end = min(offset + numOfElements, threadStart + computeBatchSize);
 
-	DATA_TYPE point[MAX_DIMENSIONS];
-	unsigned int currentIndex[MAX_DIMENSIONS];
 	int d;
 	unsigned long tmp, remainder;
 
-	extern __shared__ char shDataPtr[];
-	if(useSharedMemory){
+	// Shared memory layout is: ?Model-data?, point(thread0)[], point(thread1)[], ..., indices(thread0)[], indices(thread1)[]...
+	extern __shared__ char sharedMem[];
+	DATA_TYPE *point;
+	unsigned int *currentIndex;
+
+	// If we are using shared memory for the model's data, fetch them
+	if(useSharedMemoryForData){
+		// If we have enough threads in the block, use them to bring the data simultaneously
 		if(blockDim.x >= dataSize){
 			if(threadIdx.x < dataSize){
-				shDataPtr[threadIdx.x] = ((char*)dataPtr)[threadIdx.x];
+				sharedMem[threadIdx.x] = ((char*)dataPtr)[threadIdx.x];
 			}
-		}else{
+		}else{										// TODO: IMPROVEMENT: Use multiple threads where each one loads more bytes of data (useful when the threads are less than dataSize)
 			if(threadIdx.x == 0){
 				for(int d=0; d<dataSize; d++){
-					shDataPtr[d] = ((char*)dataPtr)[d];
+					sharedMem[d] = ((char*)dataPtr)[d];
 				}
 			}
 		}
 
-		dataPtr = shDataPtr;
+		dataPtr = sharedMem;
 
 		__syncthreads();
 	}
+
+	point = (DATA_TYPE*) &sharedMem[
+		(useSharedMemoryForData ? dataSize : 0) +	// Bypass the model's data
+		threadIdx.x * D * sizeof(DATA_TYPE) +		// Bypass the previous threads' points
+		dataSize % sizeof(DATA_TYPE)				// Align for DATA_TYPE
+	];
+
+	currentIndex = (unsigned int*) &sharedMem[
+		(useSharedMemoryForData ? dataSize : 0) +	// Bypass the model's data
+		blockDim.x * D * sizeof(DATA_TYPE) +		// Bypass all threads' points
+		threadIdx.x * sizeof(unsigned int) + 		// Bypass one element for each previous threads
+		dataSize % sizeof(DATA_TYPE) +				// Align for DATA_TYPE
+		dataSize % sizeof(unsigned int)				// Align for unsigned int
+	];
 
 	remainder = threadStart + startingPointLinearIndex;
 	for (d = D-1; d>=0; d--){
 		tmp = idxSteps[d];
 
-		currentIndex[d] = remainder / tmp;
-		remainder -= currentIndex[d] * tmp;
+		currentIndex[blockDim.x * d] = remainder / tmp;
+		remainder -= currentIndex[blockDim.x * d] * tmp;
 
 		// Calculate the exact coordinate i
-		point[d] = limits[d].lowerLimit + currentIndex[d] * limits[d].step;
+		point[d] = limits[d].lowerLimit + currentIndex[blockDim.x * d] * limits[d].step;
 	}
 
 	while(threadStart < end){
@@ -85,17 +103,17 @@ __global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, 
 		d = 0;
 		while(d < D){
 			// Increment dimension d
-			currentIndex[d]++;
+			currentIndex[blockDim.x * d]++;
 
-			if(currentIndex[d] < limits[d].N){
+			if(currentIndex[blockDim.x * d] < limits[d].N){
 				// No need to recalculate the rest of the dimensions
 
 				// point[d] += limits[d].step; // is also an option
-				point[d] = limits[d].lowerLimit + limits[d].step * currentIndex[d];
+				point[d] = limits[d].lowerLimit + limits[d].step * currentIndex[blockDim.x * d];
 				break;
 			}else{
 				// This dimension overflowed, initialize it and increment the next one
-				currentIndex[d] = 0;
+				currentIndex[blockDim.x * d] = 0;
 				point[d] = limits[d].lowerLimit;
 				d++;
 			}

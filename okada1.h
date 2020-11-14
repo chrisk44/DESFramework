@@ -209,9 +209,10 @@ void run(int argc, char** argv){
     parameters.benchmark = false;
     parameters.batchSize = ULONG_MAX;
     parameters.computeBatchSize = 200;
-    parameters.blockSize = 256;
+    parameters.blockSize = 1024;
     parameters.gpuStreams = 8;
     parameters.overrideMemoryRestrictions = true;
+    parameters.slowStartLimit = 5;
 
     // Initialize the framework object
     ParallelFramework framework = ParallelFramework();

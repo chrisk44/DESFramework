@@ -38,6 +38,11 @@ void ParallelFramework::init(Limit* _limits, ParallelFrameworkParameters& _param
 		}
 	}
 
+	if(parameters->dataPtr == nullptr && parameters->dataSize > 0){
+		cout << "[Init] Error: dataPtr is null but dataSize is > 0" << endl;
+		return;
+	}
+
 	if(parameters->overrideMemoryRestrictions && parameters->resultSaveType != SAVE_TYPE_LIST){
 		cout << "[Init] Error: Can't override memory restrictions when saving as SAVE_TYPE_ALL" << endl;
 		return;
@@ -52,6 +57,12 @@ void ParallelFramework::init(Limit* _limits, ParallelFrameworkParameters& _param
 	for (i = 0; i < parameters->D; i++) {
 		limits[i].step = abs(limits[i].upperLimit - limits[i].lowerLimit) / limits[i].N;
 	}
+
+	#ifdef DBG_DATA
+		for(i=0; i < parameters->D; i++){
+			printf("Dimension %d: Low=%lf, High=%lf, Step=%lf, N=%u, idxSteps=%llu\n", i, limits[i].lowerLimit, limits[i].upperLimit, limits[i].step, limits[i].N, idxSteps[i]);
+		}
+	#endif
 
 	if(rank == 0){
 		totalReceived = 0;
