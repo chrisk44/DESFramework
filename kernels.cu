@@ -30,7 +30,7 @@ __global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
 
 // CUDA kernel to run the computation
 template<class ImplementedModel>
-__global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, unsigned long startingPointLinearIndex,
+__global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPointLinearIndex,
 	const unsigned int D, const unsigned long numOfElements, const unsigned long offset, void* dataPtr,
 	int dataSize, bool useSharedMemoryForData, bool useConstantMemoryForData, int* listIndexPtr,
 	const int computeBatchSize) {
@@ -41,11 +41,12 @@ __global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, 
 	int d;
 	unsigned long tmp, remainder;
 
-	// Constant Memory
+	// Constant Memory layout is: Limits[], idxSteps[], ImplementedModel*, ?Model-data
 	Limit* limits = (Limit*) constantMemoryPtr;
 	unsigned long long* idxSteps = (unsigned long long*) &constantMemoryPtr[D*sizeof(Limit)];
+	ImplementedModel* modelPtr = (ImplementedModel*) *(ImplementedModel**) &constantMemoryPtr[D*(sizeof(Limit) + sizeof(unsigned long long))];
 	if(useConstantMemoryForData)
-		dataPtr = (void*) &constantMemoryPtr[D * (sizeof(Limit) + sizeof(unsigned long long))];
+		dataPtr = (void*) &constantMemoryPtr[sizeof(ImplementedModel**) + D * (sizeof(Limit) + sizeof(unsigned long long))];
 
 	// Shared memory layout is: point(thread0)[], point(thread1)[], ..., indices (with stride)..., ?Model-data
 	extern __shared__ char sharedMem[];
@@ -98,12 +99,13 @@ __global__ void validate_kernel(ImplementedModel** model, RESULT_TYPE* results, 
 		if(listIndexPtr == nullptr){
 			// We are running as SAVE_TYPE_ALL
 			// Run the validation function and save the result to the global memory
-			results[threadStart] = (*model)->validate_gpu(point, dataPtr);
+			results[threadStart] = modelPtr->validate_gpu(point, dataPtr);
 		}else{
 			// We are running as SAVE_TYPE_LIST
 			// Run the validation function and pass its result to toBool
-			if((*model)->toBool((*model)->validate_gpu(point, dataPtr))){
+			if(modelPtr->toBool(modelPtr->validate_gpu(point, dataPtr))){
 				// Append element to the list
+				// TODO: STABILITY: Handle overflow
 				tmp = atomicAdd(listIndexPtr, D);
 				for(d = 0; d < D; d++){
 					((DATA_TYPE *)results)[tmp + d] = point[d];
