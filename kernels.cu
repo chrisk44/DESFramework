@@ -45,8 +45,12 @@ __global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPoin
 	Limit* limits = (Limit*) constantMemoryPtr;
 	unsigned long long* idxSteps = (unsigned long long*) &constantMemoryPtr[D*sizeof(Limit)];
 	ImplementedModel* modelPtr = (ImplementedModel*) *(ImplementedModel**) &constantMemoryPtr[D*(sizeof(Limit) + sizeof(unsigned long long))];
+	// ^^^ modelPtr points to the actual object in global memory
 	if(useConstantMemoryForData)
 		dataPtr = (void*) &constantMemoryPtr[sizeof(ImplementedModel**) + D * (sizeof(Limit) + sizeof(unsigned long long))];
+
+	RESULT_TYPE (ImplementedModel::*VALIDATION_FUNC)(DATA_TYPE*, void*) = &ImplementedModel::validate_gpu;
+	bool (ImplementedModel::*TOBOOL_FUNC)(RESULT_TYPE) = &ImplementedModel::toBool;
 
 	// Shared memory layout is: point(thread0)[], point(thread1)[], ..., indices (with stride)..., ?Model-data
 	extern __shared__ char sharedMem[];
@@ -99,11 +103,11 @@ __global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPoin
 		if(listIndexPtr == nullptr){
 			// We are running as SAVE_TYPE_ALL
 			// Run the validation function and save the result to the global memory
-			results[threadStart] = modelPtr->validate_gpu(point, dataPtr);
+			results[threadStart] = (modelPtr->*VALIDATION_FUNC)(point, dataPtr);
 		}else{
 			// We are running as SAVE_TYPE_LIST
 			// Run the validation function and pass its result to toBool
-			if(modelPtr->toBool(modelPtr->validate_gpu(point, dataPtr))){
+			if((modelPtr->*TOBOOL_FUNC)((modelPtr->*VALIDATION_FUNC)(point, dataPtr))){
 				// Append element to the list
 				// TODO: STABILITY: Handle overflow
 				tmp = atomicAdd(listIndexPtr, D);
