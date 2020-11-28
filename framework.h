@@ -39,7 +39,7 @@ public:
 	~ParallelFramework();
 	void init(Limit* limits, ParallelFrameworkParameters& parameters);
 
-	template<class ImplementedModel>
+	template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
 	int run();
 
 	RESULT_TYPE* getResults();
@@ -52,17 +52,17 @@ public:
 
 private:
 	void masterProcess();
-	void coordinatorThread(ComputeThreadInfo* cti, int numOfThreads, Model* model);
+	void coordinatorThread(ComputeThreadInfo* cti, int numOfThreads);
 	void getPointFromIndex(unsigned long index, DATA_TYPE* result);
 
-	template<class ImplementedModel>
+	template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
 	void slaveProcess();
 
-	template<class ImplementedModel>
+	template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
 	void computeThread(ComputeThreadInfo& cti);
 };
 
-template<class ImplementedModel>
+template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
 int ParallelFramework::run() {
 	if(!valid){
 		printf("[%d] run() called for invalid framework\n", rank);
@@ -78,7 +78,7 @@ int ParallelFramework::run() {
 	}else{
 
 		printf("[%d] Slave process starting\n", rank);
-		slaveProcess<ImplementedModel>();
+		slaveProcess<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>();
 		printf("[%d] Slave process finished\n", rank);
 
 	}
@@ -88,7 +88,7 @@ int ParallelFramework::run() {
 	return 0;
 }
 
-template<class ImplementedModel>
+template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
 void ParallelFramework::slaveProcess() {
 	/*******************************************************************
 	********** Calculate number of worker threads (#GPUs + 1CPU) *******
@@ -123,8 +123,6 @@ void ParallelFramework::slaveProcess() {
 		computeThreadInfo[i].ratio = (float)1/numOfThreads;
 	}
 
-	ImplementedModel model_p = ImplementedModel();
-
 	#ifdef DBG_START_STOP
 		printf("[%d] SlaveProcess: Spawning %d worker threads...\n", rank, numOfThreads);
 	#endif
@@ -136,12 +134,12 @@ void ParallelFramework::slaveProcess() {
 	{
 		int tid = omp_get_thread_num();
 		if(tid == 0){
-			coordinatorThread(computeThreadInfo, omp_get_num_threads()-1, &model_p);
+			coordinatorThread(computeThreadInfo, omp_get_num_threads()-1);
 		}else{
 			// Calculate id: -1 -> CPU, 0+ -> GPU[id]
 			computeThreadInfo[tid-1].id = tid - (parameters->processingType == PROCESSING_TYPE_GPU ? 1 : 2);
 
-			computeThread<ImplementedModel>(computeThreadInfo[tid - 1]);
+			computeThread<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>(computeThreadInfo[tid - 1]);
 		}
 	}
 
@@ -155,15 +153,14 @@ void ParallelFramework::slaveProcess() {
 	delete[] computeThreadInfo;
 }
 
-template<class ImplementedModel>
+template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
 void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 	int gpuListIndex, globalListIndexOld;
 
 	// GPU Memory
-	ImplementedModel** deviceModelPtrAddress;	// GPU Memory to save the address of the 'Model' object on device
 	RESULT_TYPE* deviceResults;					// GPU Memory for results
 	int* deviceListIndexPtr;					// GPU Memory for list index for synchronization when saving the results as a list of points
-	void* deviceDataPtr;						// GPU Memory to store any constant data
+	void* deviceDataPtr;						// GPU Memory to store the model's constant data
 
 	// GPU Runtime
 	cudaStream_t streams[parameters->gpuStreams];
@@ -186,9 +183,9 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		// Get device's properties for shared memory
 		cudaGetDeviceProperties(&deviceProp, cti.id);
 
-		// Use constant memory for data if it fits
+		// Use constant memory for data if they fit
 		useConstantMemoryForData = parameters->dataSize > 0 &&
-			parameters->dataSize <= (MAX_CONSTANT_MEMORY - parameters->D * (sizeof(Limit) + sizeof(unsigned long long)) - sizeof(ImplementedModel*));
+			parameters->dataSize <= (MAX_CONSTANT_MEMORY - parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
 
 		// Max use 1/4 of the available shared memory for data, the rest will be used for each thread to store their point (x) and index vector (i)
 		useSharedMemoryForData = parameters->dataSize > 0 && !useConstantMemoryForData &&
@@ -197,8 +194,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		// How many bytes are left in shared memory after using it for the model's data
 		availableSharedMemory = deviceProp.sharedMemPerBlock - (useSharedMemoryForData ? parameters->dataSize : 0);
 
-		// How many points can fit in shared memory (for each point we need D*DATA_TYPEs (for x) and D*u_int (for indices)) (minus 1 is to allow the threads to align their memory)
-		maxSharedPoints = availableSharedMemory / (parameters->D * (sizeof(DATA_TYPE) + sizeof(unsigned int))) - 1;
+		// How many points can fit in shared memory (for each point we need D*DATA_TYPEs (for x) and D*u_int (for indices))
+		maxSharedPoints = availableSharedMemory / (parameters->D * (sizeof(DATA_TYPE) + sizeof(unsigned int)));
 
 		#ifdef DBG_START_STOP
 			printf("[%d] ComputeThread %d: useSharedMemoryForData = %d\n", rank, cti.id, useSharedMemoryForData);
@@ -214,7 +211,6 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		}
 
 		// Allocate memory on device
-		cudaMalloc(&deviceModelPtrAddress, sizeof(ImplementedModel**));			cce();
 		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));	cce();
 		cudaMalloc(&deviceListIndexPtr, sizeof(int));							cce();
 		// If we have data but can't fit it in constant memory, allocate global memory
@@ -223,17 +219,10 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		}
 
 		#ifdef DBG_MEMORY
-			printf("[%d] ComputeThread %d: deviceModelPtrAddress: 0x%x\n", rank, cti.id, (void*) deviceModelPtrAddress);
 			printf("[%d] ComputeThread %d: deviceResults: 0x%x\n", rank, cti.id, (void*) deviceResults);
 			printf("[%d] ComputeThread %d: deviceListIndexPtr: 0x%x\n", rank, cti.id, (void*) deviceListIndexPtr);
 			printf("[%d] ComputeThread %d: deviceDataPtr: 0x%x\n", rank, cti.id, (void*) deviceDataPtr);
 		#endif
-
-		// Instantiate the model object on the device, and fetch its address from 'deviceModelAddress' to the host
-		create_model_kernel<ImplementedModel><<<1, 1>>>(deviceModelPtrAddress);	cce();
-
-		ImplementedModel* deviceModelPtr = nullptr;
-		cudaMemcpy(&deviceModelPtr, deviceModelPtrAddress, sizeof(ImplementedModel*), cudaMemcpyDeviceToHost);	cce();
 
 		// Copy limits, idxSteps, and constant data to device
 		#ifdef DBG_MEMORY
@@ -245,18 +234,13 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 			printf("[%d] ComputeThread %d: Copying deviceModelPtr (0x%x) at constant memory with offset %d\n",
 											rank, cti.id, deviceModelPtr, parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
 		#endif
-		cudaMemcpyToSymbolWrapper<ImplementedModel>(
+		cudaMemcpyToSymbolWrapper<nullptr, nullptr>(
 			limits, parameters->D * sizeof(Limit), 0);
 		cce();
 
-		cudaMemcpyToSymbolWrapper<ImplementedModel>(
+		cudaMemcpyToSymbolWrapper<nullptr, nullptr>(
 			idxSteps, parameters->D * sizeof(unsigned long long),
 			parameters->D * sizeof(Limit));
-		cce();
-
-		cudaMemcpyToSymbolWrapper<ImplementedModel>(
-			&deviceModelPtr, sizeof(ImplementedModel*),
-			parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
 		cce();
 
 		// If we have data for the model...
@@ -265,11 +249,11 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 			if(useConstantMemoryForData){
 				#ifdef DBG_MEMORY
 					printf("[%d] ComputeThread %d: Copying data at constant memory with offset %d\n",
-										rank, cti.id, sizeof(ImplementedModel*) + parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
+										rank, cti.id, parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
 				#endif
-				cudaMemcpyToSymbolWrapper<ImplementedModel>(
+				cudaMemcpyToSymbolWrapper<nullptr, nullptr>(
 					parameters->dataPtr, parameters->dataSize,
-					sizeof(ImplementedModel*) + parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
+					parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
 				cce()
 			}
 			// else copy the data to the global memory, either to be read from there or to be copied to shared memory
@@ -369,7 +353,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					#endif
 
 					// Note: Point at the start of deviceResults, because the offset (because of computeBatchSize) is calculated in the kernel
-					validate_kernel<ImplementedModel><<<numOfBlocks, blockSize, deviceProp.sharedMemPerBlock, streams[i]>>>(
+					validate_kernel<validation_gpu, toBool_gpu><<<numOfBlocks, blockSize, deviceProp.sharedMemPerBlock, streams[i]>>>(
 						deviceResults, cti.startPoint,
 						parameters->D, elementsPerStream, skip, deviceDataPtr,
 						parameters->dataSize, useSharedMemoryForData, useConstantMemoryForData,
@@ -410,7 +394,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 			} else {
 
-				cpu_kernel<ImplementedModel>(cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : cti.listIndexPtr,
+				cpu_kernel<validation_cpu, toBool_cpu>(cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : cti.listIndexPtr,
 				idxSteps, cti.startPoint);
 
 			}
@@ -450,12 +434,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 	// Finalize GPU
 	if (cti.id > -1) {
-		// Delete the model object on the device
-		delete_model_kernel<ImplementedModel><<<1, 1 >>>(deviceModelPtrAddress);
-		cce();
-
-		// Free the space for the model's address on the device
-		cudaFree(deviceModelPtrAddress);		cce();
+		// Deallocate device's memory
 		cudaFree(deviceResults);			cce();
 		cudaFree(deviceListIndexPtr);		cce();
 		cudaFree(deviceDataPtr);			cce();

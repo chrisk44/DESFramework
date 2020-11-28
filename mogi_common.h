@@ -4,10 +4,13 @@ __host__ __device__ static __inline__ float t(float x1, float y1, float x2, floa
 __host__ __device__ static __inline__ float f(float x, float y, float z, float dv, float xl, float yl, float zl);
 __host__ __device__ static __inline__ float h(float x, float y, float z, float dv, float xl, float yl, float zl);
 
+#ifndef TOPINV_PI
+#define TOPINV_PI
 #if defined(__CUDACC__)
 __device__ const float PI = (float)M_PI;
 #else
 const float PI = (float)M_PI;
+#endif
 #endif
 
 /******************************************************************************/
@@ -59,4 +62,3 @@ __host__ __device__ static __inline__ float h(float x, float y, float z, float d
 }
 
 /******************************************************************************/
-

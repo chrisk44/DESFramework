@@ -24,10 +24,13 @@ __host__ __device__ static __inline__ float ux_tf(float xi, float eta, float q, 
 __host__ __device__ static __inline__ float uy_tf(float xi, float eta, float q, float dip, float nu);
 __host__ __device__ static __inline__ float uz_tf(float xi, float eta, float q, float dip, float nu);
 
+#ifndef TOPINV_PI
+#define TOPINV_PI
 #if defined(__CUDACC__)
 __device__ const float PI = (float)M_PI;
 #else
 const float PI = (float)M_PI;
+#endif
 #endif
 
 /******************************************************************************/
@@ -160,4 +163,3 @@ __host__ __device__ static __inline__ float uz_tf(float xi, float eta, float q, 
 }
 
 /******************************************************************************/
-

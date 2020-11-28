@@ -381,7 +381,7 @@ void ParallelFramework::masterProcess() {
 	delete[] slaveProcessInfo;
 }
 
-void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThreads, Model* model){
+void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThreads){
 	sem_t* semResults = cti[0].semResults;
 	int* globalListIndexPtr = cti[0].listIndexPtr;
 

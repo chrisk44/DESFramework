@@ -55,14 +55,8 @@
 #define TAG_EXITING 5
 #define TAG_RESULTS_DATA 6
 
-class Model {
-public:
-	// float* point will be a D-dimension vector
-	inline __host__   virtual RESULT_TYPE validate_cpu(DATA_TYPE* point, void* dataPtr) = 0;
-	inline __device__ virtual RESULT_TYPE validate_gpu(DATA_TYPE* point, void* dataPtr) = 0;
-
-	inline __host__ __device__ virtual bool toBool(RESULT_TYPE result) = 0;
-};
+typedef RESULT_TYPE (*validationFunc_t)(DATA_TYPE*, void*);
+typedef bool (*toBool_t)(RESULT_TYPE);
 
 class Stopwatch{
 private:

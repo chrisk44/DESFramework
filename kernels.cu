@@ -11,25 +11,13 @@ using namespace std;
 #define MAX_CONSTANT_MEMORY (65536 - 24)			// Don't know why...
 __device__ __constant__ char constantMemoryPtr[MAX_CONSTANT_MEMORY];
 
-template<class ImplementedModel>
+template<validationFunc_t validationFunc, toBool_t toBool>  // Because nvcc is WEIRD
 void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offset){
 	cudaMemcpyToSymbol(constantMemoryPtr, src, count, offset, cudaMemcpyHostToDevice);
 }
 
-// CUDA kernel to create the 'Model' object on device
-template<class ImplementedModel>
-__global__ void create_model_kernel(ImplementedModel** deviceModelAddress) {
-	(*deviceModelAddress) = new ImplementedModel();
-}
-
-// CUDA kernel to delete the 'Model' object on device
-template<class ImplementedModel>
-__global__ void delete_model_kernel(ImplementedModel** deviceModelAddress) {
-	delete (*deviceModelAddress);
-}
-
 // CUDA kernel to run the computation
-template<class ImplementedModel>
+template<validationFunc_t validationFunc, toBool_t toBool>
 __global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPointLinearIndex,
 	const unsigned int D, const unsigned long numOfElements, const unsigned long offset, void* dataPtr,
 	int dataSize, bool useSharedMemoryForData, bool useConstantMemoryForData, int* listIndexPtr,
@@ -41,16 +29,12 @@ __global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPoin
 	int d;
 	unsigned long tmp, remainder;
 
-	// Constant Memory layout is: Limits[], idxSteps[], ImplementedModel*, ?Model-data
+	// Constant Memory layout is: Limits[], idxSteps[], ?Model-data
 	Limit* limits = (Limit*) constantMemoryPtr;
 	unsigned long long* idxSteps = (unsigned long long*) &constantMemoryPtr[D*sizeof(Limit)];
-	ImplementedModel* modelPtr = (ImplementedModel*) *(ImplementedModel**) &constantMemoryPtr[D*(sizeof(Limit) + sizeof(unsigned long long))];
-	// ^^^ modelPtr points to the actual object in global memory
-	if(useConstantMemoryForData)
-		dataPtr = (void*) &constantMemoryPtr[sizeof(ImplementedModel**) + D * (sizeof(Limit) + sizeof(unsigned long long))];
 
-	RESULT_TYPE (ImplementedModel::*VALIDATION_FUNC)(DATA_TYPE*, void*) = &ImplementedModel::validate_gpu;
-	bool (ImplementedModel::*TOBOOL_FUNC)(RESULT_TYPE) = &ImplementedModel::toBool;
+	if(useConstantMemoryForData)
+		dataPtr = (void*) &constantMemoryPtr[D * (sizeof(Limit) + sizeof(unsigned long long))];
 
 	// Shared memory layout is: point(thread0)[], point(thread1)[], ..., indices (with stride)..., ?Model-data
 	extern __shared__ char sharedMem[];
@@ -103,11 +87,11 @@ __global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPoin
 		if(listIndexPtr == nullptr){
 			// We are running as SAVE_TYPE_ALL
 			// Run the validation function and save the result to the global memory
-			results[threadStart] = (modelPtr->*VALIDATION_FUNC)(point, dataPtr);
+			results[threadStart] = validationFunc(point, dataPtr);
 		}else{
 			// We are running as SAVE_TYPE_LIST
 			// Run the validation function and pass its result to toBool
-			if((modelPtr->*TOBOOL_FUNC)((modelPtr->*VALIDATION_FUNC)(point, dataPtr))){
+			if(toBool(validationFunc(point, dataPtr))){
 				// Append element to the list
 				// TODO: STABILITY: Handle overflow
 				tmp = atomicAdd(listIndexPtr, D);
@@ -142,10 +126,9 @@ __global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPoin
 }
 
 // CPU kernel to run the computation
-template<class ImplementedModel>
+template<validationFunc_t validationFunc, toBool_t toBool>
 void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
 	unsigned long long* idxSteps, unsigned long startingPointLinearIndex) {
-	ImplementedModel model = ImplementedModel();
 
 	omp_set_nested(1);		// We are already in a parallel region since slaveProcess()
 	#pragma omp parallel
@@ -183,11 +166,11 @@ void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned lo
 			if(listIndexPtr == nullptr){
 				// We are running as SAVE_TYPE_ALL
 				// Run the validation function and save the result to the global memory
-				results[start + processed] = model.validate_cpu(point, dataPtr);
+				results[start + processed] = validationFunc(point, dataPtr);
 			}else{
 				// We are running as SAVE_TYPE_LIST
 				// Run the validation function and pass its result to toBool
-				if(model.toBool(model.validate_cpu(point, dataPtr))){
+				if(toBool(validationFunc(point, dataPtr))){
 					// Append element to the list
 					carry = __sync_fetch_and_add(listIndexPtr, D);
 					for(d = 0; d < D; d++){
