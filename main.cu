@@ -1,201 +1,267 @@
 #include <iostream>
 #include <cstdlib>
 #include <fstream>
+#include <mpi.h>
 
 #include "framework.h"
 
 /*
- * Each one of these contain a __host__ __device__ doValidate function and have defined a MODEL_D
- * Obviously include only one.
+ * Each one of these contain a __host__ __device__ doValidate[MO][123] function
 */
-// #include "mogi1.h"
+#include "mogi1.h"
 #include "mogi2.h"
-// #include "okada1.h"
-// #include "okada2.h"
-// #include "okada3.h"
-// #include "test.h"
+#include "okada1.h"
+#include "okada2.h"
+#include "okada3.h"
 
-__host__ RESULT_TYPE validate_cpu(DATA_TYPE* x, void* dataPtr){
-    return doValidate(x, dataPtr);
-}
+__host__   RESULT_TYPE validate_cpuM1(DATA_TYPE* x, void* dataPtr){ return doValidateM1(x, dataPtr); }
+__device__ RESULT_TYPE validate_gpuM1(DATA_TYPE* x, void* dataPtr){ return doValidateM1(x, dataPtr); }
 
-__device__ RESULT_TYPE validate_gpu(DATA_TYPE* x, void* dataPtr){
-    return doValidate(x, dataPtr);
-}
+__host__   RESULT_TYPE validate_cpuM2(DATA_TYPE* x, void* dataPtr){ return doValidateM2(x, dataPtr); }
+__device__ RESULT_TYPE validate_gpuM2(DATA_TYPE* x, void* dataPtr){ return doValidateM2(x, dataPtr); }
 
-__host__ bool toBool_cpu(RESULT_TYPE result){
-    return result != 0;
-}
+__host__   RESULT_TYPE validate_cpuO1(DATA_TYPE* x, void* dataPtr){ return doValidateO1(x, dataPtr); }
+__device__ RESULT_TYPE validate_gpuO1(DATA_TYPE* x, void* dataPtr){ return doValidateO1(x, dataPtr); }
 
-__device__ bool toBool_gpu(RESULT_TYPE result){
-    return result != 0;
-}
+__host__   RESULT_TYPE validate_cpuO2(DATA_TYPE* x, void* dataPtr){ return doValidateO2(x, dataPtr); }
+__device__ RESULT_TYPE validate_gpuO2(DATA_TYPE* x, void* dataPtr){ return doValidateO2(x, dataPtr); }
+
+// __host__   RESULT_TYPE validate_cpuO3(DATA_TYPE* x, void* dataPtr){ return doValidateO2(x, dataPtr); }
+// __device__ RESULT_TYPE validate_gpuO4(DATA_TYPE* x, void* dataPtr){ return doValidateO2(x, dataPtr); }
+
+__host__ bool toBool_cpu(RESULT_TYPE result){ return result != 0; }
+__device__ bool toBool_gpu(RESULT_TYPE result){ return result != 0; }
 
 #define RESULTS_THRESHOLD 1e-13
 
 using namespace std;
 
 int main(int argc, char** argv){
+    const char* modelNames[4] = {
+        "mogi1",
+        "mogi2",
+        "okada1",
+        "okada2"
+    };
+
+    // Scale factor, must be >0
+    float k = 2;
+
+    char displFilename[1024];
+    char gridFilename[1024];
+    char outFilename[1024];
     ifstream dispfile, gridfile;
     ofstream outfile;
     string tmp;
-    int stations, dims, i, j, result;
+    int stations, dims, i, j, m, g, result;
     float *modelDataPtr, *dispPtr;
-    float x, y, z, de, dn, dv, se, sn, sv, k;
+    float x, y, z, de, dn, dv, se, sn, sv;
     float low, high, step;
-
-    ParallelFrameworkParameters parameters;
-    Limit limits[MODEL_D];
 
     Stopwatch sw;
     int length;
     DATA_TYPE* list;
 
-    if(argc != 4){
-        printf("This: ");
-        for(i=0; i<argc; i++)
-            printf("%s ", argv[i]);
+    // Initialize MPI manually
+    MPI_Init(nullptr, nullptr);
 
-        printf("is unacceptable. You wrote this thing.\n");
+    // For each model...
+    for(m=0; m<4; m++){
+        // Open displacements file
+        sprintf(displFilename, "./data/%s/displ.txt", modelNames[m]);
+        dispfile.open(displFilename, ios::in);
 
-        printf("[E] Usage: %s <displacements file> <grid file> <k >= 0>\n", argv[0]);
-        exit(1);
+        // Count stations
+        stations = 0;
+        while(getline(dispfile, tmp)) stations++;
+
+        if(stations < 1){
+            printf("[%s \\ %d] Got 0 displacements. Exiting.\n", modelNames[m], g);
+            exit(2);
+        }
+
+        // Reset the file
+        dispfile.close();
+        dispfile.open(displFilename, ios::in);
+
+        // Create the model's parameters struct (the model's input data)
+        modelDataPtr = new float[1 + stations * (9 - (m<2 ? 0 : 1))];
+        modelDataPtr[0] = (float) stations;
+
+        // Read each station's displacement data
+        dispPtr = &modelDataPtr[1];
+        i = 0;
+        if(m < 2){
+            // Mogi models have x,y,z,...
+            while(dispfile >> x >> y >> z >> de >> dn >> dv >> se >> sn >> sv){
+                dispPtr[0*stations + i] = x;
+                dispPtr[1*stations + i] = y;
+                dispPtr[2*stations + i] = z;
+                dispPtr[3*stations + i] = de;
+                dispPtr[4*stations + i] = dn;
+                dispPtr[5*stations + i] = dv;
+                dispPtr[6*stations + i] = se * k;
+                dispPtr[7*stations + i] = sn * k;
+                dispPtr[8*stations + i] = sv * k;
+
+                i++;
+            }
+        }else{
+            // Okada models have x,y,...
+            while(dispfile >> x >> y >> de >> dn >> dv >> se >> sn >> sv){
+                dispPtr[0*stations + i] = x;
+                dispPtr[1*stations + i] = y;
+                dispPtr[2*stations + i] = de;
+                dispPtr[3*stations + i] = dn;
+                dispPtr[4*stations + i] = dv;
+                dispPtr[5*stations + i] = se * k;
+                dispPtr[6*stations + i] = sn * k;
+                dispPtr[7*stations + i] = sv * k;
+
+                i++;
+            }
+        }
+
+        dispfile.close();
+
+        // For each grid...
+        for(g=1; g<=6; g++){
+            if(m == 3 && g == 5)
+                break;
+
+            // Open grid file
+            sprintf(gridFilename, "./data/%s/grid%d.txt", modelNames[m], g);
+            gridfile.open(gridFilename, ios::in);
+
+            // Count dimensions
+            dims = 0;
+            while(getline(gridfile, tmp)) dims++;
+
+            // Reset the file
+            gridfile.close();
+            gridfile.open(gridFilename, ios::in);
+
+            // Read each dimension's grid information
+            Limit limits[dims];
+            i = 0;
+            while(gridfile >> low >> high >> step){
+                // Create the limit (lower is inclusive, upper is exclusive)
+                high += step;
+                limits[i] = Limit{ low, high, (unsigned int) ((high-low)/step) };
+                i++;
+            }
+
+            // Close the file
+            gridfile.close();
+
+            // Create the framework's parameters struct
+            ParallelFrameworkParameters parameters;
+            parameters.D = dims;
+            parameters.resultSaveType = SAVE_TYPE_LIST;
+            parameters.processingType = PROCESSING_TYPE_GPU;
+            parameters.overrideMemoryRestrictions = true;
+
+            parameters.dataPtr = (void*) modelDataPtr;
+            parameters.dataSize = (1 + stations*(9 - (m<2 ? 0 : 1))) * sizeof(float);
+
+            parameters.computeBatchSize = 200;
+            parameters.blockSize = 1024;
+            parameters.gpuStreams = 8;
+            parameters.batchSize = ULONG_MAX;
+            parameters.threadBalancing = true;
+            parameters.slaveBalancing = true;
+            parameters.slowStartLimit = 5;
+            parameters.slowStartBase = 5000000;
+
+            parameters.benchmark = false;
+            parameters.finalizeAfterExecution = false;
+            parameters.printProgress = false;
+
+            float totalTime = 0;        //msec
+            int numOfRuns = 0;
+            int numOfResults = -1;
+            // Run at least 10 seconds, and stop after 10 runs or 2 minutes
+            while(true){
+                // Initialize the framework object
+                ParallelFramework* framework = new ParallelFramework(false);
+                framework->init(limits, parameters);
+                if (! framework->isValid()) {
+                    printf("[%s \\ %d] Error initializing framework\n", modelNames[m], g);
+                    exit(-1);
+                }
+
+                // Start the computation
+                sw.start();
+                switch(m){
+                    case 0: framework->run<validate_cpuM1, validate_gpuM1, toBool_cpu, toBool_gpu>(); break;
+                    case 1: framework->run<validate_cpuM2, validate_gpuM2, toBool_cpu, toBool_gpu>(); break;
+                    case 2: framework->run<validate_cpuO1, validate_gpuO1, toBool_cpu, toBool_gpu>(); break;
+                    case 3: framework->run<validate_cpuO2, validate_gpuO2, toBool_cpu, toBool_gpu>(); break;
+                }
+                sw.stop();
+                if (result != 0) {
+                    printf("[%s \\ %d] Error running the computation: %d\n", modelNames[m], g, result);
+                    exit(-1);
+                }
+
+                if(framework->getRank() == 0){
+                    framework->getList(&length);
+                    if(length != numOfResults && numOfResults != -1){
+                        printf("[%s \\ %d] Number of results from previous run don't match: %d vs %d. Exiting.\n", modelNames[m], g, numOfResults, length);
+                        exit(-2);
+                    }
+                    numOfResults = length;
+                }
+
+                // printf("[%s \\ %d] Run %d: %f ms\n", modelNames[m], g, numOfRuns, sw.getMsec());
+
+                totalTime += sw.getMsec();
+                numOfRuns++;
+
+                if(totalTime > 10 * 1000 && (numOfRuns >= 10 || totalTime >= 1 * 60 * 1000)){
+                    if(framework->getRank() == 0){
+                        if(g == 1) printf("\n");
+
+                        printf("\n[%s \\ %d] Time: %f ms in %d runs\n",
+                                    modelNames[m], g, totalTime/numOfRuns, numOfRuns);
+
+                        sprintf(outFilename, "results_%s_%d.txt", modelNames[m], g);
+                        // Open file to write results
+                        outfile.open(outFilename, ios::out | ios::trunc);
+
+                        list = framework->getList(&length);
+                        printf("[%s \\ %d] Results: %d\n", modelNames[m], g, length);
+                        for(i=0; i<min(length, 5); i++){
+                            printf("[%s \\ %d] (", modelNames[m], g);
+                            for(j=0; j<parameters.D-1; j++)
+                                printf("%lf ", list[i*parameters.D + j]);
+
+                            printf("%lf)\n", list[i*parameters.D + j]);
+                        }
+                        if(length > 5)
+                            printf("[%s \\ %d] ...%d more results\n", modelNames[m], g, length-5);
+
+                        for(i=0; i<length; i++){
+                            for(j=0; j<parameters.D-1; j++)
+                                outfile << list[i*parameters.D + j] << " ";
+
+                            outfile << list[i*parameters.D + j] << endl;
+                        }
+
+                        outfile.close();
+                    }
+                    delete framework;
+                    break;
+                }else{
+                    delete framework;
+                }
+            }
+        }
+
+        delete [] modelDataPtr;
     }
 
-    k = atof(argv[3]);
-    if(k <= 0){
-        printf("[E] Scale factor k must be > 0. Exiting.\n");
-        exit(1);
-    }
-
-    printf("Reading displacements from %s\n", argv[1]);
-    printf("Reading grid from %s\n", argv[2]);
-    printf("Scale factor = %f\n", k);
-
-    // Open files
-    dispfile.open(argv[1], ios::in);
-    gridfile.open(argv[2], ios::in);
-
-    stations = 0;
-    dims = 0;
-
-    // Count stations and dimensions
-    while(getline(dispfile, tmp)) stations++;
-    while(getline(gridfile, tmp)) dims++;
-
-    printf("Got %d stations\n", stations);
-    printf("Got %d dimensions\n", dims);
-
-    if(stations < 1){
-        printf("Got 0 displacements. Exiting.\n");
-        exit(2);
-    }
-    if(dims != MODEL_D){
-        printf("Got %d dimensions, expected %d. Exiting.\n", dims, MODEL_D);
-        exit(2);
-    }
-
-    // Reset the files
-    dispfile.close();
-    gridfile.close();
-    dispfile.open(argv[1], ios::in);
-    gridfile.open(argv[2], ios::in);
-
-    // Create the model's parameters struct (the model's input data)
-    modelDataPtr = new float[1 + stations*9];
-    modelDataPtr[0] = (float) stations;
-
-    // Read each station's displacement data
-    dispPtr = &modelDataPtr[1];
-    i = 0;
-    while(dispfile >> x >> y >> z >> de >> dn >> dv >> se >> sn >> sv){
-        dispPtr[0*stations + i] = x;
-        dispPtr[1*stations + i] = y;
-        dispPtr[2*stations + i] = z;
-        dispPtr[3*stations + i] = de;
-        dispPtr[4*stations + i] = dn;
-        dispPtr[5*stations + i] = dv;
-        dispPtr[6*stations + i] = se * k;
-        dispPtr[7*stations + i] = sn * k;
-        dispPtr[8*stations + i] = sv * k;
-
-        i++;
-    }
-
-    // Read each dimension's grid information
-    i = 0;
-    while(gridfile >> low >> high >> step){
-        // Create the limit (lower is inclusive, upper is exclusive)
-        high += step;
-        limits[i] = Limit{ low, high, (unsigned int) ((high-low)/step) };
-        i++;
-    }
-
-    dispfile.close();
-    gridfile.close();
-
-    // Create the framework's parameters struct
-    parameters.D = MODEL_D;
-    parameters.resultSaveType = SAVE_TYPE_LIST;
-    parameters.processingType = PROCESSING_TYPE_GPU;
-    parameters.dataPtr = (void*) modelDataPtr;
-    parameters.dataSize = (1 + stations*9) * sizeof(float);
-    parameters.computeBatchSize = 200;
-    parameters.blockSize = 1024;
-    parameters.gpuStreams = 8;
-    parameters.overrideMemoryRestrictions = true;
-
-    parameters.benchmark = false;
-    parameters.threadBalancing = true;
-    parameters.slaveBalancing = true;
-    parameters.batchSize = ULONG_MAX;
-    parameters.slowStartLimit = 5;
-
-    // Initialize the framework object
-    ParallelFramework framework = ParallelFramework();
-    framework.init(limits, parameters);
-    if (! framework.isValid()) {
-        cout << "Error initializing framework: " << endl;
-        exit(-1);
-    }
-
-    // Start the computation
-    sw.start();
-    result = framework.run<validate_cpu, validate_gpu, toBool_cpu, toBool_gpu>();
-    sw.stop();
-    if (result != 0) {
-        cout << "Error running the computation: " << result << endl;
-        exit(-1);
-    }
-    if(framework.getRank() != 0)
-        exit(0);
-
-    printf("Time: %f ms\n", sw.getMsec());
-
-    // Open file to write results
-    outfile.open("results.txt", ios::out | ios::trunc);
-
-    list = framework.getList(&length);
-    printf("Results: %d\n", length);
-    for(i=0; i<min(length, 5); i++){
-        printf("(");
-        for(j=0; j<parameters.D-1; j++)
-            printf("%lf ", list[i*parameters.D + j]);
-
-        printf("%lf)\n", list[i*parameters.D + j]);
-    }
-    if(length > 5)
-        printf("...%d more results\n", length-5);
-
-    for(i=0; i<length; i++){
-        for(j=0; j<parameters.D-1; j++)
-            outfile << list[i*parameters.D + j] << " ";
-
-        outfile << list[i*parameters.D + j] << endl;
-    }
-
-    outfile.close();
-    delete [] modelDataPtr;
+    MPI_Finalize();
 
     return 0;
 }

@@ -36,7 +36,7 @@
 #define DATA_MPI_TYPE MPI_DOUBLE
 
 // Debugging
-#define DBG_START_STOP      // Messages about starting/stopping processes and threads
+// #define DBG_START_STOP      // Messages about starting/stopping processes and threads
 // #define DBG_QUEUE           // Messages about queueing work (coordinator->worker threads, worker->gpu streams)
 // #define DBG_MPI_STEPS       // Messages after each MPI step
 // #define DBG_RATIO           // Messages about changes in ratios (masterProcess and coordinatorThread)
@@ -117,7 +117,8 @@ struct ParallelFrameworkParameters {
     unsigned long slowStartBase = 5000000;
     int slowStartLimit = 3;
     int minMsForRatioAdjustment = 0;
-	// ...
+    bool finalizeAfterExecution = true;
+    bool printProgress = true;
 };
 
 struct SlaveProcessInfo {

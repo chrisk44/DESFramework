@@ -68,18 +68,18 @@ __global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPoin
 
 	currentIndex = (unsigned int*) &sharedMem[
 		blockDim.x * D * sizeof(DATA_TYPE) +		// Bypass all threads' points
-		threadIdx.x * sizeof(unsigned int) 			// Bypass one element for each previous threads
+		threadIdx.x * D * sizeof(unsigned int) 		// Bypass the previous threads' indices
 	];
 
 	remainder = threadStart + startingPointLinearIndex;
 	for (d = D-1; d>=0; d--){
 		tmp = idxSteps[d];
 
-		currentIndex[blockDim.x * d] = remainder / tmp;
-		remainder -= currentIndex[blockDim.x * d] * tmp;
+		currentIndex[d] = remainder / tmp;
+		remainder -= currentIndex[d] * tmp;
 
 		// Calculate the exact coordinate i
-		point[d] = limits[d].lowerLimit + currentIndex[blockDim.x * d] * limits[d].step;
+		point[d] = limits[d].lowerLimit + currentIndex[d] * limits[d].step;
 	}
 
 	while(threadStart < end){
@@ -105,17 +105,17 @@ __global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPoin
 		d = 0;
 		while(d < D){
 			// Increment dimension d
-			currentIndex[blockDim.x * d]++;
+			currentIndex[d]++;
 
-			if(currentIndex[blockDim.x * d] < limits[d].N){
+			if(currentIndex[d] < limits[d].N){
 				// No need to recalculate the rest of the dimensions
 
 				// point[d] += limits[d].step; // is also an option
-				point[d] = limits[d].lowerLimit + limits[d].step * currentIndex[blockDim.x * d];
+				point[d] = limits[d].lowerLimit + limits[d].step * currentIndex[d];
 				break;
 			}else{
 				// This dimension overflowed, initialize it and increment the next one
-				currentIndex[blockDim.x * d] = 0;
+				currentIndex[d] = 0;
 				point[d] = limits[d].lowerLimit;
 				d++;
 			}

@@ -1,10 +1,8 @@
 #include "mogi_common.h"
 
-#define MODEL_D 4
-
 using namespace std;
 
-__host__ __device__ RESULT_TYPE doValidate(DATA_TYPE* x, void* dataPtr){
+__host__ __device__ RESULT_TYPE doValidateM1(DATA_TYPE* x, void* dataPtr){
     float *xp, *yp, *zp, *de, *dn, *dv, *se, *sn, *sv;
     float r1, ux1, uy1, uz1, dux, duy, duz;
     unsigned long long bp, m;

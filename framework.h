@@ -35,7 +35,7 @@ private:
 	int rank = -1;
 
 public:
-	ParallelFramework();
+	ParallelFramework(bool initMPI);
 	~ParallelFramework();
 	void init(Limit* limits, ParallelFrameworkParameters& parameters);
 
@@ -71,19 +71,28 @@ int ParallelFramework::run() {
 
 	if(rank == 0){
 
-		printf("[%d] Master process starting\n", rank);
+		if(parameters->printProgress)
+			printf("[%d] Master process starting\n", rank);
+
 		masterProcess();
-		printf("[%d] Master process finished\n", rank);
+
+		if(parameters->printProgress)
+			printf("[%d] Master process finished\n", rank);
 
 	}else{
 
-		printf("[%d] Slave process starting\n", rank);
+		if(parameters->printProgress)
+			printf("[%d] Slave process starting\n", rank);
+
 		slaveProcess<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>();
-		printf("[%d] Slave process finished\n", rank);
+
+		if(parameters->printProgress)
+			printf("[%d] Slave process finished\n", rank);
 
 	}
 
-	MPI_Finalize();
+	if(parameters->finalizeAfterExecution)
+		MPI_Finalize();
 
 	return 0;
 }
@@ -188,7 +197,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 			parameters->dataSize <= (MAX_CONSTANT_MEMORY - parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
 
 		// Max use 1/4 of the available shared memory for data, the rest will be used for each thread to store their point (x) and index vector (i)
-		useSharedMemoryForData = parameters->dataSize > 0 && !useConstantMemoryForData &&
+		// This seems to be worse than both global and constant memory
+		useSharedMemoryForData = false && parameters->dataSize > 0 && !useConstantMemoryForData &&
 								 parameters->dataSize <= deviceProp.sharedMemPerBlock / 4;
 
 		// How many bytes are left in shared memory after using it for the model's data
@@ -198,10 +208,12 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		maxSharedPoints = availableSharedMemory / (parameters->D * (sizeof(DATA_TYPE) + sizeof(unsigned int)));
 
 		#ifdef DBG_START_STOP
-			printf("[%d] ComputeThread %d: useSharedMemoryForData = %d\n", rank, cti.id, useSharedMemoryForData);
-			printf("[%d] ComputeThread %d: useConstantMemoryForData = %d\n", rank, cti.id, useConstantMemoryForData);
-			printf("[%d] ComputeThread %d: availableSharedMemory = %d bytes\n", rank, cti.id, availableSharedMemory);
-			printf("[%d] ComputeThread %d: maxSharedPoints = %d\n", rank, cti.id, maxSharedPoints);
+			if(parameters->printProgress){
+				printf("[%d] ComputeThread %d: useSharedMemoryForData = %d\n", rank, cti.id, useSharedMemoryForData);
+				printf("[%d] ComputeThread %d: useConstantMemoryForData = %d\n", rank, cti.id, useConstantMemoryForData);
+				printf("[%d] ComputeThread %d: availableSharedMemory = %d bytes\n", rank, cti.id, availableSharedMemory);
+				printf("[%d] ComputeThread %d: maxSharedPoints = %d\n", rank, cti.id, maxSharedPoints);
+			}
 		#endif
 
 		// Create streams

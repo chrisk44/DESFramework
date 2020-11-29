@@ -1,10 +1,8 @@
 #include "mogi_common.h"
 
-#define MODEL_D 8
-
 using namespace std;
 
-__host__ __device__ float doValidate(double* x, void* dataPtr){
+__host__ __device__ float doValidateM2(double* x, void* dataPtr){
     float *xp, *yp, *zp, *de, *dn, *dv, *se, *sn, *sv;
     float dist, r1, r2, ux, ux1, ux2, uy, uy1, uy2, uz, uz1, uz2, dux, duy, duz;
     unsigned long long bp, m;

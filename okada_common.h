@@ -1,3 +1,6 @@
+#ifndef OKADA_COMMON_H
+#define OKADA_COMMON_H
+
 #include <cuda.h>
 
 #define EPS	(1.0E-7)
@@ -163,3 +166,5 @@ __host__ __device__ static __inline__ float uz_tf(float xi, float eta, float q, 
 }
 
 /******************************************************************************/
+
+#endif

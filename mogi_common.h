@@ -1,3 +1,6 @@
+#ifndef MOGI_COMMON_H
+#define MOGI_COMMON_H
+
 #include <cuda.h>
 
 __host__ __device__ static __inline__ float t(float x1, float y1, float x2, float y2);
@@ -62,3 +65,5 @@ __host__ __device__ static __inline__ float h(float x, float y, float z, float d
 }
 
 /******************************************************************************/
+
+#endif

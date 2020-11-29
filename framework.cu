@@ -7,9 +7,12 @@
 
 using namespace std;
 
-ParallelFramework::ParallelFramework() {
-	// Initialize MPI
-	MPI_Init(nullptr, nullptr);
+ParallelFramework::ParallelFramework(bool initMPI) {
+	// The user might want to do the MPI Initialization. Useful when the framework is used more than once in a program.
+	if(initMPI){
+		// Initialize MPI
+		MPI_Init(nullptr, nullptr);
+	}
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
 	valid = false;
@@ -257,13 +260,15 @@ void ParallelFramework::masterProcess() {
 				t = masterStopwatch.getMsec()/1000;
 				eta = t * ((float)totalElements/totalReceived) - t;
 
-				printf("Progress: %lu/%lu, %.2f %%", this->totalReceived, this->totalElements, ((float)this->totalReceived / this->totalElements)*100);
+				if(parameters->printProgress){
+					printf("Progress: %lu/%lu, %.2f %%", this->totalReceived, this->totalElements, ((float)this->totalReceived / this->totalElements)*100);
 
-				if(t < 3600)	printf(", Elapsed time: %02d:%02d", t/60, t%60);
-				else			printf(", Elapsed time: %02d:%02d:%02d", t/3600, (t%3600)/60, t%60);
+					if(t < 3600)	printf(", Elapsed time: %02d:%02d", t/60, t%60);
+					else			printf(", Elapsed time: %02d:%02d:%02d", t/3600, (t%3600)/60, t%60);
 
-				if(eta < 3600)	printf(", ETA: %02d:%02d\n", eta/60, eta%60);
-				else			printf(", ETA: %02d:%02d:%02d\n", eta/3600, (eta%3600)/60, eta%60);
+					if(eta < 3600)	printf(", ETA: %02d:%02d\n", eta/60, eta%60);
+					else			printf(", ETA: %02d:%02d:%02d\n", eta/3600, (eta%3600)/60, eta%60);
+				}
 
 				#ifdef DBG_MPI_STEPS
 					if(parameters->resultSaveType == SAVE_TYPE_ALL)
@@ -317,7 +322,7 @@ void ParallelFramework::masterProcess() {
 				pinfo.lastAssignedElements = pinfo.work.numOfElements;
 
 				// Print benchmark results
-				if (parameters->benchmark) {
+				if (parameters->benchmark && parameters->printProgress) {
 					printf("[%d] Master: Slave %d benchmark: %lu elements, %f ms\n\n", rank, mpiSource, pinfo.work.numOfElements, pinfo.stopwatch.getMsec());
 				}
 
