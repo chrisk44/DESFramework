@@ -23,7 +23,7 @@ __global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPoin
 	int dataSize, bool useSharedMemoryForData, bool useConstantMemoryForData, int* listIndexPtr,
 	const int computeBatchSize) {
 
-	unsigned long threadStart = offset + (((blockIdx.x * blockDim.x) + threadIdx.x) * computeBatchSize);
+	unsigned long threadStart = offset + ((((unsigned long) blockIdx.x * blockDim.x) + threadIdx.x) * computeBatchSize);
 	unsigned long end = min(offset + numOfElements, threadStart + computeBatchSize);
 
 	int d;
