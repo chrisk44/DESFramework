@@ -67,10 +67,12 @@ void ParallelFramework::init(Limit* _limits, ParallelFrameworkParameters& _param
 		}
 	#endif
 
+	listResultsSaved = 0;
+	totalReceived = 0;
+	totalSent = 0;
+	totalElements = (unsigned long long)(idxSteps[parameters->D - 1]) * (unsigned long long)(limits[parameters->D - 1].N);
+
 	if(rank == 0){
-		totalReceived = 0;
-		totalSent = 0;
-		totalElements = (unsigned long long)(idxSteps[parameters->D - 1]) * (unsigned long long)(limits[parameters->D - 1].N);
 		if(! (parameters->benchmark)){
 			if(parameters->resultSaveType == SAVE_TYPE_ALL){
 				if(parameters->saveFile == nullptr){
@@ -447,7 +449,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 			printf("[%d] Coordinator: Received %lu elements\n", rank, work.numOfElements);
 		#endif
 
-		// If no results, break
+		// If no elements, break
 		if(work.numOfElements == 0)
 			break;
 
@@ -582,6 +584,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 					}
 					printf("]");
 				}
+				printf("\n");
 			}
 		#endif
 
@@ -675,6 +678,11 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 }
 
 RESULT_TYPE* ParallelFramework::getResults() {
+	if(rank != 0){
+		printf("Error: Results can only be fetched by the master process. Are you the master process?\n");
+		return nullptr;
+	}
+
 	if(parameters->resultSaveType != SAVE_TYPE_ALL){
 		printf("Error: Can't get all results when resultSaveType is not SAVE_TYPE_ALL\n");
 		return nullptr;
@@ -683,6 +691,11 @@ RESULT_TYPE* ParallelFramework::getResults() {
 	return finalResults;
 }
 DATA_TYPE* ParallelFramework::getList(int* length){
+	if(rank != 0){
+		printf("Error: Results can only be fetched by the master process. Are you the master process?\n");
+		return nullptr;
+	}
+
 	if(parameters->resultSaveType != SAVE_TYPE_LIST){
 		printf("Error: Can't get list results when resultSaveType is not SAVE_TYPE_LIST\n");
 		if(length != nullptr)

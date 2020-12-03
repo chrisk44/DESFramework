@@ -25,7 +25,7 @@ private:
 	int saveFile = -1;							// File descriptor for save file
 	RESULT_TYPE* finalResults = NULL;			// An array of N0 * N1 * ... * N(D-1)
 	DATA_TYPE* listResults = NULL;				// An array of points for which the validation function has returned non-zero value
-	unsigned long listResultsSaved = 0;			// Number of points saved in listResults
+	int listResultsSaved = 0;					// Number of points saved in listResults
 	bool valid = false;
 	unsigned long totalSent = 0;			// Total elements that have been sent for processing, also the index from which the next assigned batch will start
 	unsigned long totalReceived = 0;		// TOtal elements that have been calculated and returned
@@ -238,13 +238,10 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 		// Copy limits, idxSteps, and constant data to device
 		#ifdef DBG_MEMORY
-			printf("[%d] ComputeThread %d: deviceModelPtr = 0x%x\n", rank, cti.id, deviceModelPtr);
 			printf("[%d] ComputeThread %d: Copying limits at constant memory with offset %d\n",
 											rank, cti.id, 0);
 			printf("[%d] ComputeThread %d: Copying idxSteps at constant memory with offset %d\n",
 											rank, cti.id, parameters->D * sizeof(Limit));
-			printf("[%d] ComputeThread %d: Copying deviceModelPtr (0x%x) at constant memory with offset %d\n",
-											rank, cti.id, deviceModelPtr, parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
 		#endif
 		cudaMemcpyToSymbolWrapper<nullptr, nullptr>(
 			limits, parameters->D * sizeof(Limit), 0);
@@ -446,16 +443,16 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 	// Finalize GPU
 	if (cti.id > -1) {
-		// Deallocate device's memory
-		cudaFree(deviceResults);			cce();
-		cudaFree(deviceListIndexPtr);		cce();
-		cudaFree(deviceDataPtr);			cce();
-
 		// Make sure streams are finished and destroy them
 		for(int i=0;i<parameters->gpuStreams;i++){
 			cudaStreamDestroy(streams[i]);
 			cce();
 		}
+
+		// Deallocate device's memory
+		cudaFree(deviceResults);			cce();
+		cudaFree(deviceListIndexPtr);		cce();
+		cudaFree(deviceDataPtr);			cce();
 	}
 }
 

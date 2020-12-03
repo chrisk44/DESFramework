@@ -50,6 +50,7 @@ int main(int argc, char** argv){
     char displFilename[1024];
     char gridFilename[1024];
     char outFilename[1024];
+    bool isMaster;
     ifstream dispfile, gridfile;
     ofstream outfile;
     string tmp;
@@ -62,11 +63,18 @@ int main(int argc, char** argv){
     int length;
     DATA_TYPE* list;
 
+    int startModel = 0;
+    int endModel = 3;
+    int startGrid = 1;
+    int endGrid = 6;
+
     // Initialize MPI manually
     MPI_Init(nullptr, nullptr);
+    MPI_Comm_rank(MPI_COMM_WORLD, &i);
+    isMaster = i == 0;
 
     // For each model...
-    for(m=0; m<4; m++){
+    for(m=startModel; m<=endModel; m++){
         // Open displacements file
         sprintf(displFilename, "./data/%s/displ.txt", modelNames[m]);
         dispfile.open(displFilename, ios::in);
@@ -125,9 +133,9 @@ int main(int argc, char** argv){
         dispfile.close();
 
         // For each grid...
-        for(g=1; g<=6; g++){
-            if(m == 3 && g == 5)
-                break;
+        for(g=startGrid; g<=endGrid; g++){
+            if(m == 3 && g > 4)
+                continue;
 
             // Open grid file
             sprintf(gridFilename, "./data/%s/grid%d.txt", modelNames[m], g);
@@ -164,9 +172,9 @@ int main(int argc, char** argv){
             parameters.dataPtr = (void*) modelDataPtr;
             parameters.dataSize = (1 + stations*(9 - (m<2 ? 0 : 1))) * sizeof(float);
 
-            parameters.computeBatchSize = 200;
+            parameters.computeBatchSize = 20;
             parameters.blockSize = 1024;
-            parameters.gpuStreams = 8;
+            parameters.gpuStreams = 1;
             parameters.batchSize = ULONG_MAX;
             parameters.threadBalancing = true;
             parameters.slaveBalancing = true;
@@ -179,7 +187,7 @@ int main(int argc, char** argv){
 
             float totalTime = 0;        //msec
             int numOfRuns = 0;
-            int numOfResults = -1;
+            int numOfResults = -2;
             // Run at least 10 seconds, and stop after 10 runs or 2 minutes
             while(true){
                 // Initialize the framework object
@@ -204,25 +212,23 @@ int main(int argc, char** argv){
                     exit(-1);
                 }
 
-                if(framework->getRank() == 0){
+                if(isMaster){
                     framework->getList(&length);
-                    if(length != numOfResults && numOfResults != -1){
-                        printf("[%s \\ %d] Number of results from previous run don't match: %d vs %d. Exiting.\n", modelNames[m], g, numOfResults, length);
-                        exit(-2);
+                    if(length != numOfResults && numOfResults != -2){
+                        printf("[%s \\ %d] Number of results from run %d don't match: %d -> %d.\n",
+                                        modelNames[m], g, numOfRuns, numOfResults, length);
                     }
                     numOfResults = length;
+                    // printf("[%s \\ %d] Run %d: %f ms, %d results\n", modelNames[m], g, numOfRuns, length, sw.getMsec());
                 }
-
-                // printf("[%s \\ %d] Run %d: %f ms\n", modelNames[m], g, numOfRuns, sw.getMsec());
 
                 totalTime += sw.getMsec();
                 numOfRuns++;
 
-                if(totalTime > 10 * 1000 && (numOfRuns >= 10 || totalTime >= 1 * 60 * 1000)){
-                    if(framework->getRank() == 0){
-                        if(g == 1) printf("\n");
-
-                        printf("\n[%s \\ %d] Time: %f ms in %d runs\n",
+                int next;
+                if(isMaster){
+                    if(totalTime > 10 * 1000 && (numOfRuns >= 10 || totalTime >= 1 * 60 * 1000)){
+                        printf("[%s \\ %d] Time: %f ms in %d runs\n",
                                     modelNames[m], g, totalTime/numOfRuns, numOfRuns);
 
                         sprintf(outFilename, "results_%s_%d.txt", modelNames[m], g);
@@ -241,6 +247,10 @@ int main(int argc, char** argv){
                         if(length > 5)
                             printf("[%s \\ %d] ...%d more results\n", modelNames[m], g, length-5);
 
+                        printf("\n");
+                        if(g==6)
+                            printf("\n");
+
                         for(i=0; i<length; i++){
                             for(j=0; j<parameters.D-1; j++)
                                 outfile << list[i*parameters.D + j] << " ";
@@ -249,12 +259,20 @@ int main(int argc, char** argv){
                         }
 
                         outfile.close();
+                        delete framework;
+                        next = 1;
+                    }else{
+                        delete framework;
+                        next = 0;
                     }
-                    delete framework;
-                    break;
+
+                    MPI_Send(&next, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
                 }else{
-                    delete framework;
+                    MPI_Recv(&next, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, nullptr);
                 }
+
+                if(next)
+                    break;
             }
         }
 
