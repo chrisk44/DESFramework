@@ -114,6 +114,9 @@ struct ParallelFrameworkParameters {
     int blockSize = 256;
     int computeBatchSize = 200;
     int gpuStreams = 8;
+    int cpuComputeBatchSize = 10000;
+    bool cpuDynamicScheduling = true;
+    bool threadBalancingAverage = false;
     unsigned long slowStartBase = 5000000;
     int slowStartLimit = 3;
     int minMsForRatioAdjustment = 0;
@@ -149,6 +152,7 @@ struct ComputeThreadInfo{
 
     Stopwatch stopwatch;
     float ratio;
+    float totalRatio;
 };
 
 #endif

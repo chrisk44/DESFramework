@@ -130,6 +130,7 @@ void ParallelFramework::slaveProcess() {
 		computeThreadInfo[i].results = nullptr;
 		computeThreadInfo[i].listIndexPtr = &listIndex;
 		computeThreadInfo[i].ratio = (float)1/numOfThreads;
+		computeThreadInfo[i].totalRatio = 0;
 	}
 
 	#ifdef DBG_START_STOP
@@ -404,7 +405,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 			} else {
 
 				cpu_kernel<validation_cpu, toBool_cpu>(cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : cti.listIndexPtr,
-				idxSteps, cti.startPoint);
+				idxSteps, cti.startPoint, parameters->cpuDynamicScheduling, parameters->cpuComputeBatchSize);
 
 			}
 

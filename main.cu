@@ -63,6 +63,7 @@ int main(int argc, char** argv){
     int length;
     DATA_TYPE* list;
 
+    bool onlyOne = false;
     int startModel = 0;
     int endModel = 3;
     int startGrid = 1;
@@ -166,16 +167,19 @@ int main(int argc, char** argv){
             ParallelFrameworkParameters parameters;
             parameters.D = dims;
             parameters.resultSaveType = SAVE_TYPE_LIST;
-            parameters.processingType = PROCESSING_TYPE_GPU;
+            parameters.processingType = PROCESSING_TYPE_CPU;
             parameters.overrideMemoryRestrictions = true;
 
             parameters.dataPtr = (void*) modelDataPtr;
             parameters.dataSize = (1 + stations*(9 - (m<2 ? 0 : 1))) * sizeof(float);
 
+            parameters.cpuDynamicScheduling = true;
+            parameters.cpuComputeBatchSize = 1000;
             parameters.computeBatchSize = 20;
             parameters.blockSize = 1024;
-            parameters.gpuStreams = 1;
+            parameters.gpuStreams = 8;
             parameters.batchSize = ULONG_MAX;
+            parameters.threadBalancingAverage = false;
             parameters.threadBalancing = true;
             parameters.slaveBalancing = true;
             parameters.slowStartLimit = 5;
@@ -227,7 +231,7 @@ int main(int argc, char** argv){
 
                 int next;
                 if(isMaster){
-                    if(totalTime > 10 * 1000 && (numOfRuns >= 10 || totalTime >= 1 * 60 * 1000)){
+                    if(onlyOne || (totalTime > 10 * 1000 && (numOfRuns >= 10 || totalTime >= 1 * 60 * 1000))){
                         printf("[%s \\ %d] Time: %f ms in %d runs\n",
                                     modelNames[m], g, totalTime/numOfRuns, numOfRuns);
 

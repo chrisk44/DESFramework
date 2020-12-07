@@ -397,6 +397,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 	unsigned long allocatedElements = 0;
 	RESULT_TYPE* localResults = nullptr;
 	MPI_Status status;
+	int numOfRatioAdjustments = 0;
 
 	#ifdef DBG_TIME
 		Stopwatch sw;
@@ -588,10 +589,11 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 			}
 		#endif
 
-		// Calculate a score for each thread (=numOfElements/time)
 		if(parameters->threadBalancing){
 			float tmpScore;
 			float totalScore = 0;
+
+			// Calculate a score for each thread (=numOfElements/time)
 			for(int i=0; i<numOfThreads; i++){
 				if(parameters->benchmark){
 					printf("[%d] Coordinator: Thread %d time: %f ms\n", rank, cti[i].id, cti[i].stopwatch.getMsec());
@@ -613,8 +615,17 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 
 			// Adjust the ratio for each thread
 			if(totalScore > 0){
+				numOfRatioAdjustments++;
+				float newRatio;
 				for(int i=0; i<numOfThreads; i++){
-					cti[i].ratio = cti[i].numOfElements / (totalScore * cti[i].stopwatch.getMsec());
+					newRatio = cti[i].numOfElements / (totalScore * cti[i].stopwatch.getMsec());
+					cti[i].totalRatio += newRatio;
+
+					if(parameters->threadBalancingAverage){
+						cti[i].ratio = cti[i].totalRatio / numOfRatioAdjustments;
+					}else{
+						cti[i].ratio = newRatio;
+					}
 
 					#ifdef DBG_RATIO
 						printf("[%d] Coordinator: Adjusting thread %d ratio to %f\n", rank, cti[i].id, cti[i].ratio);
