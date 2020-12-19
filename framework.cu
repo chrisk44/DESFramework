@@ -590,35 +590,40 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		#endif
 
 		if(parameters->threadBalancing){
-			float tmpScore;
+			bool failed = false;
 			float totalScore = 0;
+			float newRatio;
+			float *scores = new float[numOfThreads];
 
-			// Calculate a score for each thread (=numOfElements/time)
 			for(int i=0; i<numOfThreads; i++){
+				if(cti[i].stopwatch.getMsec() < 0){
+					printf("[%d] Coordinator: Error: Skipping ratio correction due to negative time\n", rank);
+					failed = true;
+					break;
+				}
+
+				if(cti[i].stopwatch.getMsec() < parameters->minMsForRatioAdjustment){
+					#ifdef DBG_RATIO
+						printf("[%d] Coordinator: Skipping ratio correction due to fast execution\n", rank);
+					#endif
+
+					failed = true;
+					break;
+				}
+				
 				if(parameters->benchmark){
 					printf("[%d] Coordinator: Thread %d time: %f ms\n", rank, cti[i].id, cti[i].stopwatch.getMsec());
 				}
 
-				tmpScore = cti[i].numOfElements / cti[i].stopwatch.getMsec();
-				totalScore += tmpScore;
-
-				if(tmpScore < 0){
-					// Negative time
-					totalScore = -1;
-					break;
-				}else if(cti[i].stopwatch.getMsec() < parameters->minMsForRatioAdjustment){
-					// Too fast execution
-					totalScore = -2;
-					break;
-				}
+				scores[i] = cti[i].numOfElements / cti[i].stopwatch.getMsec();
+				totalScore += scores[i];
 			}
 
-			// Adjust the ratio for each thread
-			if(totalScore > 0){
+			if(!failed){
+				// Adjust the ratio for each thread
 				numOfRatioAdjustments++;
-				float newRatio;
 				for(int i=0; i<numOfThreads; i++){
-					newRatio = cti[i].numOfElements / (totalScore * cti[i].stopwatch.getMsec());
+					newRatio = scores[i] / totalScore;
 					cti[i].totalRatio += newRatio;
 
 					if(parameters->threadBalancingAverage){
@@ -628,15 +633,11 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 					}
 
 					#ifdef DBG_RATIO
-						printf("[%d] Coordinator: Adjusting thread %d ratio to %f\n", rank, cti[i].id, cti[i].ratio);
+						printf("[%d] Coordinator: Adjusting thread %d ratio to %f (elements = %d, time = %f ms, score = %f)\n",
+								rank, cti[i].id, cti[i].ratio, cti[i].numOfElements,
+								cti[i].stopwatch.getMsec(), cti[i].numOfElements/cti[i].stopwatch.getMsec());
 					#endif
 				}
-			}else if(totalScore == -1){
-				printf("[%d] Coordinator: Error: Skipping ratio correction due to negative time\n", rank);
-			}else{
-				#ifdef DBG_RATIO
-					printf("[%d] Coordinator: Skipping ratio correction due to fast execution\n", rank);
-				#endif
 			}
 
 			#ifdef DBG_TIME
@@ -644,6 +645,8 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 				time_scores = sw.getMsec();
 				sw.start();
 			#endif
+
+			delete[] scores;
 		}
 
 		// Send all results to master

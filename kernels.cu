@@ -132,9 +132,6 @@ void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned lo
 
 	unsigned long currentBatchStart = startingPointLinearIndex;
 	unsigned long globalLast = startingPointLinearIndex + numOfElements - 1;
-	if(batchSize > numOfElements/4){
-		batchSize = numOfElements/4;
-	}
 
 	omp_set_nested(1);		// We are already in a parallel region since slaveProcess()
 	#pragma omp parallel shared(currentBatchStart)
@@ -143,6 +140,11 @@ void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned lo
 		unsigned long* currentIndex = new unsigned long[D];
 		unsigned long carry, processed, localNumOfElements, elementsPerThread, start, lastElement;
 		int d;
+
+		// Adjust for small workloads
+		if(batchSize > numOfElements/omp_get_num_threads()){
+			batchSize = numOfElements/omp_get_num_threads();
+		}
 
 		// Calculate start and end for static scheduling
 		elementsPerThread = numOfElements / omp_get_num_threads();
