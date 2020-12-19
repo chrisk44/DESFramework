@@ -52,14 +52,14 @@ public:
 
 private:
 	void masterProcess();
-	void coordinatorThread(ComputeThreadInfo* cti, int numOfThreads);
+	void coordinatorThread(ComputeThreadInfo* cti, ThreadCommonData* tcd, int numOfThreads);
 	void getPointFromIndex(unsigned long index, DATA_TYPE* result);
 
 	template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
 	void slaveProcess();
 
 	template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-	void computeThread(ComputeThreadInfo& cti);
+	void computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd);
 };
 
 template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
@@ -119,16 +119,13 @@ void ParallelFramework::slaveProcess() {
 	/*******************************************************************
 	********************** Initialization ******************************
 	********************************************************************/
-	int listIndex;
-	sem_t semResults;
-	sem_init(&semResults, 0, 0);
+	ThreadCommonData threadCommonData;
+	sem_init(&threadCommonData.semResults, 0, 0);
 
 	ComputeThreadInfo* computeThreadInfo = new ComputeThreadInfo[numOfThreads];
 	for(int i=0; i<numOfThreads; i++){
 		sem_init(&computeThreadInfo[i].semData, 0, 0);
-		computeThreadInfo[i].semResults = &semResults;
 		computeThreadInfo[i].results = nullptr;
-		computeThreadInfo[i].listIndexPtr = &listIndex;
 		computeThreadInfo[i].ratio = (float)1/numOfThreads;
 		computeThreadInfo[i].totalRatio = 0;
 	}
@@ -144,19 +141,19 @@ void ParallelFramework::slaveProcess() {
 	{
 		int tid = omp_get_thread_num();
 		if(tid == 0){
-			coordinatorThread(computeThreadInfo, omp_get_num_threads()-1);
+			coordinatorThread(computeThreadInfo, &threadCommonData, omp_get_num_threads()-1);
 		}else{
 			// Calculate id: -1 -> CPU, 0+ -> GPU[id]
 			computeThreadInfo[tid-1].id = tid - (parameters->processingType == PROCESSING_TYPE_GPU ? 1 : 2);
 
-			computeThread<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>(computeThreadInfo[tid - 1]);
+			computeThread<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>(computeThreadInfo[tid - 1], &threadCommonData);
 		}
 	}
 
 	/*******************************************************************
 	***************************** Finalize *****************************
 	********************************************************************/
-	sem_destroy(&semResults);
+	sem_destroy(&threadCommonData.semResults);
 	for(int i=0; i<numOfThreads; i++){
 		sem_destroy(&computeThreadInfo[i].semData);
 	}
@@ -164,7 +161,7 @@ void ParallelFramework::slaveProcess() {
 }
 
 template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-void ParallelFramework::computeThread(ComputeThreadInfo& cti){
+void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd){
 	int gpuListIndex, globalListIndexOld;
 
 	// GPU Memory
@@ -395,7 +392,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 					cudaMemcpy(&gpuListIndex, deviceListIndexPtr, sizeof(int), cudaMemcpyDeviceToHost);
 
 					// Increment the global list index counter
-					globalListIndexOld = __sync_fetch_and_add(cti.listIndexPtr, gpuListIndex);
+					globalListIndexOld = __sync_fetch_and_add(&tcd->listIndex, gpuListIndex);
 
 					// Get the results from the GPU
 					cudaMemcpy(&((DATA_TYPE*)cti.results)[globalListIndexOld], deviceResults, gpuListIndex * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
@@ -404,7 +401,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 
 			} else {
 
-				cpu_kernel<validation_cpu, toBool_cpu>(cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : cti.listIndexPtr,
+				cpu_kernel<validation_cpu, toBool_cpu>(cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
 				idxSteps, cti.startPoint, parameters->cpuDynamicScheduling, parameters->cpuComputeBatchSize);
 
 			}
@@ -435,7 +432,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti){
 		cti.stopwatch.stop();
 
 		// Let coordinatorThread know that the results are ready
-		sem_post(cti.semResults);
+		sem_post(&tcd->semResults);
 	}
 
 	/*******************************************************************

@@ -388,9 +388,8 @@ void ParallelFramework::masterProcess() {
 	delete[] slaveProcessInfo;
 }
 
-void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThreads){
-	sem_t* semResults = cti[0].semResults;
-	int* globalListIndexPtr = cti[0].listIndexPtr;
+void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonData* tcd, int numOfThreads){
+	int* globalListIndexPtr = &tcd->listIndex;
 
 	AssignedWork work;
 	unsigned long maxBatchSize;
@@ -560,7 +559,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 		#endif
 		// Wait for all worker threads to finish their work
 		for(int i=0; i<numOfThreads; i++){
-			sem_wait(semResults);
+			sem_wait(&tcd->semResults);
 		}
 
 		#ifdef DBG_TIME
@@ -610,7 +609,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, int numOfThrea
 					failed = true;
 					break;
 				}
-				
+
 				if(parameters->benchmark){
 					printf("[%d] Coordinator: Thread %d time: %f ms\n", rank, cti[i].id, cti[i].stopwatch.getMsec());
 				}

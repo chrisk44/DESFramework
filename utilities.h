@@ -88,6 +88,12 @@ struct AssignedWork {
     unsigned long numOfElements;
 };
 
+struct ThreadCommonData {
+    sem_t semResults;
+    int listIndex;
+    unsigned long currentBatchStart;
+};
+
 enum ProcessingType {
 	PROCESSING_TYPE_CPU,
 	PROCESSING_TYPE_GPU,
@@ -147,8 +153,6 @@ struct ComputeThreadInfo{
     unsigned long startPoint;
     RESULT_TYPE* results;
     sem_t semData;
-    sem_t* semResults;
-    int* listIndexPtr;
 
     Stopwatch stopwatch;
     float ratio;
