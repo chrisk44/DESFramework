@@ -142,7 +142,7 @@ void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned lo
 		int d;
 
 		// Adjust for small workloads
-		if(batchSize > numOfElements/omp_get_num_threads()){
+		if(batchSize > numOfElements/omp_get_num_threads() && numOfElements >= omp_get_num_threads()){
 			batchSize = numOfElements/omp_get_num_threads();
 		}
 
