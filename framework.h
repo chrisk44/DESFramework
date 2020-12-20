@@ -121,6 +121,7 @@ void ParallelFramework::slaveProcess() {
 	********************************************************************/
 	ThreadCommonData threadCommonData;
 	sem_init(&threadCommonData.semResults, 0, 0);
+	sem_init(&threadCommonData.semSync, 0, 1);
 	threadCommonData.results = nullptr;
 
 	ComputeThreadInfo* computeThreadInfo = new ComputeThreadInfo[numOfThreads];
@@ -154,6 +155,7 @@ void ParallelFramework::slaveProcess() {
 	***************************** Finalize *****************************
 	********************************************************************/
 	sem_destroy(&threadCommonData.semResults);
+	sem_destroy(&threadCommonData.semSync);
 	for(int i=0; i<numOfThreads; i++){
 		sem_destroy(&computeThreadInfo[i].semStart);
 	}
@@ -279,12 +281,12 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 	while(true){
 		#ifdef DBG_TIME
 			Stopwatch sw;
-			float time_sleep, time_allocation, time_queue, time_calc;
+			float time_sleep, time_assign=0, time_allocation=0, time_queue=0, time_calc=0;
 			sw.start();
 		#endif
 
 		/*****************************************************************
-		************* Request data from coordinateThread *****************
+		************* Wait for data from coordinateThread ****************
 		******************************************************************/
 		#ifdef DBG_START_STOP
 			printf("[%d] ComputeThread %d: Ready\n", rank, cti.id);
@@ -298,20 +300,74 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		#endif
 
 		cti.stopwatch.start();
-		localResults = &tcd->results[cti.resultsOffset];
 
 		#ifdef DBG_START_STOP
 			printf("[%d] ComputeThread %d: Waking up...\n", rank, cti.id);
 		#endif
 
-		// If more data available...
-		if (cti.numOfElements > 0) {
-			#ifdef DBG_START_STOP
-				printf("[%d] ComputeThread %d: Running for %lu elements...\n", rank, cti.id, cti.numOfElements);
+		// If coordinator thread is signaling to terminate...
+		if (tcd->globalFirst > tcd->globalLast)
+			break;
+
+		/*****************************************************************
+		 ***************** Main batch assignment loop ********************
+		 ******* (will run only once if !slaveDynamicScheduling) *********
+		 *****************************************************************/
+		while(cti.batchSize > 0){	// No point in running with batch size = 0
+
+			unsigned long localStartPoint;
+			unsigned long localLast;
+			unsigned long localNumOfElements;
+
+			/*****************************************************************
+			************************** Get a batch ***************************
+			******************************************************************/
+			#ifdef DBG_TIME
+				sw.start();
+			#endif
+
+			sem_wait(&tcd->semSync);
+
+			// Get the current global batch start point as our starting point
+			localStartPoint = tcd->globalBatchStart;
+			// Increment the global batch start point by our batch size
+			tcd->globalBatchStart += cti.batchSize;
+
+			// Check for globalBatchStart overflow and limit it to globalLast+1 to avoid later overflows
+			// If the new globalBatchStart is smaller than our local start point, the increment caused an overflow
+			// If the localStart point in larger than the global last, then the elements have already been exhausted
+			if(tcd->globalBatchStart < localStartPoint || localStartPoint > tcd->globalLast){
+				// printf("[%d] ComputeThread %d: Fixing globalBatchStart from %lu to %lu\n",
+				// 				rank, cti.id, tcd->globalBatchStart, tcd->globalLast + 1);
+				tcd->globalBatchStart = tcd->globalLast + 1;
+			}
+
+			sem_post(&tcd->semSync);
+
+			// If we are out of elements then terminate the loop
+			if(localStartPoint > tcd->globalLast)
+				break;
+
+			localLast = min(localStartPoint + cti.batchSize - 1 , tcd->globalLast);
+			localNumOfElements = localLast - localStartPoint + 1;
+
+			if(parameters->resultSaveType == SAVE_TYPE_LIST)
+				localResults = tcd->results;
+			else
+				localResults = &tcd->results[localStartPoint - tcd->globalFirst];
+
+			#ifdef DBG_TIME
+				sw.stop();
+				time_assign += sw.getMsec();
+			#endif
+
+			#ifdef DBG_DATA
+				printf("[%d] ComputeThread %d: Got %lu elements starting from %lu to %lu\n",
+							rank, cti.id, localNumOfElements, localStartPoint, localLast);
 				fflush(stdout);
 			#else
-				#ifdef DBG_DATA
-					printf("[%d] ComputeThread %d: Got %lu elements starting from %lu\n", rank, cti.id, cti.numOfElements, cti.startPoint);
+				#ifdef DBG_START_STOP
+					printf("[%d] ComputeThread %d: Running for %lu elements...\n", rank, cti.id, localNumOfElements);
 					fflush(stdout);
 				#endif
 			#endif
@@ -323,14 +379,15 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 			/*****************************************************************
 			 If batchSize was increased, allocate more memory for the results
 			******************************************************************/
-			if (allocatedElements < cti.numOfElements && cti.id > -1 && allocatedElements < defaultGPUBatchSize) {
+			// TODO: Move this to initialization and allocate as much memory as possible
+			if (allocatedElements < localNumOfElements && cti.id > -1 && allocatedElements < defaultGPUBatchSize) {
 
 				#ifdef DBG_MEMORY
 					printf("[%d] ComputeThread %d: Allocating more GPU memory (%lu", rank, cti.id, allocatedElements);
 					fflush(stdout);
 				#endif
 
-				allocatedElements = min(cti.numOfElements, defaultGPUBatchSize);
+				allocatedElements = min(localNumOfElements, defaultGPUBatchSize);
 
 				#ifdef DBG_MEMORY
 					printf(" -> %lu elements, %lu MB)\n", allocatedElements, (allocatedElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
@@ -350,7 +407,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 
 			#ifdef DBG_TIME
 				sw.stop();
-				time_allocation = sw.getMsec();
+				time_allocation += sw.getMsec();
 				sw.start();
 			#endif
 
@@ -364,11 +421,11 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 				cudaMemset(deviceListIndexPtr, 0, sizeof(int));
 
 				// Divide the chunk to smaller chunks to scatter accross streams
-				unsigned long elementsPerStream = cti.numOfElements / parameters->gpuStreams;
+				unsigned long elementsPerStream = localNumOfElements / parameters->gpuStreams;
 				bool onlyOne = false;
 				unsigned long skip = 0;
 				if(elementsPerStream == 0){
-					elementsPerStream = cti.numOfElements;
+					elementsPerStream = localNumOfElements;
 					onlyOne = true;
 				}
 
@@ -376,9 +433,9 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 				for(int i=0; i<parameters->gpuStreams; i++){
 					// Adjust elementsPerStream for last stream (= total-queued)
 					if(i == parameters->gpuStreams - 1){
-						elementsPerStream = cti.numOfElements - skip;
+						elementsPerStream = localNumOfElements - skip;
 					}else{
-						elementsPerStream = min(elementsPerStream, cti.numOfElements - skip);
+						elementsPerStream = min(elementsPerStream, localNumOfElements - skip);
 					}
 
 					// Queue the kernel in stream[i] (each GPU thread gets COMPUTE_BATCH_SIZE elements to calculate)
@@ -395,7 +452,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 
 					// Note: Point at the start of deviceResults, because the offset (because of computeBatchSize) is calculated in the kernel
 					validate_kernel<validation_gpu, toBool_gpu><<<numOfBlocks, blockSize, deviceProp.sharedMemPerBlock, streams[i]>>>(
-						deviceResults, cti.startPoint,
+						deviceResults, localStartPoint,
 						parameters->D, elementsPerStream, skip, deviceDataPtr,
 						parameters->dataSize, useSharedMemoryForData, useConstantMemoryForData,
 						parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr,
@@ -416,7 +473,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 
 				#ifdef DBG_TIME
 					sw.stop();
-					time_queue = sw.getMsec();
+					time_queue += sw.getMsec();
 					sw.start();
 				#endif
 
@@ -443,30 +500,24 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 
 				#ifdef DBG_TIME
 					sw.stop();
-					time_queue = sw.getMsec();
+					time_queue += sw.getMsec();
 					sw.start();
 				#endif
 
-				cpu_kernel<validation_cpu, toBool_cpu>(localResults, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
-				idxSteps, cti.startPoint, parameters->cpuDynamicScheduling, parameters->cpuComputeBatchSize);
+				cpu_kernel<validation_cpu, toBool_cpu>(localResults, limits, parameters->D, localNumOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
+							idxSteps, localStartPoint, parameters->cpuDynamicScheduling, parameters->cpuComputeBatchSize);
 
 			}
 
 			#ifdef DBG_TIME
 				sw.stop();
-				time_calc = sw.getMsec();
-
-				printf("[%d] ComputeThread %d: Benchmark:\n", rank, cti.id);
-				printf("Time for sleep: %f ms\n", time_sleep);
-				printf("Time for allocation: %f ms\n", time_allocation);
-				printf("Time for queue: %f ms\n", time_queue);
-				printf("Time for calc: %f ms\n", time_calc);
+				time_calc += sw.getMsec();
 			#endif
 
 			#ifdef DBG_RESULTS
 				if(parameters->resultSaveType == SAVE_TYPE_ALL){
 					printf("[%d] ComputeThread %d: Results are: ", rank, cti.id);
-					for (int i = 0; i < cti.numOfElements; i++) {
+					for (int i = 0; i < localNumOfElements; i++) {
 						printf("%f ", ((DATA_TYPE *)localResults)[i]);
 					}
 					printf("\n");
@@ -476,20 +527,26 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 			#ifdef DBG_START_STOP
 				printf("[%d] ComputeThread %d: Finished calculation\n", rank, cti.id);
 			#endif
-		}
-		// else if computation is complete...
-		else if(cti.startPoint == 0){
-			// No more data, exit
-			break;
-		}
-		// else 0 elements were assigned due to extremely low computation score (improbable)
-		else{
-			// Sleep 1 ms to prevent stopwatch time = 0
-			usleep(1000);
+
+			cti.elementsCalculated += localNumOfElements;
+
+			if(!parameters->slaveDynamicScheduling)
+				break;
+
+			// End of assignment loop
 		}
 
 		// Stop the stopwatch
 		cti.stopwatch.stop();
+
+		#ifdef DBG_TIME
+			printf("[%d] ComputeThread %d: Benchmark:\n", rank, cti.id);
+			printf("Time for first sleep: %f ms\n", time_sleep);
+			printf("Time for assignments: %f ms\n", time_assign);
+			printf("Time for allocations: %f ms\n", time_allocation);
+			printf("Time for queues: %f ms\n", time_queue);
+			printf("Time for calcs: %f ms\n", time_calc);
+		#endif
 
 		// Let coordinatorThread know that the results are ready
 		sem_post(&tcd->semResults);

@@ -400,7 +400,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 
 	#ifdef DBG_TIME
 		Stopwatch sw;
-		float time_data, time_split, time_assign, time_start, time_wait, time_scores, time_results;
+		float time_data, time_assign, time_start, time_wait, time_scores, time_results;
 	#endif
 
 	if(parameters->overrideMemoryRestrictions){
@@ -478,63 +478,64 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 			sw.start();
 		#endif
 
-		// Split the data into pieces for each thread
+		/*
+		 * Split the data into pieces for each thread
+		 * If we are using dynamic scheduling, each batch size will be
+		 * ratio * min(slaveBatchSize, numOfElements).
+		 * Otherwise it will be ratio * work.numOfElements and we will make sure
+		 * later that exactly work.numOfElements elements have been assigned.
+		 */
 		unsigned long total = 0;
 		for(int i=0; i<numOfThreads; i++){
-			cti[i].numOfElements = work.numOfElements * cti[i].ratio;
-			total += cti[i].numOfElements;
-		}
-		if(total < work.numOfElements){
-			// Something was left out, assign it to first thread
-			cti[0].numOfElements += work.numOfElements - total;
-		}else if(total > work.numOfElements){
-			// More elements were given, remove from the first threads
-			for(int i=0; i<numOfThreads; i++){
-				// If thread i has enough elements, remove all the extra from it
-				if(cti[i].numOfElements > total - work.numOfElements){
-					cti[i].numOfElements -= total - work.numOfElements;
-					total = work.numOfElements;
-					break;
-				}
-
-				// else assign 0 elements to it and move to the next thread
-				total -= cti[i].numOfElements;
-				cti[i].numOfElements = 0;
+			if(parameters->slaveDynamicScheduling)
+				cti[i].batchSize = cti[i].ratio * min(
+					parameters->slaveBatchSize, work.numOfElements
+				);
+			else{
+				cti[i].batchSize = cti[i].ratio * work.numOfElements;
+				total += cti[i].batchSize;
 			}
 		}
 
-		#ifdef DBG_TIME
-			sw.stop();
-			time_split = sw.getMsec();
-			sw.start();
+		/*
+		 * If we are NOT using dynamic scheduling, make sure that exactly
+		 * work.numOfElements elements have been assigned
+		 */
+		if(!parameters->slaveDynamicScheduling){
+			if(total < work.numOfElements){
+				// Something was left out, assign it to first thread
+				cti[0].batchSize += work.numOfElements - total;
+			}else if(total > work.numOfElements){
+				// More elements were given, remove from the first threads
+				for(int i=0; i<numOfThreads; i++){
+					// If thread i has enough elements, remove all the extra from it
+					if(cti[i].batchSize > total - work.numOfElements){
+						cti[i].batchSize -= total - work.numOfElements;
+						total = work.numOfElements;
+						break;
+					}
+
+					// else assign 0 elements to it and move to the next thread
+					total -= cti[i].batchSize;
+					cti[i].batchSize = 0;
+				}
+			}
+		}
+
+		#ifdef DBG_RATIO
+			for(int i=0; i<numOfThreads; i++)
+				printf("[%d] Coordinator: Thread %d -> Assigning batch size = %lu elements\n",
+						rank, i, cti[i].batchSize);
 		#endif
 
-		// Assign work to the worker threads
-		for(int i=0; i<numOfThreads; i++){
+		tcd->globalFirst		= work.startPoint;
+		tcd->globalLast			= work.startPoint + work.numOfElements - 1;
+		tcd->globalBatchStart	= work.startPoint;
 
-			if(i==0){
-				// Set the starting point as the sessions starting point
-				cti[i].startPoint = work.startPoint;
-
-				// Set results as the start of global results
-				cti[i].resultsOffset = 0;
-			}else{
-				// Set the starting point as the starting point of the previous thread + numOfElements of the previous thread
-				cti[i].startPoint = cti[i-1].startPoint + cti[i-1].numOfElements;
-
-				if(parameters->resultSaveType == SAVE_TYPE_ALL){
-					// Set results as the results of the previous thread + numOfElements of the previous thread (compiler will eventually take into account the size of RESULT_TYPE when adding an int)
-					cti[i].resultsOffset = cti[i-1].resultsOffset + cti[i-1].numOfElements;
-				}else{
-					// All compute threads must have access to the same memory
-					cti[i].resultsOffset = 0;
-				}
-			}
-
-			#ifdef DBG_QUEUE
-				printf("[%d] Coordinator: Thread %d -> Assigning %lu elements starting from %lu with results at offset %lu\n", rank, i, cti[i].numOfElements, cti[i].startPoint, cti[i].resultsOffset);
-			#endif
-		}
+		#ifdef DBG_DATA
+			printf("[%d] Coordinator: Got job with globalFirst = %lu, globalLast = %lu\n",
+							rank, tcd->globalFirst, tcd->globalLast);
+		#endif
 
 		#ifdef DBG_TIME
 			sw.stop();
@@ -547,6 +548,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 
 		// Start all the worker threads
 		for(int i=0; i<numOfThreads; i++){
+			cti[i].elementsCalculated = 0;
 			sem_post(&cti[i].semStart);
 		}
 
@@ -568,6 +570,18 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 			sw.stop();
 			time_wait = sw.getMsec();
 		#endif
+
+		// Sanity check
+		unsigned long totalCalculated = 0;
+		for(int i=0; i<numOfThreads; i++)
+			totalCalculated += cti[i].elementsCalculated;
+
+		if(totalCalculated != work.numOfElements){
+			printf("[%d] Coordinator: Shit happened. Total calculated elements are %lu but %lu were assigned to this slave\n",
+								rank, totalCalculated, work.numOfElements);
+
+			exit(-123);
+		}
 
 		#ifdef DBG_RESULTS
 			if(parameters->resultSaveType == SAVE_TYPE_ALL){
@@ -619,7 +633,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 					printf("[%d] Coordinator: Thread %d time: %f ms\n", rank, cti[i].id, cti[i].stopwatch.getMsec());
 				}
 
-				scores[i] = cti[i].numOfElements / cti[i].stopwatch.getMsec();
+				scores[i] = cti[i].elementsCalculated / cti[i].stopwatch.getMsec();
 				totalScore += scores[i];
 			}
 
@@ -638,8 +652,8 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 
 					#ifdef DBG_RATIO
 						printf("[%d] Coordinator: Adjusting thread %d ratio to %f (elements = %d, time = %f ms, score = %f)\n",
-								rank, cti[i].id, cti[i].ratio, cti[i].numOfElements,
-								cti[i].stopwatch.getMsec(), cti[i].numOfElements/cti[i].stopwatch.getMsec());
+								rank, cti[i].id, cti[i].ratio, cti[i].elementsCalculated,
+								cti[i].stopwatch.getMsec(), cti[i].elementsCalculated/cti[i].stopwatch.getMsec());
 					#endif
 				}
 			}
@@ -677,7 +691,6 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 
 			printf("[%d] Coordinator: Benchmark:\n", rank);
 			printf("Time for receiving data: %f ms\n", time_data);
-			printf("Time for split: %f ms\n", time_split);
 			printf("Time for assign: %f ms\n", time_assign);
 			printf("Time for start: %f ms\n", time_start);
 			printf("Time for wait: %f ms\n", time_wait);
@@ -689,10 +702,10 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 	// Notify about exiting
 	MPI_Send(nullptr, 0, MPI_INT, 0, TAG_EXITING, MPI_COMM_WORLD);
 
-	// Notify worker threads to finish
+	// Signal worker threads to finish
+	tcd->globalFirst = 1;
+	tcd->globalLast = 0;
 	for(int i=0; i<numOfThreads; i++){
-		cti[i].numOfElements = 0;
-		cti[i].startPoint = 0;
 		sem_post(&cti[i].semStart);
 	}
 

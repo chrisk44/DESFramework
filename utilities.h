@@ -43,7 +43,7 @@
 // #define DBG_DATA            // Messages about the exact data being assigned (start points)
 // #define DBG_MEMORY          // Messages about memory management (addresses, reallocations)
 // #define DBG_RESULTS         // Messages with the exact results being passed around
-#define DBG_TIME            // Print time measuraments for various parts of the code
+// #define DBG_TIME            // Print time measuraments for various parts of the code
 #define DBG_SNH             // Should not happen
 
 // MPI
@@ -119,6 +119,7 @@ struct ParallelFrameworkParameters {
     bool threadBalancingAverage = false;
 
 	unsigned long batchSize;
+    unsigned long slaveBatchSize;
     int computeBatchSize = 200;
     int cpuComputeBatchSize = 10000;
 
@@ -149,16 +150,25 @@ struct SlaveProcessInfo {
 
 struct ThreadCommonData {
     sem_t semResults;
+    sem_t semSync;
+
     int listIndex;
     unsigned long currentBatchStart;
     RESULT_TYPE* results;
+    unsigned long globalFirst;
+    unsigned long globalLast;
+    unsigned long globalBatchStart;
 };
 
 struct ComputeThreadInfo{
     int id;
-    unsigned long numOfElements;
-    unsigned long startPoint;
-    unsigned long resultsOffset;
+
+    // unsigned long numOfElements;
+    // unsigned long startPoint;
+    // unsigned long resultsOffset;
+
+    unsigned long batchSize;
+    unsigned long elementsCalculated;
     sem_t semStart;
 
     Stopwatch stopwatch;
