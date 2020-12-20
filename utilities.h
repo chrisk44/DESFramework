@@ -43,7 +43,7 @@
 // #define DBG_DATA            // Messages about the exact data being assigned (start points)
 // #define DBG_MEMORY          // Messages about memory management (addresses, reallocations)
 // #define DBG_RESULTS         // Messages with the exact results being passed around
-// #define DBG_TIME            // Print time measuraments for various parts of the code
+#define DBG_TIME            // Print time measuraments for various parts of the code
 #define DBG_SNH             // Should not happen
 
 // MPI
@@ -88,12 +88,6 @@ struct AssignedWork {
     unsigned long numOfElements;
 };
 
-struct ThreadCommonData {
-    sem_t semResults;
-    int listIndex;
-    unsigned long currentBatchStart;
-};
-
 enum ProcessingType {
 	PROCESSING_TYPE_CPU,
 	PROCESSING_TYPE_GPU,
@@ -107,27 +101,33 @@ enum ResultSaveType {
 
 struct ParallelFrameworkParameters {
 	unsigned int D;
-	unsigned long batchSize;
 	ProcessingType processingType = PROCESSING_TYPE_BOTH;
-    ResultSaveType resultSaveType = SAVE_TYPE_ALL;
-    char* saveFile = nullptr;
-    bool threadBalancing = true;
-    bool slaveBalancing = true;
+    ResultSaveType resultSaveType = SAVE_TYPE_LIST;
+    bool overrideMemoryRestrictions = false;
+    bool finalizeAfterExecution = true;
+    bool printProgress = true;
 	bool benchmark = false;
+
+    char* saveFile = nullptr;
     void* dataPtr = nullptr;
     unsigned long dataSize = 0;
-    bool overrideMemoryRestrictions = false;
-    int blockSize = 256;
-    int computeBatchSize = 200;
-    int gpuStreams = 8;
-    int cpuComputeBatchSize = 10000;
+
+    bool threadBalancing = true;
+    bool slaveBalancing = true;
+    bool slaveDynamicScheduling = false;
     bool cpuDynamicScheduling = true;
     bool threadBalancingAverage = false;
+
+	unsigned long batchSize;
+    int computeBatchSize = 200;
+    int cpuComputeBatchSize = 10000;
+
+    int blockSize = 256;
+    int gpuStreams = 8;
+
     unsigned long slowStartBase = 5000000;
     int slowStartLimit = 3;
     int minMsForRatioAdjustment = 0;
-    bool finalizeAfterExecution = true;
-    bool printProgress = true;
 };
 
 struct SlaveProcessInfo {
@@ -147,12 +147,19 @@ struct SlaveProcessInfo {
     float ratio;
 };
 
+struct ThreadCommonData {
+    sem_t semResults;
+    int listIndex;
+    unsigned long currentBatchStart;
+    RESULT_TYPE* results;
+};
+
 struct ComputeThreadInfo{
     int id;
     unsigned long numOfElements;
     unsigned long startPoint;
-    RESULT_TYPE* results;
-    sem_t semData;
+    unsigned long resultsOffset;
+    sem_t semStart;
 
     Stopwatch stopwatch;
     float ratio;

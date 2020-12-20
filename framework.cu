@@ -465,6 +465,8 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 				fatal("Can't allocate memory for localResults");
 			}
 
+			tcd->results = localResults;
+
 			#ifdef DBG_MEMORY
 				printf("%lu (0x%x)\n", allocatedElements, localResults);
 			#endif
@@ -515,22 +517,22 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 				cti[i].startPoint = work.startPoint;
 
 				// Set results as the start of global results
-				cti[i].results = localResults;
+				cti[i].resultsOffset = 0;
 			}else{
 				// Set the starting point as the starting point of the previous thread + numOfElements of the previous thread
 				cti[i].startPoint = cti[i-1].startPoint + cti[i-1].numOfElements;
 
 				if(parameters->resultSaveType == SAVE_TYPE_ALL){
-					// Set results as the results of the previous thread + numOfElements of the previous thread (compiler takes into account the size of RESULT_TYPE when adding an int)
-					cti[i].results = cti[i-1].results + cti[i-1].numOfElements;
+					// Set results as the results of the previous thread + numOfElements of the previous thread (compiler will eventually take into account the size of RESULT_TYPE when adding an int)
+					cti[i].resultsOffset = cti[i-1].resultsOffset + cti[i-1].numOfElements;
 				}else{
 					// All compute threads must have access to the same memory
-					cti[i].results = localResults;
+					cti[i].resultsOffset = 0;
 				}
 			}
 
 			#ifdef DBG_QUEUE
-				printf("[%d] Coordinator: Thread %d -> Assigning %lu elements starting from %lu with results at 0x%x\n", rank, i, cti[i].numOfElements, cti[i].startPoint, cti[i].results);
+				printf("[%d] Coordinator: Thread %d -> Assigning %lu elements starting from %lu with results at offset %lu\n", rank, i, cti[i].numOfElements, cti[i].startPoint, cti[i].resultsOffset);
 			#endif
 		}
 
@@ -545,7 +547,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 
 		// Start all the worker threads
 		for(int i=0; i<numOfThreads; i++){
-			sem_post(&cti[i].semData);
+			sem_post(&cti[i].semStart);
 		}
 
 		#ifdef DBG_TIME
@@ -691,7 +693,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 	for(int i=0; i<numOfThreads; i++){
 		cti[i].numOfElements = 0;
 		cti[i].startPoint = 0;
-		sem_post(&cti[i].semData);
+		sem_post(&cti[i].semStart);
 	}
 
 	free(localResults);

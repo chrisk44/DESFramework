@@ -121,11 +121,11 @@ void ParallelFramework::slaveProcess() {
 	********************************************************************/
 	ThreadCommonData threadCommonData;
 	sem_init(&threadCommonData.semResults, 0, 0);
+	threadCommonData.results = nullptr;
 
 	ComputeThreadInfo* computeThreadInfo = new ComputeThreadInfo[numOfThreads];
 	for(int i=0; i<numOfThreads; i++){
-		sem_init(&computeThreadInfo[i].semData, 0, 0);
-		computeThreadInfo[i].results = nullptr;
+		sem_init(&computeThreadInfo[i].semStart, 0, 0);
 		computeThreadInfo[i].ratio = (float)1/numOfThreads;
 		computeThreadInfo[i].totalRatio = 0;
 	}
@@ -155,7 +155,7 @@ void ParallelFramework::slaveProcess() {
 	********************************************************************/
 	sem_destroy(&threadCommonData.semResults);
 	for(int i=0; i<numOfThreads; i++){
-		sem_destroy(&computeThreadInfo[i].semData);
+		sem_destroy(&computeThreadInfo[i].semStart);
 	}
 	delete[] computeThreadInfo;
 }
@@ -163,6 +163,7 @@ void ParallelFramework::slaveProcess() {
 template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
 void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd){
 	int gpuListIndex, globalListIndexOld;
+	RESULT_TYPE* localResults;
 
 	// GPU Memory
 	RESULT_TYPE* deviceResults;					// GPU Memory for results
@@ -182,7 +183,6 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 	/*******************************************************************
 	************************* Initialization ***************************
 	********************************************************************/
-
 	// Initialize device
 	if (cti.id > -1) {
 		// Select gpu[id]
@@ -290,7 +290,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 			printf("[%d] ComputeThread %d: Ready\n", rank, cti.id);
 		#endif
 
-		sem_wait(&cti.semData);
+		sem_wait(&cti.semStart);
 
 		#ifdef DBG_TIME
 			sw.stop();
@@ -298,6 +298,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		#endif
 
 		cti.stopwatch.start();
+		localResults = &tcd->results[cti.resultsOffset];
 
 		#ifdef DBG_START_STOP
 			printf("[%d] ComputeThread %d: Waking up...\n", rank, cti.id);
@@ -403,7 +404,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 
 					// Queue the memcpy in stream[i] only if we are saving as SAVE_TYPE_ALL (otherwise the results will be fetched at the end of the current computation)
 					if(parameters->resultSaveType == SAVE_TYPE_ALL){
-						cudaMemcpyAsync(&cti.results[skip], &deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, streams[i]);
+						cudaMemcpyAsync(&localResults[skip], &deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, streams[i]);
 					}
 
 					// Increase skip
@@ -434,7 +435,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 					globalListIndexOld = __sync_fetch_and_add(&tcd->listIndex, gpuListIndex);
 
 					// Get the results from the GPU
-					cudaMemcpy(&((DATA_TYPE*)cti.results)[globalListIndexOld], deviceResults, gpuListIndex * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+					cudaMemcpy(&((DATA_TYPE*)localResults)[globalListIndexOld], deviceResults, gpuListIndex * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
 				}
 
 
@@ -446,7 +447,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 					sw.start();
 				#endif
 
-				cpu_kernel<validation_cpu, toBool_cpu>(cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
+				cpu_kernel<validation_cpu, toBool_cpu>(localResults, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
 				idxSteps, cti.startPoint, parameters->cpuDynamicScheduling, parameters->cpuComputeBatchSize);
 
 			}
@@ -466,7 +467,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 				if(parameters->resultSaveType == SAVE_TYPE_ALL){
 					printf("[%d] ComputeThread %d: Results are: ", rank, cti.id);
 					for (int i = 0; i < cti.numOfElements; i++) {
-						printf("%f ", ((DATA_TYPE *)cti.results)[i]);
+						printf("%f ", ((DATA_TYPE *)localResults)[i]);
 					}
 					printf("\n");
 				}

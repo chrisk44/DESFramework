@@ -66,7 +66,7 @@ int main(int argc, char** argv){
     bool onlyOne = false;
     int startModel = 0;
     int endModel = 3;
-    int startGrid = 1;
+    int startGrid = 4;
     int endGrid = 6;
 
     // Initialize MPI manually
@@ -167,27 +167,31 @@ int main(int argc, char** argv){
             ParallelFrameworkParameters parameters;
             parameters.D = dims;
             parameters.resultSaveType = SAVE_TYPE_LIST;
-            parameters.processingType = PROCESSING_TYPE_CPU;
+            parameters.processingType = PROCESSING_TYPE_GPU;
             parameters.overrideMemoryRestrictions = true;
+            parameters.finalizeAfterExecution = false;
+            parameters.printProgress = false;
+            parameters.benchmark = false;
 
             parameters.dataPtr = (void*) modelDataPtr;
             parameters.dataSize = (1 + stations*(9 - (m<2 ? 0 : 1))) * sizeof(float);
 
-            parameters.cpuDynamicScheduling = true;
-            parameters.cpuComputeBatchSize = 1000;
-            parameters.computeBatchSize = 20;
-            parameters.blockSize = 1024;
-            parameters.gpuStreams = 8;
-            parameters.batchSize = ULONG_MAX;
-            parameters.threadBalancingAverage = false;
-            parameters.threadBalancing = true;
-            parameters.slaveBalancing = true;
-            parameters.slowStartLimit = 5;
-            parameters.slowStartBase = 5000000;
+            parameters.threadBalancing          = true;
+            parameters.slaveBalancing           = true;
+            parameters.slaveDynamicScheduling   = false;
+            parameters.cpuDynamicScheduling     = true;
+            parameters.threadBalancingAverage   = false;
 
-            parameters.benchmark = false;
-            parameters.finalizeAfterExecution = false;
-            parameters.printProgress = false;
+            parameters.batchSize                = ULONG_MAX;
+            parameters.computeBatchSize         = 20;
+            parameters.cpuComputeBatchSize      = 1000;
+
+            parameters.blockSize                = 1024;
+            parameters.gpuStreams               = 8;
+
+            parameters.slowStartLimit           = 0;
+            parameters.slowStartBase            = 5000000;
+            parameters.minMsForRatioAdjustment  = 10;
 
             float totalTime = 0;        //msec
             int numOfRuns = 0;
