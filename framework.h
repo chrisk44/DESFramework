@@ -173,6 +173,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 	cudaStream_t streams[parameters->gpuStreams];
 	unsigned long allocatedElements = 0;
 	cudaDeviceProp deviceProp;
+	unsigned long defaultGPUBatchSize = getDefaultGPUBatchSize();
 	bool useSharedMemoryForData;
 	bool useConstantMemoryForData;
 	int maxSharedPoints;
@@ -276,33 +277,59 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 	************************* Execution loop ***************************
 	********************************************************************/
 	while(true){
+		#ifdef DBG_TIME
+			Stopwatch sw;
+			float time_sleep, time_allocation, time_queue, time_calc;
+			sw.start();
+		#endif
+
 		/*****************************************************************
 		************* Request data from coordinateThread *****************
 		******************************************************************/
+		#ifdef DBG_START_STOP
+			printf("[%d] ComputeThread %d: Ready\n", rank, cti.id);
+		#endif
+
 		sem_wait(&cti.semData);
+
+		#ifdef DBG_TIME
+			sw.stop();
+			time_sleep = sw.getMsec();
+		#endif
+
 		cti.stopwatch.start();
+
+		#ifdef DBG_START_STOP
+			printf("[%d] ComputeThread %d: Waking up...\n", rank, cti.id);
+		#endif
 
 		// If more data available...
 		if (cti.numOfElements > 0) {
 			#ifdef DBG_START_STOP
 				printf("[%d] ComputeThread %d: Running for %lu elements...\n", rank, cti.id, cti.numOfElements);
+				fflush(stdout);
+			#else
+				#ifdef DBG_DATA
+					printf("[%d] ComputeThread %d: Got %lu elements starting from %lu\n", rank, cti.id, cti.numOfElements, cti.startPoint);
+					fflush(stdout);
+				#endif
 			#endif
-			#ifdef DBG_DATA
-				printf("[%d] ComputeThread %d: Got %lu elements starting from %lu\n", rank, cti.id, cti.numOfElements, cti.startPoint);
+
+			#ifdef DBG_TIME
+				sw.start();
 			#endif
-			fflush(stdout);
 
 			/*****************************************************************
 			 If batchSize was increased, allocate more memory for the results
 			******************************************************************/
-			if (allocatedElements < cti.numOfElements && cti.id > -1 && allocatedElements < getDefaultGPUBatchSize()) {
+			if (allocatedElements < cti.numOfElements && cti.id > -1 && allocatedElements < defaultGPUBatchSize) {
 
 				#ifdef DBG_MEMORY
 					printf("[%d] ComputeThread %d: Allocating more GPU memory (%lu", rank, cti.id, allocatedElements);
 					fflush(stdout);
 				#endif
 
-				allocatedElements = min(cti.numOfElements, getDefaultGPUBatchSize());
+				allocatedElements = min(cti.numOfElements, defaultGPUBatchSize);
 
 				#ifdef DBG_MEMORY
 					printf(" -> %lu elements, %lu MB)\n", allocatedElements, (allocatedElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
@@ -319,6 +346,12 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 					printf("[%d] ComputeThread %d: deviceResults = 0x%x\n", rank, cti.id, deviceResults);
 				#endif
 			}
+
+			#ifdef DBG_TIME
+				sw.stop();
+				time_allocation = sw.getMsec();
+				sw.start();
+			#endif
 
 			/*****************************************************************
 			******************** Calculate the results ***********************
@@ -380,6 +413,12 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 						break;
 				}
 
+				#ifdef DBG_TIME
+					sw.stop();
+					time_queue = sw.getMsec();
+					sw.start();
+				#endif
+
 				// Wait for all streams to finish
 				for(int i=0; i<parameters->gpuStreams; i++){
 					cudaStreamSynchronize(streams[i]);
@@ -401,10 +440,27 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 
 			} else {
 
+				#ifdef DBG_TIME
+					sw.stop();
+					time_queue = sw.getMsec();
+					sw.start();
+				#endif
+
 				cpu_kernel<validation_cpu, toBool_cpu>(cti.results, limits, parameters->D, cti.numOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
 				idxSteps, cti.startPoint, parameters->cpuDynamicScheduling, parameters->cpuComputeBatchSize);
 
 			}
+
+			#ifdef DBG_TIME
+				sw.stop();
+				time_calc = sw.getMsec();
+
+				printf("[%d] ComputeThread %d: Benchmark:\n", rank, cti.id);
+				printf("Time for sleep: %f ms\n", time_sleep);
+				printf("Time for allocation: %f ms\n", time_allocation);
+				printf("Time for queue: %f ms\n", time_queue);
+				printf("Time for calc: %f ms\n", time_calc);
+			#endif
 
 			#ifdef DBG_RESULTS
 				if(parameters->resultSaveType == SAVE_TYPE_ALL){
@@ -416,6 +472,9 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 				}
 			#endif
 
+			#ifdef DBG_START_STOP
+				printf("[%d] ComputeThread %d: Finished calculation\n", rank, cti.id);
+			#endif
 		}
 		// else if computation is complete...
 		else if(cti.startPoint == 0){
@@ -435,10 +494,13 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		sem_post(&tcd->semResults);
 	}
 
+	#ifdef DBG_START_STOP
+		printf("[%d] ComputeThread %d: Finalizing and exiting...\n", rank, cti.id);
+	#endif
+
 	/*******************************************************************
 	 *************************** Finalize ******************************
 	 *******************************************************************/
-
 	// Finalize GPU
 	if (cti.id > -1) {
 		// Make sure streams are finished and destroy them

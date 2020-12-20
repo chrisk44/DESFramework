@@ -565,7 +565,6 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 		#ifdef DBG_TIME
 			sw.stop();
 			time_wait = sw.getMsec();
-			sw.start();
 		#endif
 
 		#ifdef DBG_RESULTS
@@ -589,6 +588,10 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 		#endif
 
 		if(parameters->threadBalancing){
+			#ifdef DBG_TIME
+				sw.start();
+			#endif
+
 			bool failed = false;
 			float totalScore = 0;
 			float newRatio;
@@ -653,6 +656,10 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 			printf("[%d] Coordinator: Sending data to master...\n", rank);
 		#endif
 
+		#ifdef DBG_TIME
+			sw.start();
+		#endif
+
 		MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
 		if(parameters->resultSaveType == SAVE_TYPE_ALL){
 			// Send all the results
@@ -667,7 +674,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 			time_results = sw.getMsec();
 
 			printf("[%d] Coordinator: Benchmark:\n", rank);
-			printf("Time for data: %f ms\n", time_data);
+			printf("Time for receiving data: %f ms\n", time_data);
 			printf("Time for split: %f ms\n", time_split);
 			printf("Time for assign: %f ms\n", time_assign);
 			printf("Time for start: %f ms\n", time_start);
