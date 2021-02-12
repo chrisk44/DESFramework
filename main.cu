@@ -54,7 +54,7 @@ int main(int argc, char** argv){
     ifstream dispfile, gridfile;
     ofstream outfile;
     string tmp;
-    int stations, dims, i, j, m, g, result;
+    int stations, dims, i, j, m, g, result, rank;
     float *modelDataPtr, *dispPtr;
     float x, y, z, de, dn, dv, se, sn, sv;
     float low, high, step;
@@ -70,12 +70,15 @@ int main(int argc, char** argv){
     int endGrid = 6;
 
     // Initialize MPI manually
+    printf("Initializing MPI\n");
     MPI_Init(nullptr, nullptr);
-    MPI_Comm_rank(MPI_COMM_WORLD, &i);
-    isMaster = i == 0;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    printf("[%d] MPI Initialized\n", rank);
+    isMaster = rank == 0;
 
     // For each model...
     for(m=startModel; m<=endModel; m++){
+        printf("[%d] Starting model %d/4...\n", rank, m+1);
         // Open displacements file
         sprintf(displFilename, "./data/%s/displ.txt", modelNames[m]);
         dispfile.open(displFilename, ios::in);
@@ -85,7 +88,7 @@ int main(int argc, char** argv){
         while(getline(dispfile, tmp)) stations++;
 
         if(stations < 1){
-            printf("[%s \\ %d] Got 0 displacements. Exiting.\n", modelNames[m], g);
+            printf("[%d][%s \\ %d] Got 0 displacements. Exiting.\n", rank, modelNames[m], g);
             exit(2);
         }
 
@@ -135,6 +138,7 @@ int main(int argc, char** argv){
 
         // For each grid...
         for(g=startGrid; g<=endGrid; g++){
+            printf("[%d] Starting grid %d/6\n", rank, g);
             if(m == 3 && g > 4)
                 continue;
 
@@ -152,11 +156,13 @@ int main(int argc, char** argv){
 
             // Read each dimension's grid information
             Limit limits[dims];
+            unsigned long totalElements = 1;
             i = 0;
             while(gridfile >> low >> high >> step){
                 // Create the limit (lower is inclusive, upper is exclusive)
                 high += step;
                 limits[i] = Limit{ low, high, (unsigned int) ((high-low)/step) };
+                totalElements *= limits[i].N;
                 i++;
             }
 
@@ -167,7 +173,7 @@ int main(int argc, char** argv){
             ParallelFrameworkParameters parameters;
             parameters.D = dims;
             parameters.resultSaveType = SAVE_TYPE_LIST;
-            parameters.processingType = PROCESSING_TYPE_BOTH;
+            parameters.processingType = PROCESSING_TYPE_GPU;
             parameters.overrideMemoryRestrictions = true;
             parameters.finalizeAfterExecution = false;
             parameters.printProgress = false;
@@ -183,14 +189,14 @@ int main(int argc, char** argv){
             parameters.threadBalancingAverage   = true;
 
             parameters.batchSize                = ULONG_MAX;
-            parameters.slaveBatchSize           = 1e+07;
+            parameters.slaveBatchSize           = totalElements / 64;
             parameters.computeBatchSize         = 20;
             parameters.cpuComputeBatchSize      = 1e+04;
 
             parameters.blockSize                = 1024;
             parameters.gpuStreams               = 8;
 
-            parameters.slowStartLimit           = 3;
+            parameters.slowStartLimit           = 6;
             parameters.slowStartBase            = 5e+05;
             parameters.minMsForRatioAdjustment  = 10;
 
@@ -268,17 +274,14 @@ int main(int argc, char** argv){
                         }
 
                         outfile.close();
-                        delete framework;
                         next = 1;
                     }else{
-                        delete framework;
                         next = 0;
                     }
-
-                    MPI_Send(&next, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
-                }else{
-                    MPI_Recv(&next, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, nullptr);
                 }
+
+                delete framework;
+                MPI_Bcast(&next, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
                 if(next)
                     break;
