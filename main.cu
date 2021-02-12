@@ -188,7 +188,7 @@ int main(int argc, char** argv){
             parameters.cpuDynamicScheduling     = true;
             parameters.threadBalancingAverage   = true;
 
-            parameters.batchSize                = ULONG_MAX;
+            parameters.batchSize                = 1e+07;
             parameters.slaveBatchSize           = totalElements / 64;
             parameters.computeBatchSize         = 20;
             parameters.cpuComputeBatchSize      = 1e+04;
