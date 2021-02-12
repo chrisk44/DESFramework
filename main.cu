@@ -281,7 +281,6 @@ int main(int argc, char** argv){
                 }
 
                 delete framework;
-                printf("[%d] Process is before MPI_Bcast\n", rank);
                 MPI_Bcast(&next, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
                 if(next)
