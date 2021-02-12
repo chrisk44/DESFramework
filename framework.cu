@@ -211,10 +211,13 @@ void ParallelFramework::masterProcess() {
 				if(totalSent == totalElements){
 					pinfo.work.startPoint = 0;
 					pinfo.work.numOfElements = 0;
+					printf("[%d] Signaling %d to terminate\n", rank, mpiSource);
 				}else{
 					pinfo.work.startPoint = totalSent;
-					pinfo.work.numOfElements = min(min((unsigned long) pinfo.ratio * parameters->batchSize, (unsigned long) pinfo.maxBatchSize), totalElements-totalSent);
+					pinfo.work.numOfElements = min(min((unsigned long) (pinfo.ratio * parameters->batchSize), (unsigned long) pinfo.maxBatchSize), totalElements-totalSent);
 
+					//printf("pinfo.ratio = %f, paramters->batchSize = %ld, pinfo.maxBatchSize = %ld, totalElements = %ld, totalSent = %ld, product = %lu\n",
+					//pinfo.ratio, parameters->batchSize, pinfo.maxBatchSize, totalElements, totalSent, (unsigned long) (pinfo.ratio * parameters->batchSize));
 					totalSent += pinfo.work.numOfElements;
 				}
 
