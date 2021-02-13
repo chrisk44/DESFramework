@@ -84,7 +84,6 @@ unsigned long getOrDefault(int argc, char** argv, bool* found, int* i, const cha
             exit(ERR_INVALID_ARG);
         }
 
-        printf("Got %s with value %d\n", argName, defaultValue);
         *found = true;
     }
 
@@ -96,8 +95,8 @@ void parseArgs(int argc, char** argv){
     bool found;
     while(i < argc){
         found = false;
-        startModel = getOrDefault(argc, argv, &found, &i, "--model-start", "-ms", true, startModel);
-        endModel   = getOrDefault(argc, argv, &found, &i, "--model-end",   "-me", true, endModel);
+        startModel = getOrDefault(argc, argv, &found, &i, "--model-start", "-ms", true, startModel) - 1;
+        endModel   = getOrDefault(argc, argv, &found, &i, "--model-end",   "-me", true, endModel) - 1;
         startGrid  = getOrDefault(argc, argv, &found, &i, "--grid-start",  "-gs", true, startGrid);
         endGrid    = getOrDefault(argc, argv, &found, &i, "--grid-end",    "-ge", true, endGrid);
         onlyOne    = getOrDefault(argc, argv, &found, &i, "--only-one",    "-oo", false, onlyOne ? 1 : 0) == 1 ? true : false;
@@ -157,12 +156,11 @@ int main(int argc, char** argv){
     printf("Initializing MPI\n");
     MPI_Init(nullptr, nullptr);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    printf("[%d] MPI Initialized\n", rank);
     isMaster = rank == 0;
 
     // For each model...
     for(m=startModel; m<=endModel; m++){
-        printf("[%d] Starting model %d/4...\n", rank, m+1);
+        if(isMaster) printf("[%d] Starting model %d/4...\n", rank, m+1);
         // Open displacements file
         sprintf(displFilename, "./data/%s/displ.txt", modelNames[m]);
         dispfile.open(displFilename, ios::in);
@@ -172,7 +170,7 @@ int main(int argc, char** argv){
         while(getline(dispfile, tmp)) stations++;
 
         if(stations < 1){
-            printf("[%d][%s \\ %d] Got 0 displacements. Exiting.\n", rank, modelNames[m], g);
+            printf("[%d] [%s \\ %d] Got 0 displacements. Exiting.\n", rank, modelNames[m], g);
             exit(2);
         }
 
@@ -222,7 +220,7 @@ int main(int argc, char** argv){
 
         // For each grid...
         for(g=startGrid; g<=endGrid; g++){
-            printf("[%d] Starting grid %d/6\n", rank, g);
+            if(isMaster) printf("[%d] Starting grid %d/6\n", rank, g);
             if(m == 3 && g > 4)
                 continue;
 
@@ -293,7 +291,7 @@ int main(int argc, char** argv){
                 ParallelFramework* framework = new ParallelFramework(false);
                 framework->init(limits, parameters);
                 if (! framework->isValid()) {
-                    printf("[%s \\ %d] Error initializing framework\n", modelNames[m], g);
+                    printf("[%d] [%s \\ %d] Error initializing framework\n", rank, modelNames[m], g);
                     exit(-1);
                 }
 
@@ -307,7 +305,7 @@ int main(int argc, char** argv){
                 }
                 sw.stop();
                 if (result != 0) {
-                    printf("[%s \\ %d] Error running the computation: %d\n", modelNames[m], g, result);
+                    printf("[%d] [%s \\ %d] Error running the computation: %d\n", rank, modelNames[m], g, result);
                     exit(-1);
                 }
 
@@ -315,7 +313,7 @@ int main(int argc, char** argv){
                     framework->getList(&length);
                     if(length != numOfResults && numOfResults != -2){
                         printf("[%s \\ %d] Number of results from run %d don't match: %d -> %d.\n",
-                                        modelNames[m], g, numOfRuns, numOfResults, length);
+                                        rank, modelNames[m], g, numOfRuns, numOfResults, length);
                     }
                     numOfResults = length;
                     // printf("[%s \\ %d] Run %d: %f ms, %d results\n", modelNames[m], g, numOfRuns, length, sw.getMsec());
