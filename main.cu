@@ -34,7 +34,95 @@ __device__ bool toBool_gpu(RESULT_TYPE result){ return result != 0; }
 
 #define RESULTS_THRESHOLD 1e-13
 
+#define ERR_INVALID_ARG -1
+
 using namespace std;
+
+bool onlyOne = false;
+int startModel = 0;
+int endModel = 3;
+int startGrid = 1;
+int endGrid = 6;
+
+ProcessingType processingType = PROCESSING_TYPE_GPU;
+bool threadBalancing          = true;
+bool slaveBalancing           = true;
+bool slaveDynamicScheduling   = true;
+bool cpuDynamicScheduling     = true;
+bool threadBalancingAverage   = true;
+
+unsigned long batchSize           = UINT_MAX;
+unsigned long slaveBatchSize      = 1e+07;
+unsigned long computeBatchSize    = 20;
+unsigned long cpuComputeBatchSize = 1e+04;
+
+int blockSize  = 1024;
+int gpuStreams = 8;
+
+int slowStartLimit          = 6;
+unsigned long slowStartBase = 5e+05;
+int minMsForRatioAdjustment = 10;
+
+unsigned long getOrDefault(int argc, char** argv, bool* found, int* i, const char* argName, const char* argNameShort, bool requiresMore, unsigned long defaultValue){
+    if(*i >= argc)
+        return defaultValue;
+
+    if(strcmp(argv[*i], argName) == 0 || strcmp(argv[*i], argNameShort) == 0){
+        // If it required more and we have it...
+        if(requiresMore && (*i + 1) < argc){
+            defaultValue = atoi(argv[*i+1]);
+            *i += 2;
+        }
+        // else if it doesn't require a second argument, so just mark it as 'found'
+        else if(!requiresMore){
+            defaultValue = 1;
+            *i += 1;
+        }
+        // else if it requires more and we don't have it
+        else{
+            fprintf(stderr, "[E] %s requires an additional argument\n", argName);
+            exit(ERR_INVALID_ARG);
+        }
+
+        printf("Got %s with value %d\n", argName, defaultValue);
+        *found = true;
+    }
+
+    return defaultValue;
+}
+
+void parseArgs(int argc, char** argv){
+    int i = 1;
+    bool found;
+    while(i < argc){
+        found = false;
+        startModel = getOrDefault(argc, argv, &found, &i, "--model-start", "-ms", true, startModel);
+        endModel   = getOrDefault(argc, argv, &found, &i, "--model-end",   "-me", true, endModel);
+        startGrid  = getOrDefault(argc, argv, &found, &i, "--grid-start",  "-gs", true, startGrid);
+        endGrid    = getOrDefault(argc, argv, &found, &i, "--grid-end",    "-ge", true, endGrid);
+        onlyOne    = getOrDefault(argc, argv, &found, &i, "--only-one",    "-oo", false, onlyOne ? 1 : 0) == 1 ? true : false;
+
+        batchSize           = getOrDefault(argc, argv, &found, &i, "--batch-size",  "-bs", true, batchSize);
+        slaveBatchSize      = getOrDefault(argc, argv, &found, &i, "--slave-batch-size",  "-sbs", true, slaveBatchSize);
+        computeBatchSize    = getOrDefault(argc, argv, &found, &i, "--compute-batch-size",  "-cbs", true, computeBatchSize);
+        cpuComputeBatchSize = getOrDefault(argc, argv, &found, &i, "--cpu-compute-batch-size",  "-ccbs", true, cpuComputeBatchSize);
+
+        threadBalancing        = getOrDefault(argc, argv, &found, &i, "--thread-balancing", "-tb", false, threadBalancing ? 1 : 0) == 1 ? true : false;
+        slaveBalancing         = getOrDefault(argc, argv, &found, &i, "--slave-balancing", "-sb", false, slaveBalancing ? 1 : 0) == 1 ? true : false;
+        slaveDynamicScheduling = getOrDefault(argc, argv, &found, &i, "--slave-dynamic-balancing", "-sdb", false, slaveDynamicScheduling ? 1 : 0) == 1 ? true : false;
+        cpuDynamicScheduling   = getOrDefault(argc, argv, &found, &i, "--cpu-dynamic-balancing", "-cdb", false, cpuDynamicScheduling ? 1 : 0) == 1 ? true : false;
+        threadBalancingAverage = getOrDefault(argc, argv, &found, &i, "--thread-balancing-avg", "-tba", false, threadBalancingAverage ? 1 : 0) == 1 ? true : false;
+
+        if (getOrDefault(argc, argv, &found, &i, "--cpu", "-cpu", false, 0) == 1) processingType = PROCESSING_TYPE_CPU;
+        if (getOrDefault(argc, argv, &found, &i, "--gpu", "-gpu", false, 0) == 1) processingType = PROCESSING_TYPE_GPU;
+        if (getOrDefault(argc, argv, &found, &i, "--both", "-both", false, 0) == 1) processingType = PROCESSING_TYPE_BOTH;
+
+        if(!found && i < argc){
+            printf("Unknown argument: %s\n", argv[i]);
+            break;
+        }
+    }
+}
 
 int main(int argc, char** argv){
     const char* modelNames[4] = {
@@ -63,11 +151,7 @@ int main(int argc, char** argv){
     int length;
     DATA_TYPE* list;
 
-    bool onlyOne = false;
-    int startModel = 0;
-    int endModel = 3;
-    int startGrid = 1;
-    int endGrid = 6;
+    parseArgs(argc, argv);
 
     // Initialize MPI manually
     printf("Initializing MPI\n");
@@ -173,7 +257,7 @@ int main(int argc, char** argv){
             ParallelFrameworkParameters parameters;
             parameters.D = dims;
             parameters.resultSaveType = SAVE_TYPE_LIST;
-            parameters.processingType = PROCESSING_TYPE_GPU;
+            parameters.processingType = processingType;
             parameters.overrideMemoryRestrictions = true;
             parameters.finalizeAfterExecution = false;
             parameters.printProgress = false;
@@ -182,23 +266,23 @@ int main(int argc, char** argv){
             parameters.dataPtr = (void*) modelDataPtr;
             parameters.dataSize = (1 + stations*(9 - (m<2 ? 0 : 1))) * sizeof(float);
 
-            parameters.threadBalancing          = true;
-            parameters.slaveBalancing           = true;
-            parameters.slaveDynamicScheduling   = true;
-            parameters.cpuDynamicScheduling     = true;
-            parameters.threadBalancingAverage   = true;
+            parameters.threadBalancing          = threadBalancing;
+            parameters.slaveBalancing           = slaveBalancing;
+            parameters.slaveDynamicScheduling   = slaveDynamicScheduling;
+            parameters.cpuDynamicScheduling     = cpuDynamicScheduling;
+            parameters.threadBalancingAverage   = threadBalancingAverage;
 
-            parameters.batchSize                = ULONG_MAX;
-            parameters.slaveBatchSize           = totalElements / 64;
-            parameters.computeBatchSize         = 20;
-            parameters.cpuComputeBatchSize      = 1e+04;
+            parameters.batchSize                = batchSize;
+            parameters.slaveBatchSize           = slaveBatchSize;
+            parameters.computeBatchSize         = computeBatchSize;
+            parameters.cpuComputeBatchSize      = cpuComputeBatchSize;
 
-            parameters.blockSize                = 1024;
-            parameters.gpuStreams               = 8;
+            parameters.blockSize                = blockSize;
+            parameters.gpuStreams               = gpuStreams;
 
-            parameters.slowStartLimit           = 6;
-            parameters.slowStartBase            = 5e+05;
-            parameters.minMsForRatioAdjustment  = 10;
+            parameters.slowStartLimit           = slowStartLimit;
+            parameters.slowStartBase            = slowStartBase;
+            parameters.minMsForRatioAdjustment  = minMsForRatioAdjustment;
 
             float totalTime = 0;        //msec
             int numOfRuns = 0;
