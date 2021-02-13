@@ -395,6 +395,9 @@ void ParallelFramework::masterProcess() {
 		printf("[%d] Waiting in barrier...\n", rank);
 	#endif
 	MPI_Barrier(MPI_COMM_WORLD);
+	#ifdef DBG_START_STOP
+		printf("[%d] Passed the barrier...\n", rank);
+	#endif
 }
 
 void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonData* tcd, int numOfThreads){

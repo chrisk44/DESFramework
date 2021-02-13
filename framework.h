@@ -164,6 +164,9 @@ void ParallelFramework::slaveProcess() {
 		printf("[%d] Waiting in barrier...\n", rank);
 	#endif
 	MPI_Barrier(MPI_COMM_WORLD);
+	#ifdef DBG_START_STOP
+		printf("[%d] Passed the barrier...\n", rank);
+	#endif
 	masterStopwatch.stop();
 	float masterTime = masterStopwatch.getMsec();
 
