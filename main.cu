@@ -380,9 +380,6 @@ int main(int argc, char** argv){
         }
 
         delete [] modelDataPtr;
-
-        if(onlyOne)
-            break;
     }
 
     MPI_Finalize();

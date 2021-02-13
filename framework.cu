@@ -215,8 +215,9 @@ void ParallelFramework::masterProcess() {
 					pinfo.work.startPoint = totalSent;
 					pinfo.work.numOfElements = min(min((unsigned long) (pinfo.ratio * parameters->batchSize), (unsigned long) pinfo.maxBatchSize), totalElements-totalSent);
 
-					//printf("pinfo.ratio = %f, paramters->batchSize = %ld, pinfo.maxBatchSize = %ld, totalElements = %ld, totalSent = %ld, product = %lu\n",
-					//pinfo.ratio, parameters->batchSize, pinfo.maxBatchSize, totalElements, totalSent, (unsigned long) (pinfo.ratio * parameters->batchSize));
+					// printf("pinfo.ratio = %f, paramters->batchSize = %lu, pinfo.maxBatchSize = %lu, totalElements = %lu, totalSent = %lu, product = %lu\n",
+					// 		pinfo.ratio, parameters->batchSize, pinfo.maxBatchSize, totalElements, totalSent, (unsigned long) (pinfo.ratio * parameters->batchSize));
+
 					totalSent += pinfo.work.numOfElements;
 				}
 
