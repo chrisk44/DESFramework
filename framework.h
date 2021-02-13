@@ -121,6 +121,9 @@ void ParallelFramework::slaveProcess() {
 	/*******************************************************************
 	********************** Initialization ******************************
 	********************************************************************/
+	Stopwatch masterStopwatch;
+	masterStopwatch.start();
+
 	ThreadCommonData threadCommonData;
 	sem_init(&threadCommonData.semResults, 0, 0);
 	sem_init(&threadCommonData.semSync, 0, 1);
@@ -131,6 +134,7 @@ void ParallelFramework::slaveProcess() {
 		sem_init(&computeThreadInfo[i].semStart, 0, 0);
 		computeThreadInfo[i].ratio = (float)1/numOfThreads;
 		computeThreadInfo[i].totalRatio = 0;
+		computeThreadInfo[i].name[0] = '\0';
 	}
 
 	#ifdef DBG_START_STOP
@@ -149,8 +153,25 @@ void ParallelFramework::slaveProcess() {
 			// Calculate id: -1 -> CPU, 0+ -> GPU[id]
 			computeThreadInfo[tid-1].id = tid - (parameters->processingType == PROCESSING_TYPE_GPU ? 1 : 2);
 
+			computeThreadInfo[tid-1].masterStopwatch.start();
 			computeThread<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>(computeThreadInfo[tid - 1], &threadCommonData);
+			computeThreadInfo[tid-1].masterStopwatch.stop();
 		}
+	}
+
+	// Synchronize with the rest of the processes
+	MPI_Barrier(MPI_COMM_WORLD);
+	masterStopwatch.stop();
+	float masterTime = masterStopwatch.getMsec();
+
+	for(int i=0; i<numOfThreads; i++){
+		if(computeThreadInfo[i].averageUtilization >= 0)
+			printf("[%d] Resource %d utilization: %.02f%%, idle time: %.02fms (%s)\n", rank,
+					computeThreadInfo[i].id,
+					computeThreadInfo[i].averageUtilization,
+					masterTime - computeThreadInfo[i].masterStopwatch.getMsec(),
+					computeThreadInfo[i].name[0] == '\0' ? "unnamed" : computeThreadInfo[i].name
+			);
 	}
 
 	/*******************************************************************
@@ -189,7 +210,6 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 	bool nvmlAvailable = false;
 	nvmlReturn_t result;
 	nvmlDevice_t gpuHandle;
-	char gpuName[NVML_DEVICE_NAME_BUFFER_SIZE];
 
 	float totalUtilization = 0;
 	unsigned long numOfSamples = 0;
@@ -204,6 +224,40 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 	********************************************************************/
 	// Initialize device
 	if (cti.id > -1) {
+		// Initialize NVML to monitor the GPU
+		nvmlAvailable = false;
+		result = nvmlInit();
+		if (result == NVML_SUCCESS){
+			nvmlInitialized = true;
+
+			result = nvmlDeviceGetHandleByIndex(cti.id, &gpuHandle);
+			if(result == NVML_SUCCESS){
+				nvmlAvailable = true;
+			}else{
+				printf("[%d] [E] Failed to get device handle for gpu %d: %s\n", rank, cti.id, nvmlErrorString(result));
+			}
+		} else {
+			printf("[%d] [E] Failed to initialize NVML: %s\n", rank, nvmlErrorString(result));
+			nvmlAvailable = false;
+		}
+
+		if(nvmlAvailable){
+			// Get the device's name for later
+			result = nvmlDeviceGetName(gpuHandle, cti.name, NVML_DEVICE_NAME_BUFFER_SIZE);
+
+			// Get samples to save the current timestamp
+			unsigned int temp = 1;
+			// Read them one by one to avoid allocating memory for the whole buffer
+			while((result = nvmlDeviceGetSamples(gpuHandle, NVML_GPU_UTILIZATION_SAMPLES, lastSeenTimeStamp, &sampleValType, &temp, samples)) == NVML_SUCCESS && temp > 0){
+				lastSeenTimeStamp = samples[temp-1].timeStamp;
+			}
+
+			if (result != NVML_SUCCESS && result != NVML_ERROR_NOT_FOUND) {
+				printf("[%d] [E] Failed to get initial utilization samples for device: %s\n", rank, nvmlErrorString(result));
+				nvmlAvailable = false;
+			}
+		}
+
 		// Select gpu[id]
 		cudaSetDevice(cti.id);
 
@@ -289,40 +343,9 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 				cce();
 			}
 		}
-
-		// Initialize NVML to monitor the GPU
-		nvmlAvailable = false;
-		result = nvmlInit();
-	    if (result == NVML_SUCCESS){
-			nvmlInitialized = true;
-
-			result = nvmlDeviceGetHandleByIndex(cti.id, &gpuHandle);
-			if(result == NVML_SUCCESS){
-				nvmlAvailable = true;
-			}else{
-				printf("[%d] [E] Failed to get device handle for gpu %d: %s\n", rank, cti.id, nvmlErrorString(result));
-			}
-		} else {
-	        printf("[%d] [E] Failed to initialize NVML: %s\n", rank, nvmlErrorString(result));
-			nvmlAvailable = false;
-	    }
-
-		if(nvmlAvailable){
-			// Get the device's name for later
-			result = nvmlDeviceGetName(gpuHandle, gpuName, NVML_DEVICE_NAME_BUFFER_SIZE);
-
-			// Get samples to save the current timestamp
-			unsigned int temp = 1;
-			// Read them one by one to avoid allocating memory for the whole buffer
-			while((result = nvmlDeviceGetSamples(gpuHandle, NVML_GPU_UTILIZATION_SAMPLES, lastSeenTimeStamp, &sampleValType, &temp, samples)) == NVML_SUCCESS && temp > 0){
-				lastSeenTimeStamp = samples[temp-1].timeStamp;
-			}
-
-			if (result != NVML_SUCCESS && result != NVML_ERROR_NOT_FOUND) {
-				printf("[%d] [E] Failed to get initial utilization samples for device: %s\n", rank, nvmlErrorString(result));
-				nvmlAvailable = false;
-			}
-		}
+	} else {
+		strcpy(cti.name, "CPU");
+		cti.averageUtilization = 0;
 	}
 
 
@@ -634,10 +657,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		printf("[%d] ComputeThread %d: Finalizing and exiting...\n", rank, cti.id);
 	#endif
 
-	if(nvmlAvailable && numOfSamples > 2){
-		printf("[%d] %s utilization: %.02f%% from %lu samples\n", rank, gpuName,
-				numOfSamples > 0 ? totalUtilization/numOfSamples : 0, numOfSamples);
-	}
+	if(nvmlAvailable && numOfSamples > 2)
+		cti.averageUtilization = numOfSamples > 0 ? totalUtilization/numOfSamples : 0;
 
 	/*******************************************************************
 	 *************************** Finalize ******************************

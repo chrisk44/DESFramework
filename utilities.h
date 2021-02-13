@@ -3,6 +3,7 @@
 
 #include <cuda_runtime.h>
 #include <cuda.h>
+#include <nvml.h>
 #include <limits.h>
 #include <mpi.h>
 #include <semaphore.h>
@@ -163,10 +164,6 @@ struct ThreadCommonData {
 struct ComputeThreadInfo{
     int id;
 
-    // unsigned long numOfElements;
-    // unsigned long startPoint;
-    // unsigned long resultsOffset;
-
     unsigned long batchSize;
     unsigned long elementsCalculated;
     sem_t semStart;
@@ -174,6 +171,10 @@ struct ComputeThreadInfo{
     Stopwatch stopwatch;
     float ratio;
     float totalRatio;
+
+    char name[NVML_DEVICE_NAME_BUFFER_SIZE];
+    float averageUtilization = -1;
+    Stopwatch masterStopwatch;
 };
 
 #endif

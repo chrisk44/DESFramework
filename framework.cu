@@ -389,6 +389,9 @@ void ParallelFramework::masterProcess() {
 
 	free(tmpResultsMem);
 	delete[] slaveProcessInfo;
+
+	// Synchronize with the rest of the processes
+	MPI_Barrier(MPI_COMM_WORLD);
 }
 
 void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonData* tcd, int numOfThreads){
