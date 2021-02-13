@@ -313,7 +313,7 @@ int main(int argc, char** argv){
                     framework->getList(&length);
                     if(length != numOfResults && numOfResults != -2){
                         printf("[%s \\ %d] Number of results from run %d don't match: %d -> %d.\n",
-                                        rank, modelNames[m], g, numOfRuns, numOfResults, length);
+                                        modelNames[m], g, numOfRuns, numOfResults, length);
                     }
                     numOfResults = length;
                     // printf("[%s \\ %d] Run %d: %f ms, %d results\n", modelNames[m], g, numOfRuns, length, sw.getMsec());
