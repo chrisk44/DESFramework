@@ -163,7 +163,9 @@ void ParallelFramework::slaveProcess() {
 	#ifdef DBG_START_STOP
 		printf("[%d] Waiting in barrier...\n", rank);
 	#endif
-	MPI_Barrier(MPI_COMM_WORLD);
+	// MPI_Barrier(MPI_COMM_WORLD);
+	int a = 0;
+	MPI_Bcast(&a, 1, MPI_INT, 0, MPI_COMM_WORLD);
 	#ifdef DBG_START_STOP
 		printf("[%d] Passed the barrier...\n", rank);
 	#endif
