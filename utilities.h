@@ -72,7 +72,7 @@ public:
 
 unsigned long getDefaultCPUBatchSize();
 unsigned long getDefaultGPUBatchSize();
-void asd();
+int getCpuStats(float* uptime, float* idleTime);
 
 // MPI_Recv without busy wait
 void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status* status);

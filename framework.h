@@ -169,17 +169,21 @@ void ParallelFramework::slaveProcess() {
 	#ifdef DBG_START_STOP
 		printf("[%d] Passed the barrier...\n", rank);
 	#endif
+
 	masterStopwatch.stop();
 	float masterTime = masterStopwatch.getMsec();
-
 	for(int i=0; i<numOfThreads; i++){
-		if(computeThreadInfo[i].averageUtilization >= 0)
-			printf("[%d] Resource %d utilization: %.02f%%, idle time: %.02fms (%s)\n", rank,
+		if(computeThreadInfo[i].averageUtilization >= 0){
+			float resourceTime = computeThreadInfo[i].masterStopwatch.getMsec();
+			float diff = masterTime - resourceTime;
+			printf("[%d] Resource %d utilization: %.02f%%, idle time: %.02f%% (%.02fms) (%s)\n", rank,
 					computeThreadInfo[i].id,
 					computeThreadInfo[i].averageUtilization,
-					masterTime - computeThreadInfo[i].masterStopwatch.getMsec(),
+					(diff / masterTime) * 100,
+					diff,
 					computeThreadInfo[i].name[0] == '\0' ? "unnamed" : computeThreadInfo[i].name
 			);
+		}
 	}
 
 	/*******************************************************************
@@ -226,6 +230,10 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 	unsigned long numOfAllocatedSamples = 1;
 	unsigned long long lastSeenTimeStamp = 0;
 	nvmlValueType_t sampleValType;
+
+	// CPU usage
+	float startUptime = -1, startIdleTime = -1;
+	float endUptime, endIdleTime;
 
 	/*******************************************************************
 	************************* Initialization ***************************
@@ -353,7 +361,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		}
 	} else {
 		strcpy(cti.name, "CPU");
-		cti.averageUtilization = 0;
+		getCpuStats(&startUptime, &startIdleTime);
 	}
 
 
@@ -665,8 +673,14 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		printf("[%d] ComputeThread %d: Finalizing and exiting...\n", rank, cti.id);
 	#endif
 
-	if(nvmlAvailable)
+	if(cti.id >= 0 && nvmlAvailable)
 		cti.averageUtilization = numOfSamples > 0 ? totalUtilization/numOfSamples : 0;
+
+	if(cti.id == -1 && startUptime > 0 && startIdleTime > 0){
+		if(getCpuStats(&endUptime, &endIdleTime) == 0){
+			cti.averageUtilization = 100 - 100 * (endIdleTime - startIdleTime) / (endUptime - startUptime);
+		}
+	}
 
 	/*******************************************************************
 	 *************************** Finalize ******************************

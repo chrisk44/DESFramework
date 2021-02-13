@@ -28,6 +28,29 @@ unsigned long getDefaultGPUBatchSize(){
     return minBatchSize;
 }
 
+int getCpuStats(float* uptime, float* idleTime){
+    FILE *fp;
+
+    fp = fopen ("/proc/uptime", "r");
+    if (fp != NULL){
+        float localUptime;
+        float localIdleTime;
+
+        if(fscanf(fp, "%f %f", &localUptime, &localIdleTime) == 2){
+            *uptime = localUptime;
+            *idleTime = localIdleTime;
+
+            fclose (fp);
+            return 0;
+        } else {    
+            fclose (fp);
+            return -2;
+        }
+    } else {
+        return -1;
+    }
+}
+
 void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status* status){
     // MPI_Recv(buf, count, datatype, source, tag, comm, status);
     // return;

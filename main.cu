@@ -373,14 +373,14 @@ int main(int argc, char** argv){
 
                 if(next)
                     break;
-            }
+            } // end while time too short
 
             if(onlyOne)
                 break;
-        }
+        } // end for each grid
 
         delete [] modelDataPtr;
-    }
+    }   // end for each model
 
     MPI_Finalize();
 
