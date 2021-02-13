@@ -391,6 +391,9 @@ void ParallelFramework::masterProcess() {
 	delete[] slaveProcessInfo;
 
 	// Synchronize with the rest of the processes
+	#ifdef DBG_START_STOP
+		printf("[%d] Waiting in barrier...\n", rank);
+	#endif
 	MPI_Barrier(MPI_COMM_WORLD);
 }
 
