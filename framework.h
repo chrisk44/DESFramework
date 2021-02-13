@@ -2,6 +2,8 @@
 #define PARALLELFRAMEWORK_H
 
 #include <cuda.h>
+#include <nvml.h>
+
 #include <cmath>
 #include <iostream>
 #include <mpi.h>
@@ -182,6 +184,21 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 	int maxSharedPoints;
 	int availableSharedMemory;
 
+	// NVML
+	bool nvmlInitialized = false;
+	bool nvmlAvailable = false;
+	nvmlReturn_t result;
+	nvmlDevice_t gpuHandle;
+	char gpuName[NVML_DEVICE_NAME_BUFFER_SIZE];
+
+	float totalUtilization = 0;
+	unsigned long numOfSamples = 0;
+
+	nvmlSample_t *samples = new nvmlSample_t[1];
+	unsigned long numOfAllocatedSamples = 1;
+	unsigned long long lastSeenTimeStamp = 0;
+	nvmlValueType_t sampleValType;
+
 	/*******************************************************************
 	************************* Initialization ***************************
 	********************************************************************/
@@ -270,6 +287,40 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 			else{
 				cudaMemcpy(deviceDataPtr, parameters->dataPtr, parameters->dataSize, cudaMemcpyHostToDevice);
 				cce();
+			}
+		}
+
+		// Initialize NVML to monitor the GPU
+		nvmlAvailable = false;
+		result = nvmlInit();
+	    if (result == NVML_SUCCESS){
+			nvmlInitialized = true;
+
+			result = nvmlDeviceGetHandleByIndex(cti.id, &gpuHandle);
+			if(result == NVML_SUCCESS){
+				nvmlAvailable = true;
+			}else{
+				printf("[%d] [E] Failed to get device handle for gpu %d: %s\n", rank, cti.id, nvmlErrorString(result));
+			}
+		} else {
+	        printf("[%d] [E] Failed to initialize NVML: %s\n", rank, nvmlErrorString(result));
+			nvmlAvailable = false;
+	    }
+
+		if(nvmlAvailable){
+			// Get the device's name for later
+			result = nvmlDeviceGetName(gpuHandle, gpuName, NVML_DEVICE_NAME_BUFFER_SIZE);
+
+			// Get samples to save the current timestamp
+			unsigned int temp = 1;
+			// Read them one by one to avoid allocating memory for the whole buffer
+			while((result = nvmlDeviceGetSamples(gpuHandle, NVML_GPU_UTILIZATION_SAMPLES, lastSeenTimeStamp, &sampleValType, &temp, samples)) == NVML_SUCCESS && temp > 0){
+				lastSeenTimeStamp = samples[temp-1].timeStamp;
+			}
+
+			if (result != NVML_SUCCESS && result != NVML_ERROR_NOT_FOUND) {
+				printf("[%d] [E] Failed to get initial utilization samples for device: %s\n", rank, nvmlErrorString(result));
+				nvmlAvailable = false;
 			}
 		}
 	}
@@ -495,6 +546,33 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 					cudaMemcpy(&((DATA_TYPE*)localResults)[globalListIndexOld], deviceResults, gpuListIndex * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
 				}
 
+				if(nvmlAvailable){
+					unsigned int tmpSamples;
+
+					// Get number of available samples
+					result = nvmlDeviceGetSamples(gpuHandle, NVML_GPU_UTILIZATION_SAMPLES, lastSeenTimeStamp, &sampleValType, &tmpSamples, NULL);
+					if (result != NVML_SUCCESS && result != NVML_ERROR_NOT_FOUND) {
+						printf("[%d] [E1] Failed to get utilization samples for device: %s\n", rank, nvmlErrorString(result));
+					}else if(result == NVML_SUCCESS){
+
+						// Make sure we have enough allocated memory for the new samples
+						if(tmpSamples > numOfAllocatedSamples){
+							delete[] samples;
+							samples = new nvmlSample_t[tmpSamples];
+						}
+
+						result = nvmlDeviceGetSamples(gpuHandle, NVML_GPU_UTILIZATION_SAMPLES, lastSeenTimeStamp, &sampleValType, &tmpSamples, samples);
+						if (result == NVML_SUCCESS) {
+							numOfSamples += tmpSamples;
+							for(int i=0; i<tmpSamples; i++){
+								totalUtilization += samples[i].sampleValue.uiVal;
+							}
+						}else if(result != NVML_ERROR_NOT_FOUND){
+							printf("[%d] [E2] Failed to get utilization samples for device: %s\n", rank, nvmlErrorString(result));
+						}
+					}
+
+				}
 
 			} else {
 
@@ -556,6 +634,9 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		printf("[%d] ComputeThread %d: Finalizing and exiting...\n", rank, cti.id);
 	#endif
 
+	if(nvmlAvailable)
+		printf("[%d] %s utilization: %.02f%% from %lu samples\n", rank, gpuName, totalUtilization/numOfSamples, numOfSamples);
+
 	/*******************************************************************
 	 *************************** Finalize ******************************
 	 *******************************************************************/
@@ -571,6 +652,13 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		cudaFree(deviceResults);			cce();
 		cudaFree(deviceListIndexPtr);		cce();
 		cudaFree(deviceDataPtr);			cce();
+
+		delete[] samples;
+		if(nvmlInitialized){
+			result = nvmlShutdown();
+		    if (result != NVML_SUCCESS)
+		        printf("[%d] [E] Failed to shutdown NVML: %s\n", rank, nvmlErrorString(result));
+		}
 	}
 }
 

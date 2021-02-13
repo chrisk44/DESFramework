@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 
 NVCC=nvcc
-NVCC_ARGS=-lmpi -lineinfo -arch=sm_61 --ptxas-options=-v --maxrregcount 64
+NVCC_ARGS=-lmpi -lineinfo -arch=sm_61 --ptxas-options=-v --maxrregcount 64 -lnvidia-ml
 COMPILER_ARGS=-g -Wno-format -fopenmp -O3
 
 N?=2

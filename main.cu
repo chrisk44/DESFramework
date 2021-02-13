@@ -39,8 +39,8 @@ __device__ bool toBool_gpu(RESULT_TYPE result){ return result != 0; }
 using namespace std;
 
 bool onlyOne = false;
-int startModel = 1;
-int endModel = 4;
+int startModel = 0;
+int endModel = 3;
 int startGrid = 1;
 int endGrid = 6;
 
@@ -63,22 +63,22 @@ int slowStartLimit          = 6;
 unsigned long slowStartBase = 5e+05;
 int minMsForRatioAdjustment = 10;
 
-unsigned long getOrDefault(int argc, char** argv, bool* found, int* i, const char* argName, const char* argNameShort, bool requiresMore, unsigned long defaultValue){
+unsigned long getOrDefault(int argc, char** argv, bool* found, int* i, const char* argName, const char* argNameShort, bool hasArgument, unsigned long defaultValue){
     if(*i >= argc)
         return defaultValue;
 
     if(strcmp(argv[*i], argName) == 0 || strcmp(argv[*i], argNameShort) == 0){
-        // If it required more and we have it...
-        if(requiresMore && (*i + 1) < argc){
+        // If it has an argument and we have it...
+        if(hasArgument && (*i + 1) < argc){
             defaultValue = atoi(argv[*i+1]);
             *i += 2;
         }
-        // else if it doesn't require a second argument, so just mark it as 'found'
-        else if(!requiresMore){
+        // else if it doesn't have a second argument, so just mark it as 'found'
+        else if(!hasArgument){
             defaultValue = 1;
             *i += 1;
         }
-        // else if it requires more and we don't have it
+        // else if it has an argument and we don't have it
         else{
             fprintf(stderr, "[E] %s requires an additional argument\n", argName);
             exit(ERR_INVALID_ARG);
@@ -95,8 +95,8 @@ void parseArgs(int argc, char** argv){
     bool found;
     while(i < argc){
         found = false;
-        startModel = getOrDefault(argc, argv, &found, &i, "--model-start", "-ms", true, startModel) - 1;
-        endModel   = getOrDefault(argc, argv, &found, &i, "--model-end",   "-me", true, endModel) - 1;
+        startModel = getOrDefault(argc, argv, &found, &i, "--model-start", "-ms", true, startModel + 1) - 1;
+        endModel   = getOrDefault(argc, argv, &found, &i, "--model-end",   "-me", true, endModel + 1) - 1;
         startGrid  = getOrDefault(argc, argv, &found, &i, "--grid-start",  "-gs", true, startGrid);
         endGrid    = getOrDefault(argc, argv, &found, &i, "--grid-end",    "-ge", true, endGrid);
         onlyOne    = getOrDefault(argc, argv, &found, &i, "--only-one",    "-oo", false, onlyOne ? 1 : 0) == 1 ? true : false;
