@@ -634,7 +634,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		printf("[%d] ComputeThread %d: Finalizing and exiting...\n", rank, cti.id);
 	#endif
 
-	if(nvmlAvailable){
+	if(nvmlAvailable && numOfSamples > 2){
 		printf("[%d] %s utilization: %.02f%% from %lu samples\n", rank, gpuName,
 				numOfSamples > 0 ? totalUtilization/numOfSamples : 0, numOfSamples);
 	}
