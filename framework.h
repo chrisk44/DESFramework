@@ -665,7 +665,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		printf("[%d] ComputeThread %d: Finalizing and exiting...\n", rank, cti.id);
 	#endif
 
-	if(nvmlAvailable && numOfSamples > 2)
+	if(nvmlAvailable)
 		cti.averageUtilization = numOfSamples > 0 ? totalUtilization/numOfSamples : 0;
 
 	/*******************************************************************
