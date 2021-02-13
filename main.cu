@@ -39,8 +39,8 @@ __device__ bool toBool_gpu(RESULT_TYPE result){ return result != 0; }
 using namespace std;
 
 bool onlyOne = false;
-int startModel = 0;
-int endModel = 3;
+int startModel = 1;
+int endModel = 4;
 int startGrid = 1;
 int endGrid = 6;
 
@@ -111,6 +111,12 @@ void parseArgs(int argc, char** argv){
         slaveDynamicScheduling = getOrDefault(argc, argv, &found, &i, "--slave-dynamic-balancing", "-sdb", false, slaveDynamicScheduling ? 1 : 0) == 1 ? true : false;
         cpuDynamicScheduling   = getOrDefault(argc, argv, &found, &i, "--cpu-dynamic-balancing", "-cdb", false, cpuDynamicScheduling ? 1 : 0) == 1 ? true : false;
         threadBalancingAverage = getOrDefault(argc, argv, &found, &i, "--thread-balancing-avg", "-tba", false, threadBalancingAverage ? 1 : 0) == 1 ? true : false;
+
+        blockSize  = getOrDefault(argc, argv, &found, &i, "--block-size",  "-bls", true, blockSize);
+        gpuStreams = getOrDefault(argc, argv, &found, &i, "--gpu-streams",  "-gs", true, gpuStreams);
+        slowStartLimit = getOrDefault(argc, argv, &found, &i, "--slow-start-limit",  "-ssl", true, slowStartLimit);
+        slowStartBase = getOrDefault(argc, argv, &found, &i, "--slow-start-base",  "-ssb", true, slowStartBase);
+        minMsForRatioAdjustment = getOrDefault(argc, argv, &found, &i, "--min-ms-ratio",  "-mmr", true, minMsForRatioAdjustment);
 
         if (getOrDefault(argc, argv, &found, &i, "--cpu", "-cpu", false, 0) == 1) processingType = PROCESSING_TYPE_CPU;
         if (getOrDefault(argc, argv, &found, &i, "--gpu", "-gpu", false, 0) == 1) processingType = PROCESSING_TYPE_GPU;
