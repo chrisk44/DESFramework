@@ -38,11 +38,11 @@ int getCpuStats(float* uptime, float* idleTime){
 
         if(fscanf(fp, "%f %f", &localUptime, &localIdleTime) == 2){
             *uptime = localUptime;
-            *idleTime = localIdleTime;
+            *idleTime = localIdleTime / get_nprocs_conf();
 
             fclose (fp);
             return 0;
-        } else {    
+        } else {
             fclose (fp);
             return -2;
         }

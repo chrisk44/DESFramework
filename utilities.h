@@ -8,6 +8,7 @@
 #include <mpi.h>
 #include <semaphore.h>
 #include <string>
+#include <sys/sysinfo.h>
 #include <sys/time.h>
 #include <unistd.h>
 
