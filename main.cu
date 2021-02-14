@@ -214,6 +214,11 @@ int main(int argc, char** argv){
     int length;
     DATA_TYPE* list;
 
+    float finalResults[4][6];
+    for(int i=0; i<4; i++)
+        for(int j=0; j<6; j++)
+            finalResults[i][j] = 0.0;
+
     parseArgs(argc, argv);
 
     // Initialize MPI manually
@@ -392,6 +397,7 @@ int main(int argc, char** argv){
                 if(isMaster){
                     if(commSize > 2 || processingType == PROCESSING_TYPE_BOTH) printf("\n");
                     if(onlyOne || (totalTime > 10 * 1000 && (numOfRuns >= 10 || totalTime >= 1 * 60 * 1000))){
+                        finalResults[m][g] = totalTime/numOfRuns;
                         printf("[%s \\ %d] Time: %f ms in %d runs\n",
                                     modelNames[m], g, totalTime/numOfRuns, numOfRuns);
 
@@ -442,6 +448,16 @@ int main(int argc, char** argv){
 
         delete [] modelDataPtr;
     }   // end for each model
+
+    if(isMaster){
+        printf("Final results:\n");
+        for(m=startModel; m<=endModel; m++){
+            for(g=startGrid; g<=endGrid; g++)
+                printf("%f\n", finalResults[m][g]);
+
+            printf("\n");
+        }
+    }
 
     MPI_Finalize();
 

@@ -176,6 +176,7 @@ struct ComputeThreadInfo{
 
     char name[NVML_DEVICE_NAME_BUFFER_SIZE];
     float averageUtilization = -1;
+    float idleTime = 0;
     Stopwatch masterStopwatch;
 };
 

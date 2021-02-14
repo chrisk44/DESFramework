@@ -176,12 +176,13 @@ void ParallelFramework::slaveProcess() {
 	for(int i=0; i<numOfThreads; i++){
 		// if(computeThreadInfo[i].averageUtilization >= 0){
 			float resourceTime = computeThreadInfo[i].masterStopwatch.getMsec();
-			float diff = masterTime - resourceTime;
-			printf("[%d] Resource %d utilization: %.02f%%, idle time: %.02f%% (%.02fms) (%s)\n", rank,
+            float finishIdleTime = masterTime - resourceTime;
+            computeThreadInfo[i].idleTime += finishIdleTime;
+			printf("[%d] Resource %d utilization: %.02f%%, total idle time: %.02f%% (%.02fms) (%s)\n", rank,
 					computeThreadInfo[i].id,
 					computeThreadInfo[i].averageUtilization,
-					(diff / masterTime) * 100,
-					diff,
+					(computeThreadInfo[i].idleTime / masterTime) * 100,
+					computeThreadInfo[i].idleTime,
 					computeThreadInfo[i].name[0] == '\0' ? "unnamed" : computeThreadInfo[i].name
 			);
 		// }
@@ -202,6 +203,7 @@ template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBoo
 void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd){
 	int gpuListIndex, globalListIndexOld;
 	RESULT_TYPE* localResults;
+    Stopwatch idleStopwatch;
 
 	// GPU Memory
 	RESULT_TYPE* deviceResults;					// GPU Memory for results
@@ -390,7 +392,10 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 			printf("[%d] ComputeThread %d: Ready\n", rank, cti.id);
 		#endif
 
+        idleStopwatch.start();
 		sem_wait(&cti.semStart);
+        idleStopwatch.stop();
+        cti.idleTime += idleStopwatch.getMsec();
 
 		#ifdef DBG_TIME
 			sw.stop();
@@ -424,7 +429,10 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 				sw.start();
 			#endif
 
+            idleStopwatch.start();
 			sem_wait(&tcd->semSync);
+            idleStopwatch.stop();
+            cti.idleTime += idleStopwatch.getMsec();
 
 			// Get the current global batch start point as our starting point
 			localStartPoint = tcd->globalBatchStart;
