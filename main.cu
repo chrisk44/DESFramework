@@ -205,7 +205,7 @@ int main(int argc, char** argv){
     ifstream dispfile, gridfile;
     ofstream outfile;
     string tmp;
-    int stations, dims, i, j, m, g, result, rank;
+    int stations, dims, i, j, m, g, result, rank, commSize;
     float *modelDataPtr, *dispPtr;
     float x, y, z, de, dn, dv, se, sn, sv;
     float low, high, step;
@@ -221,6 +221,8 @@ int main(int argc, char** argv){
     MPI_Init(nullptr, nullptr);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     isMaster = rank == 0;
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &commSize);
 
     // For each model...
     for(m=startModel; m<=endModel; m++){
@@ -388,7 +390,7 @@ int main(int argc, char** argv){
 
                 int next;
                 if(isMaster){
-                    printf("\n");
+                    if(commSize > 2 || processingType == PROCESSING_TYPE_BOTH) printf("\n");
                     if(onlyOne || (totalTime > 10 * 1000 && (numOfRuns >= 10 || totalTime >= 1 * 60 * 1000))){
                         printf("[%s \\ %d] Time: %f ms in %d runs\n",
                                     modelNames[m], g, totalTime/numOfRuns, numOfRuns);

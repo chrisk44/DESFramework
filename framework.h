@@ -96,7 +96,7 @@ int ParallelFramework::run() {
 	if(parameters->finalizeAfterExecution)
 		MPI_Finalize();
 
-	return 0;
+	return valid ? 0 : -1;
 }
 
 template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
@@ -105,6 +105,10 @@ void ParallelFramework::slaveProcess() {
 	********** Calculate number of worker threads (#GPUs + 1CPU) *******
 	********************************************************************/
 	int numOfThreads = 0;
+	ComputeThreadInfo* computeThreadInfo;
+	ThreadCommonData threadCommonData;
+	Stopwatch masterStopwatch;
+	masterStopwatch.start();
 
 	if(parameters->processingType != PROCESSING_TYPE_CPU)
 		cudaGetDeviceCount(&numOfThreads);
@@ -112,51 +116,48 @@ void ParallelFramework::slaveProcess() {
 	if(parameters->processingType != PROCESSING_TYPE_GPU)
 		numOfThreads++;
 
-	if(numOfThreads == 0){
-		printf("[%d] SlaveProcess: Error: cudaGetDeviceCount returned 0\n", rank);
-		return;
-	}
+	if(numOfThreads > 0){
 
+		/*******************************************************************
+		********************** Initialization ******************************
+		********************************************************************/
 
-	/*******************************************************************
-	********************** Initialization ******************************
-	********************************************************************/
-	Stopwatch masterStopwatch;
-	masterStopwatch.start();
+		sem_init(&threadCommonData.semResults, 0, 0);
+		sem_init(&threadCommonData.semSync, 0, 1);
+		threadCommonData.results = nullptr;
 
-	ThreadCommonData threadCommonData;
-	sem_init(&threadCommonData.semResults, 0, 0);
-	sem_init(&threadCommonData.semSync, 0, 1);
-	threadCommonData.results = nullptr;
-
-	ComputeThreadInfo* computeThreadInfo = new ComputeThreadInfo[numOfThreads];
-	for(int i=0; i<numOfThreads; i++){
-		sem_init(&computeThreadInfo[i].semStart, 0, 0);
-		computeThreadInfo[i].ratio = (float)1/numOfThreads;
-		computeThreadInfo[i].totalRatio = 0;
-		computeThreadInfo[i].name[0] = '\0';
-	}
-
-	#ifdef DBG_START_STOP
-		printf("[%d] SlaveProcess: Spawning %d worker threads...\n", rank, numOfThreads);
-	#endif
-
-	/*******************************************************************
-	*************** Launch coordinator and worker threads **************
-	********************************************************************/
-	#pragma omp parallel num_threads(numOfThreads + 1) shared(computeThreadInfo) 	// +1 thread to handle the communication with masterProcess
-	{
-		int tid = omp_get_thread_num();
-		if(tid == 0){
-			coordinatorThread(computeThreadInfo, &threadCommonData, omp_get_num_threads()-1);
-		}else{
-			// Calculate id: -1 -> CPU, 0+ -> GPU[id]
-			computeThreadInfo[tid-1].id = tid - (parameters->processingType == PROCESSING_TYPE_GPU ? 1 : 2);
-
-			computeThreadInfo[tid-1].masterStopwatch.start();
-			computeThread<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>(computeThreadInfo[tid - 1], &threadCommonData);
-			computeThreadInfo[tid-1].masterStopwatch.stop();
+		computeThreadInfo = new ComputeThreadInfo[numOfThreads];
+		for(int i=0; i<numOfThreads; i++){
+			sem_init(&computeThreadInfo[i].semStart, 0, 0);
+			computeThreadInfo[i].ratio = (float)1/numOfThreads;
+			computeThreadInfo[i].totalRatio = 0;
+			computeThreadInfo[i].name[0] = '\0';
 		}
+
+		#ifdef DBG_START_STOP
+			printf("[%d] SlaveProcess: Spawning %d worker threads...\n", rank, numOfThreads);
+		#endif
+
+		/*******************************************************************
+		*************** Launch coordinator and worker threads **************
+		********************************************************************/
+		#pragma omp parallel num_threads(numOfThreads + 1) shared(computeThreadInfo) 	// +1 thread to handle the communication with masterProcess
+		{
+			int tid = omp_get_thread_num();
+			if(tid == 0){
+				coordinatorThread(computeThreadInfo, &threadCommonData, omp_get_num_threads()-1);
+			}else{
+				// Calculate id: -1 -> CPU, 0+ -> GPU[id]
+				computeThreadInfo[tid-1].id = tid - (parameters->processingType == PROCESSING_TYPE_GPU ? 1 : 2);
+
+				computeThreadInfo[tid-1].masterStopwatch.start();
+				computeThread<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>(computeThreadInfo[tid - 1], &threadCommonData);
+				computeThreadInfo[tid-1].masterStopwatch.stop();
+			}
+		}
+	} else {
+		printf("[%d] SlaveProcess: Error: cudaGetDeviceCount returned 0\n", rank);
+		valid = false;
 	}
 
 	// Synchronize with the rest of the processes
