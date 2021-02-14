@@ -52,7 +52,7 @@ bool cpuDynamicScheduling     = true;
 bool threadBalancingAverage   = true;
 
 unsigned long batchSize           = UINT_MAX;
-unsigned long slaveBatchSize      = 1e+07;
+unsigned long slaveBatchSize      = UINT_MAX;  // 1e+07
 unsigned long computeBatchSize    = 20;
 unsigned long cpuComputeBatchSize = 1e+04;
 
