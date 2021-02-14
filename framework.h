@@ -212,7 +212,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 	cudaStream_t streams[parameters->gpuStreams];
 	unsigned long allocatedElements = 0;
 	cudaDeviceProp deviceProp;
-	unsigned long defaultGPUBatchSize = getDefaultGPUBatchSize();
+	unsigned long maxGpuBatchSize;
 	bool useSharedMemoryForData;
 	bool useConstantMemoryForData;
 	int maxSharedPoints;
@@ -278,6 +278,13 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		// Select gpu[id]
 		cudaSetDevice(cti.id);
 
+        // Calculate the max batch size for the device
+        maxGpuBatchSize = getMaxGPUBytesForGpu(cti.id);
+        if(parameters->resultSaveType == SAVE_TYPE_ALL)
+            maxGpuBatchSize /= sizeof(RESULT_TYPE);
+        else
+            maxGpuBatchSize /= parameters->D * sizeof(DATA_TYPE);
+
 		// Get device's properties for shared memory
 		cudaGetDeviceProperties(&deviceProp, cti.id);
 
@@ -314,7 +321,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		// Allocate memory on device
 		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));	cce();
 		cudaMalloc(&deviceListIndexPtr, sizeof(int));							cce();
-		// If we have data but can't fit it in constant memory, allocate global memory
+		// If we have static model data but won't use constant memory, allocate global memory for it
 		if(parameters->dataSize > 0 && !useConstantMemoryForData){
 			cudaMalloc(&deviceDataPtr, parameters->dataSize);					cce();
 		}
@@ -471,14 +478,14 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 			 If batchSize was increased, allocate more memory for the results
 			******************************************************************/
 			// TODO: Move this to initialization and allocate as much memory as possible
-			if (allocatedElements < localNumOfElements && cti.id > -1 && allocatedElements < defaultGPUBatchSize) {
+			if (allocatedElements < localNumOfElements && cti.id > -1 && allocatedElements < maxGpuBatchSize) {
 
 				#ifdef DBG_MEMORY
 					printf("[%d] ComputeThread %d: Allocating more GPU memory (%lu", rank, cti.id, allocatedElements);
 					fflush(stdout);
 				#endif
 
-				allocatedElements = min(localNumOfElements, defaultGPUBatchSize);
+				allocatedElements = min(localNumOfElements, maxGpuBatchSize);
 
 				#ifdef DBG_MEMORY
 					printf(" -> %lu elements, %lu MB)\n", allocatedElements, (allocatedElements*sizeof(RESULT_TYPE)) / (1024 * 1024));

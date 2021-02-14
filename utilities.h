@@ -71,8 +71,9 @@ public:
     float getMsec();
 };
 
-unsigned long getDefaultCPUBatchSize();
-unsigned long getDefaultGPUBatchSize();
+unsigned long getMaxCPUBytes();
+unsigned long getMaxGPUBytes();
+unsigned long getMaxGPUBytesForGpu(int id);
 int getCpuStats(float* uptime, float* idleTime);
 
 // MPI_Recv without busy wait
