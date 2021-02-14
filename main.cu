@@ -90,6 +90,57 @@ unsigned long getOrDefault(int argc, char** argv, bool* found, int* i, const cha
     return defaultValue;
 }
 
+void printHelp(){
+    printf(
+        "DES Framework Usage:\n"\
+        "To run locally:    mpirun -n 2 ./parallelFramework <options>\n"
+        "To run on cluster: mpirun --host localhost,localhost,remotehost1,remotehost2 ~/DESFramework/parallelFramework <options>\n\n"
+        "Available options (every option takes a number as an argument. For true-false arguments use 0 or 1. -cpu, -gpu, -both don't require an argument.):\n"
+        "Model/Grid selection (must be the same for every participating system):\n"
+        "--model-start              -ms             The first model to test (1-4).\n"
+        "--model-end                -me             The last model to test (1-4).\n"
+        "--grid-start               -gs             The first grid to test (1-6).\n"
+        "--grid-end                 -ge             The last grid to test (1-6).\n"
+        "--only-one                 -oo             Do only one run for each grid regardless of the time it takes.\n"
+        "\n"
+        "Load balancing (--thread-balancing must be the same for every system, the rest can be freely adjusted per system):\n"
+        "--thread-balancing         -tb             Enables the use of HPLS in the slave level for each compute thread.\n"
+        "                                           This means that for each assignment, the slave will use HPLS to calculate a ratio which will\n"
+        "                                           be multiplied by the slave batch size to determine the number of elements that will be assigned to each compute thread.\n"
+        "--slave-balancing          -sb             Enables the use of HPLS in the master level for each slave.\n"
+        "                                           This means that for each assignment request, the master will use HPLS to calculate a ratio\n"
+        "                                           which will be multiplied by the global batch size to determine the number of elements that\n"
+        "                                           should be assigned to that slave.\n"
+        "--slave-dynamic-balancing  -sdb            Enables dynamic scheduling in the slave level. When enabled, the slave will assign the elements dynamically to the available\n"
+        "                                           resources using the slave batch size, as opposed to assigning them all at once\n"
+        "--cpu-dynamic-balancing    -cdb            Enables dynamic scheduling in the compute thread level for the CPU worker thread. When enabled, the elements\n"
+        "                                           that have been assigned to the CPU worker thread will be assigned dynamically to each CPU core using a CPU batch size,\n"
+        "                                           as opposed to statically assigning the elements equally to the available cores.\n"
+        "--thread-balancing-avg     -tba            Causes the slave-level HPLS to use the average ratio for each compute thread instead of the latest one\n. Useful when\n"
+        "                                           the elements are heavily imbalanced compute-wise.\n"
+        "\n"
+        "Element assignment (can be defined separately for each slave, except for --batch-size which is used only by the master process):\n"
+        "--batch-size               -bs             The maximum number of elements for each assignment from the master node to a slave, and the multiplier of HPLS ratios.\n"
+        "--slave-batch-size         -sbs            The maximum number of elements that a slave can assign to a compute thread at a time, and the multiplier of HPLS ratios.\n"
+        "--compute-batch-size       -cbs            The number of elements that each GPU thread will compute.\n"
+        "--cpu-compute-batch-size   -ccbs           The batch size for CPU dynamic scheduling.\n"
+        "\n"
+        "GPU parameters (can be defined separately for each slave):\n"
+        "--block-size               -bls            The number of threads in each GPU block.\n"
+        "--gpu-streams              -gs             The number of GPU streams to be used to dispatch work to the GPU.\n"
+        "\n"
+        "Slow-Start technique (used only by the master system, except for minimum time for ratio adjustment which is also used by the slaves and can be freely adjusted per system):\n"
+        "--slow-start-limit         -ssl            The number of assignments that should be limited by the slow-start technique, where after each step the limit is doubled.\n"
+        "--slow-start-base          -ssb            The initial number of elements for the slow-start technique which will be doubled after each step.\n"
+        "--min-ms-ratio             -mmr            The minimum time in milliseconds that will be considered as valid to be used to adjust HPLS ratios.\n"
+        "\n"
+        "Resource selection (can be defined separately for each slave) (these don't require arguments, obviously use only one of them):\n"
+        "--cpu                      -cpu            Use only the CPUs of the system\n"
+        "--gpu                      -gpu            Use only the GPUs of the system\n"
+        "--both                     -both           Use all CPUs and GPUs of the system\n"
+    );
+}
+
 void parseArgs(int argc, char** argv){
     int i = 1;
     bool found;
@@ -122,8 +173,15 @@ void parseArgs(int argc, char** argv){
         if (getOrDefault(argc, argv, &found, &i, "--gpu", "-gpu", false, 0) == 1) processingType = PROCESSING_TYPE_GPU;
         if (getOrDefault(argc, argv, &found, &i, "--both", "-both", false, 0) == 1) processingType = PROCESSING_TYPE_BOTH;
 
+        if (getOrDefault(argc, argv, &found, &i, "--help", "-help", false, 0) == 1){
+            printHelp();
+            exit(0);
+        }
+
         if(!found && i < argc){
             printf("Unknown argument: %s\n", argv[i]);
+            printHelp();
+            exit(1);
             break;
         }
     }

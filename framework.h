@@ -173,7 +173,7 @@ void ParallelFramework::slaveProcess() {
 	masterStopwatch.stop();
 	float masterTime = masterStopwatch.getMsec();
 	for(int i=0; i<numOfThreads; i++){
-		if(computeThreadInfo[i].averageUtilization >= 0){
+		// if(computeThreadInfo[i].averageUtilization >= 0){
 			float resourceTime = computeThreadInfo[i].masterStopwatch.getMsec();
 			float diff = masterTime - resourceTime;
 			printf("[%d] Resource %d utilization: %.02f%%, idle time: %.02f%% (%.02fms) (%s)\n", rank,
@@ -183,7 +183,7 @@ void ParallelFramework::slaveProcess() {
 					diff,
 					computeThreadInfo[i].name[0] == '\0' ? "unnamed" : computeThreadInfo[i].name
 			);
-		}
+		// }
 	}
 
 	/*******************************************************************
