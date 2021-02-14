@@ -388,6 +388,7 @@ int main(int argc, char** argv){
 
                 int next;
                 if(isMaster){
+                    printf("\n");
                     if(onlyOne || (totalTime > 10 * 1000 && (numOfRuns >= 10 || totalTime >= 1 * 60 * 1000))){
                         printf("[%s \\ %d] Time: %f ms in %d runs\n",
                                     modelNames[m], g, totalTime/numOfRuns, numOfRuns);
