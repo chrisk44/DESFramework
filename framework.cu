@@ -502,11 +502,10 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 		unsigned long total = 0;
 		for(int i=0; i<numOfThreads; i++){
 			if(parameters->slaveDynamicScheduling)
-				cti[i].batchSize = cti[i].ratio * min(
-					parameters->slaveBatchSize, work.numOfElements
-				);
+				cti[i].batchSize = max((unsigned long) 1, (unsigned long) (cti[i].ratio * min(
+					parameters->slaveBatchSize, work.numOfElements)));
 			else{
-				cti[i].batchSize = cti[i].ratio * work.numOfElements;
+				cti[i].batchSize = max((unsigned long) 1, (unsigned long) (cti[i].ratio * work.numOfElements));
 				total += cti[i].batchSize;
 			}
 		}

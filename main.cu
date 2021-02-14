@@ -157,11 +157,11 @@ void parseArgs(int argc, char** argv){
         computeBatchSize    = getOrDefault(argc, argv, &found, &i, "--compute-batch-size",  "-cbs", true, computeBatchSize);
         cpuComputeBatchSize = getOrDefault(argc, argv, &found, &i, "--cpu-compute-batch-size",  "-ccbs", true, cpuComputeBatchSize);
 
-        threadBalancing        = getOrDefault(argc, argv, &found, &i, "--thread-balancing", "-tb", false, threadBalancing ? 1 : 0) == 1 ? true : false;
-        slaveBalancing         = getOrDefault(argc, argv, &found, &i, "--slave-balancing", "-sb", false, slaveBalancing ? 1 : 0) == 1 ? true : false;
-        slaveDynamicScheduling = getOrDefault(argc, argv, &found, &i, "--slave-dynamic-balancing", "-sdb", false, slaveDynamicScheduling ? 1 : 0) == 1 ? true : false;
-        cpuDynamicScheduling   = getOrDefault(argc, argv, &found, &i, "--cpu-dynamic-balancing", "-cdb", false, cpuDynamicScheduling ? 1 : 0) == 1 ? true : false;
-        threadBalancingAverage = getOrDefault(argc, argv, &found, &i, "--thread-balancing-avg", "-tba", false, threadBalancingAverage ? 1 : 0) == 1 ? true : false;
+        threadBalancing        = getOrDefault(argc, argv, &found, &i, "--thread-balancing", "-tb", true, threadBalancing ? 1 : 0) == 1 ? true : false;
+        slaveBalancing         = getOrDefault(argc, argv, &found, &i, "--slave-balancing", "-sb", true, slaveBalancing ? 1 : 0) == 1 ? true : false;
+        slaveDynamicScheduling = getOrDefault(argc, argv, &found, &i, "--slave-dynamic-balancing", "-sdb", true, slaveDynamicScheduling ? 1 : 0) == 1 ? true : false;
+        cpuDynamicScheduling   = getOrDefault(argc, argv, &found, &i, "--cpu-dynamic-balancing", "-cdb", true, cpuDynamicScheduling ? 1 : 0) == 1 ? true : false;
+        threadBalancingAverage = getOrDefault(argc, argv, &found, &i, "--thread-balancing-avg", "-tba", true, threadBalancingAverage ? 1 : 0) == 1 ? true : false;
 
         blockSize  = getOrDefault(argc, argv, &found, &i, "--block-size",  "-bls", true, blockSize);
         gpuStreams = getOrDefault(argc, argv, &found, &i, "--gpu-streams",  "-gs", true, gpuStreams);
