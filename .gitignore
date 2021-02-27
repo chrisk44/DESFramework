@@ -1,3 +1,5 @@
 parallelFramework
 *results*.txt
 time.txt
+
+*.o

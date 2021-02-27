@@ -1,5 +1,4 @@
-#ifndef KERNELS_CU
-#define KERNELS_CU
+#include "kernels.h"
 
 #include <cuda.h>
 #include <omp.h>
@@ -8,20 +7,27 @@
 
 using namespace std;
 
-#define MAX_CONSTANT_MEMORY (65536 - 24)			// Don't know why...
 __device__ __constant__ char constantMemoryPtr[MAX_CONSTANT_MEMORY];
 
-template<validationFunc_t validationFunc, toBool_t toBool>  // Because nvcc is WEIRD
 void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offset){
 	cudaMemcpyToSymbol(constantMemoryPtr, src, count, offset, cudaMemcpyHostToDevice);
 }
 
 // CUDA kernel to run the computation
-template<validationFunc_t validationFunc, toBool_t toBool>
-__global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPointLinearIndex,
-	const unsigned int D, const unsigned long numOfElements, const unsigned long offset, void* dataPtr,
-	int dataSize, bool useSharedMemoryForData, bool useConstantMemoryForData, int* listIndexPtr,
-	const int computeBatchSize) {
+__global__ void validate_kernel(
+	validationFunc_t validationFunc, toBool_t toBool,
+	RESULT_TYPE* results,
+	unsigned long startingPointLinearIndex,
+	const unsigned int D,
+	const unsigned long numOfElements,
+	const unsigned long offset,
+	void* dataPtr,
+	int dataSize,
+	bool useSharedMemoryForData,
+	bool useConstantMemoryForData,
+	int* listIndexPtr,
+	const int computeBatchSize
+) {
 
 	unsigned long threadStart = offset + ((((unsigned long) blockIdx.x * blockDim.x) + threadIdx.x) * computeBatchSize);
 	unsigned long end = min(offset + numOfElements, threadStart + computeBatchSize);
@@ -126,9 +132,19 @@ __global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPoin
 }
 
 // CPU kernel to run the computation
-template<validationFunc_t validationFunc, toBool_t toBool>
-void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
-	unsigned long long* idxSteps, unsigned long startingPointLinearIndex, bool dynamicScheduling, int batchSize) {
+void cpu_kernel(
+	validationFunc_t validationFunc, toBool_t toBool,
+	RESULT_TYPE* results,
+	Limit* limits,
+	unsigned int D,
+	unsigned long numOfElements,
+	void* dataPtr,
+	int* listIndexPtr,
+	unsigned long long* idxSteps,
+	unsigned long startingPointLinearIndex,
+	bool dynamicScheduling,
+	int batchSize
+) {
 
 	unsigned long currentBatchStart = startingPointLinearIndex;
 	unsigned long globalLast = startingPointLinearIndex + numOfElements - 1;
@@ -229,5 +245,3 @@ void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned lo
 	}
 
 }
-
-#endif
