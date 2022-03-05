@@ -2,6 +2,8 @@
 #define PARALLELFRAMEWORK_H
 
 #include <cuda.h>
+#include <nvml.h>
+
 #include <cmath>
 #include <iostream>
 #include <mpi.h>
@@ -94,7 +96,7 @@ int ParallelFramework::run() {
 	if(parameters->finalizeAfterExecution)
 		MPI_Finalize();
 
-	return 0;
+	return valid ? 0 : -1;
 }
 
 template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
@@ -103,6 +105,10 @@ void ParallelFramework::slaveProcess() {
 	********** Calculate number of worker threads (#GPUs + 1CPU) *******
 	********************************************************************/
 	int numOfThreads = 0;
+	ComputeThreadInfo* computeThreadInfo;
+	ThreadCommonData threadCommonData;
+	Stopwatch masterStopwatch;
+	masterStopwatch.start();
 
 	if(parameters->processingType != PROCESSING_TYPE_CPU)
 		cudaGetDeviceCount(&numOfThreads);
@@ -110,45 +116,76 @@ void ParallelFramework::slaveProcess() {
 	if(parameters->processingType != PROCESSING_TYPE_GPU)
 		numOfThreads++;
 
-	if(numOfThreads == 0){
+	if(numOfThreads > 0){
+
+		/*******************************************************************
+		********************** Initialization ******************************
+		********************************************************************/
+
+		sem_init(&threadCommonData.semResults, 0, 0);
+		sem_init(&threadCommonData.semSync, 0, 1);
+		threadCommonData.results = nullptr;
+
+		computeThreadInfo = new ComputeThreadInfo[numOfThreads];
+		for(int i=0; i<numOfThreads; i++){
+			sem_init(&computeThreadInfo[i].semStart, 0, 0);
+			computeThreadInfo[i].ratio = (float)1/numOfThreads;
+			computeThreadInfo[i].totalRatio = 0;
+			computeThreadInfo[i].name[0] = '\0';
+		}
+
+		#ifdef DBG_START_STOP
+			printf("[%d] SlaveProcess: Spawning %d worker threads...\n", rank, numOfThreads);
+		#endif
+
+		/*******************************************************************
+		*************** Launch coordinator and worker threads **************
+		********************************************************************/
+		#pragma omp parallel num_threads(numOfThreads + 1) shared(computeThreadInfo) 	// +1 thread to handle the communication with masterProcess
+		{
+			int tid = omp_get_thread_num();
+			if(tid == 0){
+				coordinatorThread(computeThreadInfo, &threadCommonData, omp_get_num_threads()-1);
+			}else{
+				// Calculate id: -1 -> CPU, 0+ -> GPU[id]
+				computeThreadInfo[tid-1].id = tid - (parameters->processingType == PROCESSING_TYPE_GPU ? 1 : 2);
+
+				computeThreadInfo[tid-1].masterStopwatch.start();
+				computeThread<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>(computeThreadInfo[tid - 1], &threadCommonData);
+				computeThreadInfo[tid-1].masterStopwatch.stop();
+			}
+		}
+	} else {
 		printf("[%d] SlaveProcess: Error: cudaGetDeviceCount returned 0\n", rank);
-		return;
+		valid = false;
 	}
 
-
-	/*******************************************************************
-	********************** Initialization ******************************
-	********************************************************************/
-	ThreadCommonData threadCommonData;
-	sem_init(&threadCommonData.semResults, 0, 0);
-	sem_init(&threadCommonData.semSync, 0, 1);
-	threadCommonData.results = nullptr;
-
-	ComputeThreadInfo* computeThreadInfo = new ComputeThreadInfo[numOfThreads];
-	for(int i=0; i<numOfThreads; i++){
-		sem_init(&computeThreadInfo[i].semStart, 0, 0);
-		computeThreadInfo[i].ratio = (float)1/numOfThreads;
-		computeThreadInfo[i].totalRatio = 0;
-	}
-
+	// Synchronize with the rest of the processes
 	#ifdef DBG_START_STOP
-		printf("[%d] SlaveProcess: Spawning %d worker threads...\n", rank, numOfThreads);
+		printf("[%d] Waiting in barrier...\n", rank);
+	#endif
+	// MPI_Barrier(MPI_COMM_WORLD);
+	int a = 0;
+	MPI_Bcast(&a, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	#ifdef DBG_START_STOP
+		printf("[%d] Passed the barrier...\n", rank);
 	#endif
 
-	/*******************************************************************
-	*************** Launch coordinator and worker threads **************
-	********************************************************************/
-	#pragma omp parallel num_threads(numOfThreads + 1) shared(computeThreadInfo) 	// +1 thread to handle the communication with masterProcess
-	{
-		int tid = omp_get_thread_num();
-		if(tid == 0){
-			coordinatorThread(computeThreadInfo, &threadCommonData, omp_get_num_threads()-1);
-		}else{
-			// Calculate id: -1 -> CPU, 0+ -> GPU[id]
-			computeThreadInfo[tid-1].id = tid - (parameters->processingType == PROCESSING_TYPE_GPU ? 1 : 2);
-
-			computeThread<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>(computeThreadInfo[tid - 1], &threadCommonData);
-		}
+	masterStopwatch.stop();
+	float masterTime = masterStopwatch.getMsec();
+	for(int i=0; i<numOfThreads; i++){
+		// if(computeThreadInfo[i].averageUtilization >= 0){
+			float resourceTime = computeThreadInfo[i].masterStopwatch.getMsec();
+            float finishIdleTime = masterTime - resourceTime;
+            computeThreadInfo[i].idleTime += finishIdleTime;
+			printf("[%d] Resource %d utilization: %.02f%%, total idle time: %.02f%% (%.02fms) (%s)\n", rank,
+					computeThreadInfo[i].id,
+					computeThreadInfo[i].averageUtilization,
+					(computeThreadInfo[i].idleTime / masterTime) * 100,
+					computeThreadInfo[i].idleTime,
+					computeThreadInfo[i].name[0] == '\0' ? "unnamed" : computeThreadInfo[i].name
+			);
+		// }
 	}
 
 	/*******************************************************************
@@ -166,6 +203,7 @@ template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBoo
 void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd){
 	int gpuListIndex, globalListIndexOld;
 	RESULT_TYPE* localResults;
+    Stopwatch idleStopwatch;
 
 	// GPU Memory
 	RESULT_TYPE* deviceResults;					// GPU Memory for results
@@ -176,19 +214,78 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 	cudaStream_t streams[parameters->gpuStreams];
 	unsigned long allocatedElements = 0;
 	cudaDeviceProp deviceProp;
-	unsigned long defaultGPUBatchSize = getDefaultGPUBatchSize();
+	unsigned long maxGpuBatchSize;
 	bool useSharedMemoryForData;
 	bool useConstantMemoryForData;
 	int maxSharedPoints;
 	int availableSharedMemory;
+
+	// NVML
+	bool nvmlInitialized = false;
+	bool nvmlAvailable = false;
+	nvmlReturn_t result;
+	nvmlDevice_t gpuHandle;
+
+	float totalUtilization = 0;
+	unsigned long numOfSamples = 0;
+
+	nvmlSample_t *samples = new nvmlSample_t[1];
+	unsigned long numOfAllocatedSamples = 1;
+	unsigned long long lastSeenTimeStamp = 0;
+	nvmlValueType_t sampleValType;
+
+	// CPU usage
+	float startUptime = -1, startIdleTime = -1;
+	float endUptime, endIdleTime;
 
 	/*******************************************************************
 	************************* Initialization ***************************
 	********************************************************************/
 	// Initialize device
 	if (cti.id > -1) {
+		// Initialize NVML to monitor the GPU
+		nvmlAvailable = false;
+		result = nvmlInit();
+		if (result == NVML_SUCCESS){
+			nvmlInitialized = true;
+
+			result = nvmlDeviceGetHandleByIndex(cti.id, &gpuHandle);
+			if(result == NVML_SUCCESS){
+				nvmlAvailable = true;
+			}else{
+				printf("[%d] [E] Failed to get device handle for gpu %d: %s\n", rank, cti.id, nvmlErrorString(result));
+			}
+		} else {
+			printf("[%d] [E] Failed to initialize NVML: %s\n", rank, nvmlErrorString(result));
+			nvmlAvailable = false;
+		}
+
+		if(nvmlAvailable){
+			// Get the device's name for later
+			result = nvmlDeviceGetName(gpuHandle, cti.name, NVML_DEVICE_NAME_BUFFER_SIZE);
+
+			// Get samples to save the current timestamp
+			unsigned int temp = 1;
+			// Read them one by one to avoid allocating memory for the whole buffer
+			while((result = nvmlDeviceGetSamples(gpuHandle, NVML_GPU_UTILIZATION_SAMPLES, lastSeenTimeStamp, &sampleValType, &temp, samples)) == NVML_SUCCESS && temp > 0){
+				lastSeenTimeStamp = samples[temp-1].timeStamp;
+			}
+
+			if (result != NVML_SUCCESS && result != NVML_ERROR_NOT_FOUND) {
+				printf("[%d] [E] Failed to get initial utilization samples for device: %s\n", rank, nvmlErrorString(result));
+				nvmlAvailable = false;
+			}
+		}
+
 		// Select gpu[id]
 		cudaSetDevice(cti.id);
+
+        // Calculate the max batch size for the device
+        maxGpuBatchSize = getMaxGPUBytesForGpu(cti.id);
+        if(parameters->resultSaveType == SAVE_TYPE_ALL)
+            maxGpuBatchSize /= sizeof(RESULT_TYPE);
+        else
+            maxGpuBatchSize /= parameters->D * sizeof(DATA_TYPE);
 
 		// Get device's properties for shared memory
 		cudaGetDeviceProperties(&deviceProp, cti.id);
@@ -226,7 +323,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		// Allocate memory on device
 		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));	cce();
 		cudaMalloc(&deviceListIndexPtr, sizeof(int));							cce();
-		// If we have data but can't fit it in constant memory, allocate global memory
+		// If we have static model data but won't use constant memory, allocate global memory for it
 		if(parameters->dataSize > 0 && !useConstantMemoryForData){
 			cudaMalloc(&deviceDataPtr, parameters->dataSize);					cce();
 		}
@@ -272,6 +369,9 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 				cce();
 			}
 		}
+	} else {
+		strcpy(cti.name, "CPU");
+		getCpuStats(&startUptime, &startIdleTime);
 	}
 
 
@@ -292,7 +392,10 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 			printf("[%d] ComputeThread %d: Ready\n", rank, cti.id);
 		#endif
 
+        idleStopwatch.start();
 		sem_wait(&cti.semStart);
+        idleStopwatch.stop();
+        cti.idleTime += idleStopwatch.getMsec();
 
 		#ifdef DBG_TIME
 			sw.stop();
@@ -326,7 +429,10 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 				sw.start();
 			#endif
 
+            idleStopwatch.start();
 			sem_wait(&tcd->semSync);
+            idleStopwatch.stop();
+            cti.idleTime += idleStopwatch.getMsec();
 
 			// Get the current global batch start point as our starting point
 			localStartPoint = tcd->globalBatchStart;
@@ -380,14 +486,14 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 			 If batchSize was increased, allocate more memory for the results
 			******************************************************************/
 			// TODO: Move this to initialization and allocate as much memory as possible
-			if (allocatedElements < localNumOfElements && cti.id > -1 && allocatedElements < defaultGPUBatchSize) {
+			if (allocatedElements < localNumOfElements && cti.id > -1 && allocatedElements < maxGpuBatchSize) {
 
 				#ifdef DBG_MEMORY
 					printf("[%d] ComputeThread %d: Allocating more GPU memory (%lu", rank, cti.id, allocatedElements);
 					fflush(stdout);
 				#endif
 
-				allocatedElements = min(localNumOfElements, defaultGPUBatchSize);
+				allocatedElements = min(localNumOfElements, maxGpuBatchSize);
 
 				#ifdef DBG_MEMORY
 					printf(" -> %lu elements, %lu MB)\n", allocatedElements, (allocatedElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
@@ -495,6 +601,33 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 					cudaMemcpy(&((DATA_TYPE*)localResults)[globalListIndexOld], deviceResults, gpuListIndex * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
 				}
 
+				if(nvmlAvailable){
+					unsigned int tmpSamples;
+
+					// Get number of available samples
+					result = nvmlDeviceGetSamples(gpuHandle, NVML_GPU_UTILIZATION_SAMPLES, lastSeenTimeStamp, &sampleValType, &tmpSamples, NULL);
+					if (result != NVML_SUCCESS && result != NVML_ERROR_NOT_FOUND) {
+						printf("[%d] [E1] Failed to get utilization samples for device: %s\n", rank, nvmlErrorString(result));
+					}else if(result == NVML_SUCCESS){
+
+						// Make sure we have enough allocated memory for the new samples
+						if(tmpSamples > numOfAllocatedSamples){
+							delete[] samples;
+							samples = new nvmlSample_t[tmpSamples];
+						}
+
+						result = nvmlDeviceGetSamples(gpuHandle, NVML_GPU_UTILIZATION_SAMPLES, lastSeenTimeStamp, &sampleValType, &tmpSamples, samples);
+						if (result == NVML_SUCCESS) {
+							numOfSamples += tmpSamples;
+							for(int i=0; i<tmpSamples; i++){
+								totalUtilization += samples[i].sampleValue.uiVal;
+							}
+						}else if(result != NVML_ERROR_NOT_FOUND){
+							printf("[%d] [E2] Failed to get utilization samples for device: %s\n", rank, nvmlErrorString(result));
+						}
+					}
+
+				}
 
 			} else {
 
@@ -556,6 +689,15 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		printf("[%d] ComputeThread %d: Finalizing and exiting...\n", rank, cti.id);
 	#endif
 
+	if(cti.id >= 0 && nvmlAvailable)
+		cti.averageUtilization = numOfSamples > 0 ? totalUtilization/numOfSamples : 0;
+
+	if(cti.id == -1 && startUptime > 0 && startIdleTime > 0){
+		if(getCpuStats(&endUptime, &endIdleTime) == 0){
+			cti.averageUtilization = 100 - 100 * (endIdleTime - startIdleTime) / (endUptime - startUptime);
+		}
+	}
+
 	/*******************************************************************
 	 *************************** Finalize ******************************
 	 *******************************************************************/
@@ -571,6 +713,13 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		cudaFree(deviceResults);			cce();
 		cudaFree(deviceListIndexPtr);		cce();
 		cudaFree(deviceDataPtr);			cce();
+
+		delete[] samples;
+		if(nvmlInitialized){
+			result = nvmlShutdown();
+		    if (result != NVML_SUCCESS)
+		        printf("[%d] [E] Failed to shutdown NVML: %s\n", rank, nvmlErrorString(result));
+		}
 	}
 }
 

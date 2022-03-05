@@ -3,10 +3,12 @@
 
 #include <cuda_runtime.h>
 #include <cuda.h>
+#include <nvml.h>
 #include <limits.h>
 #include <mpi.h>
 #include <semaphore.h>
 #include <string>
+#include <sys/sysinfo.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -69,9 +71,10 @@ public:
     float getMsec();
 };
 
-unsigned long getDefaultCPUBatchSize();
-unsigned long getDefaultGPUBatchSize();
-void asd();
+unsigned long getMaxCPUBytes();
+unsigned long getMaxGPUBytes();
+unsigned long getMaxGPUBytesForGpu(int id);
+int getCpuStats(float* uptime, float* idleTime);
 
 // MPI_Recv without busy wait
 void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status* status);
@@ -163,10 +166,6 @@ struct ThreadCommonData {
 struct ComputeThreadInfo{
     int id;
 
-    // unsigned long numOfElements;
-    // unsigned long startPoint;
-    // unsigned long resultsOffset;
-
     unsigned long batchSize;
     unsigned long elementsCalculated;
     sem_t semStart;
@@ -174,6 +173,11 @@ struct ComputeThreadInfo{
     Stopwatch stopwatch;
     float ratio;
     float totalRatio;
+
+    char name[NVML_DEVICE_NAME_BUFFER_SIZE];
+    float averageUtilization = -1;
+    float idleTime = 0;
+    Stopwatch masterStopwatch;
 };
 
 #endif

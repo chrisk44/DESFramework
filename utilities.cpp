@@ -2,30 +2,56 @@
 
 using namespace std;
 
-unsigned long getDefaultCPUBatchSize(){
+unsigned long getMaxCPUBytes(){
     long pages = sysconf(_SC_PHYS_PAGES);
     long page_size = sysconf(_SC_PAGE_SIZE);
-    return (pages * page_size)/(4*sizeof(RESULT_TYPE));
+    return (pages * page_size)/4;
 }
-unsigned long getDefaultGPUBatchSize(){
-    size_t freeMem, totalMem;				// Bytes of free,total memory on GPU
+unsigned long getMaxGPUBytes(){
     int gpus;
-    int minBatchSize = INT_MAX;
+    unsigned long minBytes = ULONG_MAX;
 
     // Get GPUs count
     cudaGetDeviceCount(&gpus);
 
     for(int i=0; i<gpus; i++){
-        // Select GPU i
-        cudaSetDevice(i);
-
-        // Read device's memory info
-        cudaMemGetInfo(&freeMem, &totalMem);
-
-        // Calculate and keep the minimum batch size
-        minBatchSize = min(minBatchSize, (int) ((freeMem - MEM_GPU_SPARE_BYTES) / sizeof(RESULT_TYPE)));
+        // Calculate and keep the minimum bytes
+        minBytes = min(minBytes, getMaxGPUBytesForGpu(i));
     }
-    return minBatchSize;
+
+    return minBytes;
+}
+
+unsigned long getMaxGPUBytesForGpu(int id){
+    size_t freeMem, totalMem;				// Bytes of free,total memory on GPU
+
+    cudaSetDevice(id);
+    cudaMemGetInfo(&freeMem, &totalMem);
+
+    return (unsigned long) (freeMem - MEM_GPU_SPARE_BYTES);
+}
+
+int getCpuStats(float* uptime, float* idleTime){
+    FILE *fp;
+
+    fp = fopen ("/proc/uptime", "r");
+    if (fp != NULL){
+        float localUptime;
+        float localIdleTime;
+
+        if(fscanf(fp, "%f %f", &localUptime, &localIdleTime) == 2){
+            *uptime = localUptime;
+            *idleTime = localIdleTime / get_nprocs_conf();
+
+            fclose (fp);
+            return 0;
+        } else {
+            fclose (fp);
+            return -2;
+        }
+    } else {
+        return -1;
+    }
 }
 
 void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status* status){

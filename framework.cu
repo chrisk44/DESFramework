@@ -150,7 +150,7 @@ void ParallelFramework::masterProcess() {
 
 	void* tmpResultsMem;
 	if(parameters->overrideMemoryRestrictions){
-		tmpResultsMem = malloc(getDefaultCPUBatchSize() * sizeof(DATA_TYPE));
+		tmpResultsMem = malloc(getMaxCPUBytes());
 	}else{
 		tmpResultsMem = malloc(parameters->resultSaveType == SAVE_TYPE_ALL ? parameters->batchSize * sizeof(RESULT_TYPE) : parameters->batchSize * parameters->D * sizeof(DATA_TYPE));
 	}
@@ -215,8 +215,9 @@ void ParallelFramework::masterProcess() {
 					pinfo.work.startPoint = totalSent;
 					pinfo.work.numOfElements = min(min((unsigned long) (pinfo.ratio * parameters->batchSize), (unsigned long) pinfo.maxBatchSize), totalElements-totalSent);
 
-					//printf("pinfo.ratio = %f, paramters->batchSize = %ld, pinfo.maxBatchSize = %ld, totalElements = %ld, totalSent = %ld, product = %lu\n",
-					//pinfo.ratio, parameters->batchSize, pinfo.maxBatchSize, totalElements, totalSent, (unsigned long) (pinfo.ratio * parameters->batchSize));
+					// printf("pinfo.ratio = %f, paramters->batchSize = %lu, pinfo.maxBatchSize = %lu, totalElements = %lu, totalSent = %lu, product = %lu\n",
+					// 		pinfo.ratio, parameters->batchSize, pinfo.maxBatchSize, totalElements, totalSent, (unsigned long) (pinfo.ratio * parameters->batchSize));
+
 					totalSent += pinfo.work.numOfElements;
 				}
 
@@ -388,6 +389,17 @@ void ParallelFramework::masterProcess() {
 
 	free(tmpResultsMem);
 	delete[] slaveProcessInfo;
+
+	// Synchronize with the rest of the processes
+	#ifdef DBG_START_STOP
+		printf("[%d] Waiting in barrier...\n", rank);
+	#endif
+	// MPI_Barrier(MPI_COMM_WORLD);
+	int a = 0;
+	MPI_Bcast(&a, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	#ifdef DBG_START_STOP
+		printf("[%d] Passed the barrier...\n", rank);
+	#endif
 }
 
 void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonData* tcd, int numOfThreads){
@@ -399,6 +411,11 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 	RESULT_TYPE* localResults = nullptr;
 	MPI_Status status;
 	int numOfRatioAdjustments = 0;
+	unsigned long maxCpuElements = getMaxCPUBytes();
+	if(parameters->resultSaveType == SAVE_TYPE_ALL)
+		maxCpuElements /= sizeof(RESULT_TYPE);
+	else
+		maxCpuElements /= parameters->D * sizeof(DATA_TYPE);
 
 	#ifdef DBG_TIME
 		Stopwatch sw;
@@ -409,17 +426,28 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 		maxBatchSize = parameters->batchSize;
 	}else{
 		if(parameters->processingType == PROCESSING_TYPE_CPU)
-			maxBatchSize = getDefaultCPUBatchSize();
+			maxBatchSize = getMaxCPUBytes();
 		else if(parameters->processingType == PROCESSING_TYPE_GPU)
-			maxBatchSize = getDefaultGPUBatchSize();
+			maxBatchSize = getMaxGPUBytes();
 		else
-			maxBatchSize = min(getDefaultCPUBatchSize(), getDefaultGPUBatchSize());
+			maxBatchSize = min(getMaxCPUBytes(), getMaxGPUBytes());
 
+		// maxBatchSize contains the value in bytes, so divide it according to resultSaveType to convert it to actual batch size
+		if(parameters->resultSaveType == SAVE_TYPE_ALL)
+            maxBatchSize /= sizeof(RESULT_TYPE);
+        else
+            maxBatchSize /= parameters->D * sizeof(DATA_TYPE);
+
+		// Limit the batch size by the user-given value
 		maxBatchSize = min((unsigned long)parameters->batchSize, (unsigned long)maxBatchSize);
 
-		if(maxBatchSize*parameters->D > INT_MAX && parameters->resultSaveType == SAVE_TYPE_LIST){
+		// If we are saving a list, the max number of elements we might want to send is maxBatchSize * D, so limit the batch size
+		// so that the max number of elements is INT_MAX
+		if(parameters->resultSaveType == SAVE_TYPE_LIST && (unsigned long) (maxBatchSize*parameters->D) > (unsigned long) INT_MAX){
 			maxBatchSize = (INT_MAX - parameters->D) / parameters->D;
-		}else if(maxBatchSize > INT_MAX && parameters->resultSaveType == SAVE_TYPE_ALL){
+		}
+		// If we are saving all of the results, the max number of elements is maxBatchSize itself, so limit it to INT_MAX
+		else if(parameters->resultSaveType == SAVE_TYPE_ALL && (unsigned long) maxBatchSize > (unsigned long) INT_MAX){
 			maxBatchSize = INT_MAX;
 		}
 	}
@@ -456,12 +484,12 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 			break;
 
 		// Make sure we have enough allocated memory for localResults
-		if(work.numOfElements > allocatedElements && allocatedElements < getDefaultCPUBatchSize()){
+		if(work.numOfElements > allocatedElements && allocatedElements < maxCpuElements){
 			#ifdef DBG_MEMORY
 				printf("[%d] Coordinator: Allocating more memory for localResults: %lu (0x%x) -> ", rank, allocatedElements, localResults);
 			#endif
 
-			allocatedElements = min(work.numOfElements, getDefaultCPUBatchSize());
+			allocatedElements = min(work.numOfElements, maxCpuElements);
 			localResults = (RESULT_TYPE*) realloc(localResults, allocatedElements * sizeof(RESULT_TYPE));
 			if(localResults == nullptr){
 				fatal("Can't allocate memory for localResults");
@@ -490,11 +518,10 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 		unsigned long total = 0;
 		for(int i=0; i<numOfThreads; i++){
 			if(parameters->slaveDynamicScheduling)
-				cti[i].batchSize = cti[i].ratio * min(
-					parameters->slaveBatchSize, work.numOfElements
-				);
+				cti[i].batchSize = max((unsigned long) 1, (unsigned long) (cti[i].ratio * min(
+					parameters->slaveBatchSize, work.numOfElements)));
 			else{
-				cti[i].batchSize = cti[i].ratio * work.numOfElements;
+				cti[i].batchSize = max((unsigned long) 1, (unsigned long) (cti[i].ratio * work.numOfElements));
 				total += cti[i].batchSize;
 			}
 		}
