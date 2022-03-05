@@ -49,10 +49,12 @@ bool threadBalancing          = true;
 bool slaveBalancing           = true;
 bool slaveDynamicScheduling   = true;
 bool cpuDynamicScheduling     = true;
-bool threadBalancingAverage   = true;
+bool threadBalancingAverage   = false;
 
 unsigned long batchSize           = UINT_MAX;
+float batchSizeFactor             = -1;
 unsigned long slaveBatchSize      = UINT_MAX;  // 1e+07
+float slaveBatchSizeFactor        = -1;
 unsigned long computeBatchSize    = 20;
 unsigned long cpuComputeBatchSize = 1e+04;
 
@@ -71,6 +73,33 @@ unsigned long getOrDefault(int argc, char** argv, bool* found, int* i, const cha
         // If it has an argument and we have it...
         if(hasArgument && (*i + 1) < argc){
             defaultValue = atoi(argv[*i+1]);
+            *i += 2;
+        }
+        // else if it doesn't have a second argument, so just mark it as 'found'
+        else if(!hasArgument){
+            defaultValue = 1;
+            *i += 1;
+        }
+        // else if it has an argument and we don't have it
+        else{
+            fprintf(stderr, "[E] %s requires an additional argument\n", argName);
+            exit(ERR_INVALID_ARG);
+        }
+
+        *found = true;
+    }
+
+    return defaultValue;
+}
+
+float getOrDefaultF(int argc, char** argv, bool* found, int* i, const char* argName, const char* argNameShort, bool hasArgument, float defaultValue){
+    if(*i >= argc)
+        return defaultValue;
+
+    if(strcmp(argv[*i], argName) == 0 || strcmp(argv[*i], argNameShort) == 0){
+        // If it has an argument and we have it...
+        if(hasArgument && (*i + 1) < argc){
+            defaultValue = atof(argv[*i+1]);
             *i += 2;
         }
         // else if it doesn't have a second argument, so just mark it as 'found'
@@ -121,7 +150,9 @@ void printHelp(){
         "\n"
         "Element assignment (can be defined separately for each slave, except for --batch-size which is used only by the master process):\n"
         "--batch-size               -bs             The maximum number of elements for each assignment from the master node to a slave, and the multiplier of HPLS ratios.\n"
+        "--batch-size-factor        -bsf            The maximum number of elements for each assignment from the master node to a slave, and the multiplier of HPLS ratios (multiplier for total elements of grid).\n"
         "--slave-batch-size         -sbs            The maximum number of elements that a slave can assign to a compute thread at a time, and the multiplier of HPLS ratios.\n"
+        "--slave-batch-size-factor  -sbsf           The maximum number of elements that a slave can assign to a compute thread at a time, and the multiplier of HPLS ratios (multiplier for total elements of grid).\n"
         "--compute-batch-size       -cbs            The number of elements that each GPU thread will compute.\n"
         "--cpu-compute-batch-size   -ccbs           The batch size for CPU dynamic scheduling.\n"
         "\n"
@@ -152,10 +183,12 @@ void parseArgs(int argc, char** argv){
         endGrid    = getOrDefault(argc, argv, &found, &i, "--grid-end",    "-ge", true, endGrid);
         onlyOne    = getOrDefault(argc, argv, &found, &i, "--only-one",    "-oo", false, onlyOne ? 1 : 0) == 1 ? true : false;
 
-        batchSize           = getOrDefault(argc, argv, &found, &i, "--batch-size",  "-bs", true, batchSize);
-        slaveBatchSize      = getOrDefault(argc, argv, &found, &i, "--slave-batch-size",  "-sbs", true, slaveBatchSize);
-        computeBatchSize    = getOrDefault(argc, argv, &found, &i, "--compute-batch-size",  "-cbs", true, computeBatchSize);
-        cpuComputeBatchSize = getOrDefault(argc, argv, &found, &i, "--cpu-compute-batch-size",  "-ccbs", true, cpuComputeBatchSize);
+        batchSize            = getOrDefault(argc, argv, &found, &i, "--batch-size",  "-bs", true, batchSize);
+        batchSizeFactor      = getOrDefaultF(argc, argv, &found, &i, "--batch-size-factor", "-bsf", true, batchSizeFactor);
+        slaveBatchSize       = getOrDefault(argc, argv, &found, &i, "--slave-batch-size",  "-sbs", true, slaveBatchSize);
+        slaveBatchSizeFactor = getOrDefaultF(argc, argv, &found, &i, "--slave-batch-size-factor",  "-sbsf", true, slaveBatchSizeFactor);
+        computeBatchSize     = getOrDefault(argc, argv, &found, &i, "--compute-batch-size",  "-cbs", true, computeBatchSize);
+        cpuComputeBatchSize  = getOrDefault(argc, argv, &found, &i, "--cpu-compute-batch-size",  "-ccbs", true, cpuComputeBatchSize);
 
         threadBalancing        = getOrDefault(argc, argv, &found, &i, "--thread-balancing", "-tb", true, threadBalancing ? 1 : 0) == 1 ? true : false;
         slaveBalancing         = getOrDefault(argc, argv, &found, &i, "--slave-balancing", "-sb", true, slaveBalancing ? 1 : 0) == 1 ? true : false;
@@ -341,8 +374,8 @@ int main(int argc, char** argv){
             parameters.cpuDynamicScheduling     = cpuDynamicScheduling;
             parameters.threadBalancingAverage   = threadBalancingAverage;
 
-            parameters.batchSize                = batchSize;
-            parameters.slaveBatchSize           = slaveBatchSize;
+            parameters.batchSize                = batchSizeFactor > 0 ? totalElements * batchSizeFactor : batchSize;
+            parameters.slaveBatchSize           = slaveBatchSizeFactor > 0 ? totalElements * slaveBatchSizeFactor : slaveBatchSize;
             parameters.computeBatchSize         = computeBatchSize;
             parameters.cpuComputeBatchSize      = cpuComputeBatchSize;
 
