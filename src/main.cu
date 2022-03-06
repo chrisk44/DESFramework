@@ -85,7 +85,7 @@ T getOrDefault(int argc, char** argv, bool* found, int* i, const char* argName, 
         }
         // else if it doesn't have a second argument, so just mark it as 'found'
         else if(!hasArgument){
-            defaultValue = {};
+            defaultValue = {1};
             *i += 1;
         }
         // else if it has an argument and we don't have it
@@ -185,9 +185,9 @@ void parseArgs(int argc, char** argv){
         slowStartBase = getOrDefault(argc, argv, &found, &i, "--slow-start-base",  "-ssb", true, slowStartBase);
         minMsForRatioAdjustment = getOrDefault(argc, argv, &found, &i, "--min-ms-ratio",  "-mmr", true, minMsForRatioAdjustment);
 
-        if (getOrDefault(argc, argv, &found, &i, "--cpu", "-cpu", false, 0) == 1) processingType = PROCESSING_TYPE_CPU;
-        if (getOrDefault(argc, argv, &found, &i, "--gpu", "-gpu", false, 0) == 1) processingType = PROCESSING_TYPE_GPU;
-        if (getOrDefault(argc, argv, &found, &i, "--both", "-both", false, 0) == 1) processingType = PROCESSING_TYPE_BOTH;
+        if (getOrDefault(argc, argv, &found, &i, "--cpu", "-cpu", false, false) == 1) processingType = PROCESSING_TYPE_CPU;
+        if (getOrDefault(argc, argv, &found, &i, "--gpu", "-gpu", false, false) == 1) processingType = PROCESSING_TYPE_GPU;
+        if (getOrDefault(argc, argv, &found, &i, "--both", "-both", false, false) == 1) processingType = PROCESSING_TYPE_BOTH;
 
         if (getOrDefault(argc, argv, &found, &i, "--help", "-help", false, 0) == 1){
             printHelp();
@@ -389,10 +389,10 @@ int main(int argc, char** argv){
                 // Start the computation
                 sw.start();
                 switch(m){
-                    case 0: framework.run<validate_cpuM1, validate_gpuM1, toBool_cpu, toBool_gpu>(); break;
-                    case 1: framework.run<validate_cpuM2, validate_gpuM2, toBool_cpu, toBool_gpu>(); break;
-                    case 2: framework.run<validate_cpuO1, validate_gpuO1, toBool_cpu, toBool_gpu>(); break;
-                    case 3: framework.run<validate_cpuO2, validate_gpuO2, toBool_cpu, toBool_gpu>(); break;
+                    case 0: result = framework.run<validate_cpuM1, validate_gpuM1, toBool_cpu, toBool_gpu>(); break;
+                    case 1: result = framework.run<validate_cpuM2, validate_gpuM2, toBool_cpu, toBool_gpu>(); break;
+                    case 2: result = framework.run<validate_cpuO1, validate_gpuO1, toBool_cpu, toBool_gpu>(); break;
+                    case 3: result = framework.run<validate_cpuO2, validate_gpuO2, toBool_cpu, toBool_gpu>(); break;
                 }
                 sw.stop();
                 if (result != 0) {
