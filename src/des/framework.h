@@ -5,7 +5,6 @@
 
 #include <cmath>
 #include <iostream>
-#include <mpi.h>
 #include <omp.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -61,5 +60,14 @@ private:
 
     void slaveProcess(validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu);
     void computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd, validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu);
+
+    int getNumOfProcesses() const;
+    int receiveRequest(int& source) const;
+    unsigned long receiveMaxBatchSize(int mpiSource) const;
+    void sendBatchSize(const AssignedWork& work, int mpiSource) const;
+
+    void receiveAllResults(RESULT_TYPE* dst, size_t count, int mpiSource) const;
+    int receiveListResults(DATA_TYPE* dst, size_t maxCount, int mpiSource) const;
+    void syncWithSlaves() const;
 };
 

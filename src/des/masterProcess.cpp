@@ -3,18 +3,14 @@
 #include <cstring>
 
 void ParallelFramework::masterProcess() {
-	MPI_Status status;
-	int mpiSource;
 	int finished = 0;
-	int numOfProcesses;
 	float totalScore;
 	int t, eta;
-	MPI_Comm_size(MPI_COMM_WORLD, &numOfProcesses);
+    int numOfProcesses = getNumOfProcesses();
 	int numOfSlaves = numOfProcesses - 1;
 	Stopwatch masterStopwatch;
 
     SlaveProcessInfo slaveProcessInfo[numOfSlaves];
-	#define pinfo (slaveProcessInfo[mpiSource-1])
 
 	void* tmpResultsMem;
     if(parameters.overrideMemoryRestrictions){
@@ -28,7 +24,7 @@ void ParallelFramework::masterProcess() {
 	}
 	RESULT_TYPE* tmpResults = (RESULT_TYPE*) tmpResultsMem;
 	DATA_TYPE* tmpResultsList = (DATA_TYPE*) tmpResultsMem;
-	int tmpNumOfPoints;	// This need to be int because of MPI
+    int tmpNumOfPoints;
 
 	#ifdef DBG_TIME
 		Stopwatch sw;
@@ -52,20 +48,22 @@ void ParallelFramework::masterProcess() {
 		#endif
 		fflush(stdout);
 
-		MMPI_Recv(nullptr, 0, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-		mpiSource = status.MPI_SOURCE;
+        int mpiSource;
+        int request = receiveRequest(mpiSource);
+
+        SlaveProcessInfo& pinfo = slaveProcessInfo[mpiSource-1];
 
 		#ifdef DBG_MPI_STEPS
 			printf("[%d] Master: Received %d from %d\n", rank, status.MPI_TAG, mpiSource);
 		#endif
 
-		switch(status.MPI_TAG){
+        switch(request){
 			case TAG_READY:
 				#ifdef DBG_TIME
 					sw.start();
 				#endif
 				// Receive the maximum batch size reported by the slave process
-				MMPI_Recv(&pinfo.maxBatchSize, 1, MPI_UNSIGNED_LONG, mpiSource, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD, &status);
+                pinfo.maxBatchSize = receiveMaxBatchSize(mpiSource);
 
 				// For the first batches, use low batch size so the process can optimize its computeThread scores early
                 if(pinfo.jobsCompleted < parameters.slowStartLimit){
@@ -97,7 +95,7 @@ void ParallelFramework::masterProcess() {
 				#endif
 
 				// Send the batch to the slave process
-				MPI_Send(&pinfo.work, 2, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, MPI_COMM_WORLD);
+                sendBatchSize(pinfo.work, mpiSource);
 
 				// Start stopwatch for process
 				pinfo.stopwatch.start();
@@ -116,15 +114,9 @@ void ParallelFramework::masterProcess() {
 
 				// Receive the results
                 if(parameters.resultSaveType == SAVE_TYPE_ALL){
-					MMPI_Recv(tmpResults, pinfo.work.numOfElements, RESULT_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
+                    receiveAllResults(tmpResults, pinfo.work.numOfElements, mpiSource);
 				}else{
-                    MMPI_Recv(tmpResultsList, parameters.overrideMemoryRestrictions ? INT_MAX : pinfo.work.numOfElements * parameters.D, DATA_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
-
-					// Find the number of points in list
-					MPI_Get_count(&status, DATA_MPI_TYPE, &tmpNumOfPoints);
-
-					// MPI_Get_count returned the count of DATA_TYPE elements received, so divide with D to get the count of points
-                    tmpNumOfPoints /= parameters.D;
+                    tmpNumOfPoints = receiveListResults(tmpResultsList, pinfo.work.numOfElements, mpiSource);
 				}
 
 				this->totalReceived += pinfo.work.numOfElements;
@@ -261,9 +253,7 @@ void ParallelFramework::masterProcess() {
 	#ifdef DBG_START_STOP
 		printf("[%d] Waiting in barrier...\n", rank);
 	#endif
-	// MPI_Barrier(MPI_COMM_WORLD);
-	int a = 0;
-	MPI_Bcast(&a, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    syncWithSlaves();
 	#ifdef DBG_START_STOP
 		printf("[%d] Passed the barrier...\n", rank);
 	#endif

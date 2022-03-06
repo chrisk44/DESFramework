@@ -14,6 +14,7 @@ add_library(${MODULE_NAME} framework.cpp
                            coordinatorThread.cpp
                            masterProcess.cpp
                            slaveProcess.cpp
+                           messaging.cpp
                            kernels.cu
                            kernels.h
                            utilities.cpp
