@@ -1,5 +1,7 @@
 #include "framework.h"
 
+#include <cstring>
+
 void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd, validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu){
     int gpuListIndex, globalListIndexOld;
     RESULT_TYPE* localResults;
@@ -254,7 +256,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
             if(localStartPoint > tcd->globalLast)
                 break;
 
-            localLast = min(localStartPoint + cti.batchSize - 1 , tcd->globalLast);
+            localLast = std::min(localStartPoint + cti.batchSize - 1 , tcd->globalLast);
             localNumOfElements = localLast - localStartPoint + 1;
 
             if(parameters.resultSaveType == SAVE_TYPE_LIST)
@@ -293,7 +295,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
                     fflush(stdout);
                 #endif
 
-                allocatedElements = min(localNumOfElements, maxGpuBatchSize);
+                allocatedElements = std::min(localNumOfElements, maxGpuBatchSize);
 
                 #ifdef DBG_MEMORY
                     printf(" -> %lu elements, %lu MB)\n", allocatedElements, (allocatedElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
@@ -341,14 +343,14 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
                     if(i == parameters.gpuStreams - 1){
                         elementsPerStream = localNumOfElements - skip;
                     }else{
-                        elementsPerStream = min(elementsPerStream, localNumOfElements - skip);
+                        elementsPerStream = std::min(elementsPerStream, localNumOfElements - skip);
                     }
 
                     // Queue the kernel in stream[i] (each GPU thread gets COMPUTE_BATCH_SIZE elements to calculate)
                     int gpuThreads = (elementsPerStream + parameters.computeBatchSize - 1) / parameters.computeBatchSize;
 
                     // Minimum of (minimum of user-defined block size and number of threads to go to this stream) and number of points that can fit in shared memory
-                    int blockSize = min(min(parameters.blockSize, gpuThreads), maxSharedPoints);
+                    int blockSize = std::min(std::min(parameters.blockSize, gpuThreads), maxSharedPoints);
                     int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
 
                     #ifdef DBG_QUEUE
