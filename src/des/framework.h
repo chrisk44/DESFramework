@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #include "utilities.h"
-#include "kernels.h"
+#include "kernels.cu"
 
 using namespace std;
 

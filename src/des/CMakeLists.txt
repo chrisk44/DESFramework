@@ -10,7 +10,7 @@ set(MODULE_NAME DES)
 
 add_library(${MODULE_NAME} framework.cu
                            framework.h
-                           kernels.h
+                           kernels.cu
                            utilities.cpp
                            utilities.h)
 
@@ -25,3 +25,4 @@ target_compile_options(${MODULE_NAME} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:
                        --relocatable-device-code=true
                        >)
 
+set_property(TARGET ${MODULE_NAME} PROPERTY CUDA_SEPARABLE_COMPILATION ON)

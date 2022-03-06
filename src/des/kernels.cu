@@ -1,5 +1,3 @@
-#pragma once
-
 #include <cuda.h>
 #include <omp.h>
 #include <cuda_runtime.h>
@@ -8,17 +6,17 @@
 
 using namespace std;
 
-#define MAX_CONSTANT_MEMORY (65536 - 24)			// Don't know why...
-__device__ __constant__ char constantMemoryPtr[MAX_CONSTANT_MEMORY];
+#define MAX_CONSTANT_MEMORY 1024 //(65536 - 24)			// Don't know why...
+__device__ __constant__ static char constantMemoryPtr[MAX_CONSTANT_MEMORY];
 
 template<validationFunc_t validationFunc, toBool_t toBool>  // Because nvcc is WEIRD
-void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offset){
+static void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offset){
 	cudaMemcpyToSymbol(constantMemoryPtr, src, count, offset, cudaMemcpyHostToDevice);
 }
 
 // CUDA kernel to run the computation
 template<validationFunc_t validationFunc, toBool_t toBool>
-__global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPointLinearIndex,
+__global__ static void validate_kernel(RESULT_TYPE* results, unsigned long startingPointLinearIndex,
 	const unsigned int D, const unsigned long numOfElements, const unsigned long offset, void* dataPtr,
 	int dataSize, bool useSharedMemoryForData, bool useConstantMemoryForData, int* listIndexPtr,
 	const int computeBatchSize) {
@@ -127,7 +125,7 @@ __global__ void validate_kernel(RESULT_TYPE* results, unsigned long startingPoin
 
 // CPU kernel to run the computation
 template<validationFunc_t validationFunc, toBool_t toBool>
-void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
+static void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
 	unsigned long long* idxSteps, unsigned long startingPointLinearIndex, bool dynamicScheduling, int batchSize) {
 
 	unsigned long currentBatchStart = startingPointLinearIndex;

@@ -3,22 +3,19 @@
 #include <cuda_runtime.h>
 #include <cmath>
 
-namespace okada {
-
 #define EPS	(1.0E-7)
 /*
  * Isotropic Poisson's ratio
  */
 #define NU	(0.25)
 
-#ifndef TOPINV_PI
-#define TOPINV_PI
 #if defined(__CUDACC__)
-__device__ const float PI = (float)M_PI;
+__device__ static const float PI = (float)M_PI;
 #else
-const float PI = (float)M_PI;
+static const float PI = (float)M_PI;
 #endif
-#endif
+
+namespace okada {
 
 /******************************************************************************/
 

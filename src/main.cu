@@ -2,7 +2,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <mpi.h>
-//#include <cuda_runtime.h>
+#include <cuda_runtime.h>
 
 #include "des/framework.h"
 
