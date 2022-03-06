@@ -8,8 +8,12 @@ find_package(OpenMP REQUIRED)
 
 set(MODULE_NAME DES)
 
-add_library(${MODULE_NAME} framework.cu
+add_library(${MODULE_NAME} framework.cpp
                            framework.h
+                           computeThread.cu
+                           coordinatorThread.cpp
+                           masterProcess.cpp
+                           slaveProcess.cpp
                            kernels.cu
                            kernels.h
                            utilities.cpp

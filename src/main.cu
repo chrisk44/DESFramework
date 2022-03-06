@@ -339,7 +339,8 @@ int main(int argc, char** argv){
             gridfile.open(gridFilename, ios::in);
 
             // Read each dimension's grid information
-            Limit limits[dims];
+            std::vector<Limit> limits;
+            limits.resize(dims);
             unsigned long totalElements = 1;
             i = 0;
             while(gridfile >> low >> high >> step){
