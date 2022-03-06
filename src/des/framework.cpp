@@ -53,10 +53,9 @@ void ParallelFramework::init(const std::vector<Limit>& _limits, const ParallelFr
 		return;
 	}
 
-    idxSteps = new unsigned long long[parameters.D];
-	idxSteps[0] = 1;
+    idxSteps.push_back(1);
     for (i = 1; i < parameters.D; i++) {
-		idxSteps[i] = idxSteps[i - 1] * limits[i-1].N;
+        idxSteps.push_back(idxSteps[i - 1] * limits[i-1].N);
 	}
 
     for (i = 0; i < parameters.D; i++) {
@@ -69,7 +68,6 @@ void ParallelFramework::init(const std::vector<Limit>& _limits, const ParallelFr
 		}
 	#endif
 
-	listResultsSaved = 0;
 	totalReceived = 0;
 	totalSent = 0;
     totalElements = (unsigned long long)(idxSteps[parameters.D - 1]) * (unsigned long long)(limits[parameters.D - 1].N);
@@ -77,12 +75,12 @@ void ParallelFramework::init(const std::vector<Limit>& _limits, const ParallelFr
 	if(rank == 0){
         if(! (parameters.benchmark)){
             if(parameters.resultSaveType == SAVE_TYPE_ALL){
-                if(parameters.saveFile == nullptr){
+                if(parameters.saveFile.size()){
 					// No saveFile given, save everything in memory
 					finalResults = new RESULT_TYPE[totalElements];		// Uninitialized
 				}else{
 					// Open save file
-                    saveFile = open(parameters.saveFile, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+                    saveFile = open(parameters.saveFile.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 					if(saveFile == -1){
 						fatal("open failed");
 					}
@@ -113,9 +111,8 @@ void ParallelFramework::init(const std::vector<Limit>& _limits, const ParallelFr
 }
 
 ParallelFramework::~ParallelFramework() {
-	delete [] idxSteps;
 	if(rank == 0){
-        if(parameters.saveFile == nullptr){
+        if(parameters.saveFile.size() == 0){
 			delete [] finalResults;
 		}else{
 			// Unmap the save file
@@ -123,10 +120,6 @@ ParallelFramework::~ParallelFramework() {
 
 			// Close the file
 			close(saveFile);
-		}
-		if(listResults != NULL){
-			free(listResults);
-			listResultsSaved = 0;
 		}
 	}
 	valid = false;
@@ -185,22 +178,13 @@ RESULT_TYPE* ParallelFramework::getResults() {
 	return finalResults;
 }
 
-DATA_TYPE* ParallelFramework::getList(int* length){
-	if(rank != 0){
-		printf("Error: Results can only be fetched by the master process. Are you the master process?\n");
-		return nullptr;
-	}
+std::vector<std::vector<DATA_TYPE>> ParallelFramework::getList(){
+    if(rank != 0)
+        throw std::runtime_error("Error: Results can only be fetched by the master process. Are you the master process?\n");
 
     if(parameters.resultSaveType != SAVE_TYPE_LIST){
-		printf("Error: Can't get list results when resultSaveType is not SAVE_TYPE_LIST\n");
-		if(length != nullptr)
-			*length = -1;
-
-		return nullptr;
+        throw std::runtime_error("Error: Can't get list results when resultSaveType is not SAVE_TYPE_LIST\n");
 	}
-
-	if(length != nullptr)
-		*length = listResultsSaved;
 
 	return listResults;
 }

@@ -64,7 +64,9 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 
         if(nvmlAvailable){
             // Get the device's name for later
-            result = nvmlDeviceGetName(gpuHandle, cti.name, NVML_DEVICE_NAME_BUFFER_SIZE);
+            char gpuName[NVML_DEVICE_NAME_BUFFER_SIZE];
+            nvmlDeviceGetName(gpuHandle, gpuName, NVML_DEVICE_NAME_BUFFER_SIZE);
+            cti.name = gpuName;
 
             // Get samples to save the current timestamp
             unsigned int temp = 1;
@@ -148,7 +150,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
         cce();
 
         cudaMemcpyToSymbolWrapper(
-            idxSteps, parameters.D * sizeof(unsigned long long),
+            idxSteps.data(), parameters.D * sizeof(unsigned long long),
             parameters.D * sizeof(Limit));
         cce();
 
@@ -172,7 +174,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
             }
         }
     } else {
-        strcpy(cti.name, "CPU");
+        cti.name = "CPU";
         getCpuStats(&startUptime, &startIdleTime);
     }
 
@@ -441,7 +443,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
                 #endif
 
                 cpu_kernel(validation_cpu, toBool_cpu, localResults, limits.data(), parameters.D, localNumOfElements, parameters.dataPtr, parameters.resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
-                            idxSteps, localStartPoint, parameters.cpuDynamicScheduling, parameters.cpuComputeBatchSize);
+                            idxSteps.data(), localStartPoint, parameters.cpuDynamicScheduling, parameters.cpuComputeBatchSize);
 
             }
 

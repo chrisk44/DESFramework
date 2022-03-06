@@ -20,11 +20,10 @@ private:
     ParallelFrameworkParameters parameters;
 
 	// Runtime variables
-	unsigned long long* idxSteps = NULL;		// Index steps for each dimension
+    std::vector<unsigned long long> idxSteps;   // Index steps for each dimension
 	int saveFile = -1;							// File descriptor for save file
-	RESULT_TYPE* finalResults = NULL;			// An array of N0 * N1 * ... * N(D-1)
-	DATA_TYPE* listResults = NULL;				// An array of points for which the validation function has returned non-zero value
-	int listResultsSaved = 0;					// Number of points saved in listResults
+    RESULT_TYPE* finalResults = NULL;			// An array of N0 * N1 * ... * N(D-1) (this can't be a vector because we may want to map it to a file
+    std::vector<std::vector<DATA_TYPE>> listResults; // A list of points for which the validation function has returned non-zero value
 	bool valid = false;
 	unsigned long totalSent = 0;			// Total elements that have been sent for processing, also the index from which the next assigned batch will start
     unsigned long totalReceived = 0;		// Total elements that have been calculated and returned
@@ -46,7 +45,7 @@ public:
     int _run(validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu);
 
 	RESULT_TYPE* getResults();
-	DATA_TYPE* getList(int* length);
+    std::vector<std::vector<DATA_TYPE>> getList();
 	void getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst);
 	unsigned long getIndexFromIndices(unsigned long* pointIdx);
 	unsigned long getIndexFromPoint(DATA_TYPE* point);

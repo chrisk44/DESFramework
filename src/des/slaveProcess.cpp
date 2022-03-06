@@ -83,7 +83,7 @@ void ParallelFramework::slaveProcess(validationFunc_t validation_cpu, validation
                     computeThreadInfo[i].averageUtilization,
                     (computeThreadInfo[i].idleTime / masterTime) * 100,
                     computeThreadInfo[i].idleTime,
-                    computeThreadInfo[i].name[0] == '\0' ? "unnamed" : computeThreadInfo[i].name
+                    computeThreadInfo[i].name.size() == 0 ? "unnamed" : computeThreadInfo[i].name.c_str()
             );
         // }
     }

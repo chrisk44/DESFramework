@@ -110,7 +110,7 @@ struct ParallelFrameworkParameters {
     bool printProgress = true;
 	bool benchmark = false;
 
-    char* saveFile = nullptr;
+    std::string saveFile;
     void* dataPtr = nullptr;
     unsigned long dataSize = 0;
 
@@ -173,7 +173,7 @@ struct ComputeThreadInfo{
     float ratio;
     float totalRatio;
 
-    char name[NVML_DEVICE_NAME_BUFFER_SIZE];
+    std::string name;
     float averageUtilization = -1;
     float idleTime = 0;
     Stopwatch masterStopwatch;

@@ -224,13 +224,11 @@ int main(int argc, char** argv){
     ifstream dispfile, gridfile;
     ofstream outfile;
     string tmp;
-    int stations, dims, i, j, m, g, result, rank, commSize;
+    int stations, dims, result, rank, commSize;
     float x, y, z, de, dn, dv, se, sn, sv;
     float low, high, step;
 
     Stopwatch sw;
-    int length;
-    DATA_TYPE* list;
 
     float finalResults[4][6];
     for(int i=0; i<4; i++)
@@ -248,7 +246,7 @@ int main(int argc, char** argv){
     MPI_Comm_rank(MPI_COMM_WORLD, &commSize);
 
     // For each model...
-    for(m=startModel; m<=endModel; m++){
+    for(int m=startModel; m<=endModel; m++){
         if(isMaster) printf("[%d] Starting model %d/4...\n", rank, m+1);
         // Open displacements file
         displFilename = dataPath + modelNames[m] + "/displ.txt";
@@ -259,7 +257,7 @@ int main(int argc, char** argv){
         while(getline(dispfile, tmp)) stations++;
 
         if(stations < 1){
-            printf("[%d] [%s \\ %d] Got 0 displacements. Exiting.\n", rank, modelNames[m].c_str(), g);
+            printf("[%d] [%s \\ N/A] Got 0 displacements. Exiting.\n", rank, modelNames[m].c_str());
             exit(2);
         }
 
@@ -273,9 +271,9 @@ int main(int argc, char** argv){
 
         // Read each station's displacement data
         float *dispPtr = &modelDataPtr[1];
-        i = 0;
         if(m < 2){
             // Mogi models have x,y,z,...
+            int i = 0;
             while(dispfile >> x >> y >> z >> de >> dn >> dv >> se >> sn >> sv){
                 dispPtr[0*stations + i] = x;
                 dispPtr[1*stations + i] = y;
@@ -291,6 +289,7 @@ int main(int argc, char** argv){
             }
         }else{
             // Okada models have x,y,...
+            int i = 0;
             while(dispfile >> x >> y >> de >> dn >> dv >> se >> sn >> sv){
                 dispPtr[0*stations + i] = x;
                 dispPtr[1*stations + i] = y;
@@ -308,7 +307,7 @@ int main(int argc, char** argv){
         dispfile.close();
 
         // For each grid...
-        for(g=startGrid; g<=endGrid; g++){
+        for(int g=startGrid; g<=endGrid; g++){
             if(isMaster) printf("[%d] Starting grid %d/6\n", rank, g);
             if(m == 3 && g > 4)
                 continue;
@@ -329,13 +328,15 @@ int main(int argc, char** argv){
             std::vector<Limit> limits;
             limits.resize(dims);
             unsigned long totalElements = 1;
-            i = 0;
-            while(gridfile >> low >> high >> step){
-                // Create the limit (lower is inclusive, upper is exclusive)
-                high += step;
-                limits[i] = Limit{ low, high, (unsigned int) ((high-low)/step), step };
-                totalElements *= limits[i].N;
-                i++;
+            {
+                int i = 0;
+                while(gridfile >> low >> high >> step){
+                    // Create the limit (lower is inclusive, upper is exclusive)
+                    high += step;
+                    limits[i] = Limit{ low, high, (unsigned int) ((high-low)/step), step };
+                    totalElements *= limits[i].N;
+                    i++;
+                }
             }
 
             // Close the file
@@ -400,13 +401,13 @@ int main(int argc, char** argv){
                 }
 
                 if(isMaster){
-                    framework.getList(&length);
-                    if(length != numOfResults && numOfResults != -2){
+                    int size = framework.getList().size();
+                    if(size != numOfResults && numOfResults != -2){
                         printf("[%s \\ %d] Number of results from run %d don't match: %d -> %d.\n",
-                                        modelNames[m].c_str(), g, numOfRuns, numOfResults, length);
+                                        modelNames[m].c_str(), g, numOfRuns, numOfResults, size);
                     }
-                    numOfResults = length;
-                    // printf("[%s \\ %d] Run %d: %f ms, %d results\n", modelNames[m], g, numOfRuns, length, sw.getMsec());
+                    numOfResults = size;
+                    // printf("[%s \\ %d] Run %d: %f ms, %d results\n", modelNames[m], g, numOfRuns, size, sw.getMsec());
                 }
 
                 totalTime += sw.getMsec();
@@ -424,27 +425,27 @@ int main(int argc, char** argv){
                         // Open file to write results
                         outfile.open(outFilename, ios::out | ios::trunc);
 
-                        list = framework.getList(&length);
-                        printf("[%s \\ %d] Results: %d\n", modelNames[m].c_str(), g, length);
-                        for(i=0; i<min(length, 5); i++){
-                            printf("[%s \\ %d] (", modelNames[m].c_str(), g);
-                            for(j=0; j<parameters.D-1; j++)
-                                printf("%lf ", list[i*parameters.D + j]);
+                        auto list = framework.getList();
+                        printf("[%s \\ %d] Results: %lu\n", modelNames[m].c_str(), g, list.size());
+                        for(int i=0; i<std::min((int) list.size(), 5); i++){
+                            printf("[%s \\ %d] ( ", modelNames[m].c_str(), g);
+                            for(auto v : list[i])
+                                printf("%lf ", v);
 
-                            printf("%lf)\n", list[i*parameters.D + j]);
+                            printf(")\n");
                         }
-                        if(length > 5)
-                            printf("[%s \\ %d] ...%d more results\n", modelNames[m].c_str(), g, length-5);
+                        if(list.size() > 5)
+                            printf("[%s \\ %d] ...%lu more results\n", modelNames[m].c_str(), g, list.size()-5);
 
                         printf("\n");
                         if(g==6)
                             printf("\n");
 
-                        for(i=0; i<length; i++){
-                            for(j=0; j<parameters.D-1; j++)
-                                outfile << list[i*parameters.D + j] << " ";
+                        for(auto point : list){
+                            for(auto v : point)
+                                outfile << v << " ";
 
-                            outfile << list[i*parameters.D + j] << endl;
+                            outfile << endl;
                         }
 
                         outfile.close();
@@ -468,8 +469,8 @@ int main(int argc, char** argv){
 
     if(isMaster){
         printf("Final results:\n");
-        for(m=startModel; m<=endModel; m++){
-            for(g=startGrid; g<=endGrid; g++)
+        for(int m=startModel; m<=endModel; m++){
+            for(int g=startGrid; g<=endGrid; g++)
                 printf("%f\n", finalResults[m][g]);
 
             printf("\n");
