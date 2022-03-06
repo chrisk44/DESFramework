@@ -3,6 +3,7 @@
 #include <fstream>
 #include <mpi.h>
 #include <cuda_runtime.h>
+#include <cstring>
 
 #include "des/framework.h"
 
@@ -36,6 +37,7 @@ __device__ bool toBool_gpu(RESULT_TYPE result){ return result != 0; }
 
 using namespace std;
 
+std::string dataPath = "../data";
 bool onlyOne = false;
 int startModel = 0;
 int endModel = 3;
@@ -63,46 +65,27 @@ int slowStartLimit          = 6;
 unsigned long slowStartBase = 5e+05;
 int minMsForRatioAdjustment = 10;
 
-unsigned long getOrDefault(int argc, char** argv, bool* found, int* i, const char* argName, const char* argNameShort, bool hasArgument, unsigned long defaultValue){
+template<typename T> T fromString(char* str);
+template<> float fromString<float>(char* str){ return atof(str); }
+template<> int fromString<int>(char* str){ return atoi(str); }
+template<> unsigned long fromString<unsigned long>(char* str){ return atoi(str); }
+template<> bool fromString<bool>(char* str){ return strcmp(str, "1")==0 || strcmp(str, "true") == 0; }
+template<> std::string fromString<std::string>(char* str){ return std::string(str); }
+
+template<typename T>
+T getOrDefault(int argc, char** argv, bool* found, int* i, const char* argName, const char* argNameShort, bool hasArgument, T defaultValue){
     if(*i >= argc)
         return defaultValue;
 
     if(strcmp(argv[*i], argName) == 0 || strcmp(argv[*i], argNameShort) == 0){
         // If it has an argument and we have it...
         if(hasArgument && (*i + 1) < argc){
-            defaultValue = atoi(argv[*i+1]);
+            defaultValue = fromString<T>(argv[*i+1]);
             *i += 2;
         }
         // else if it doesn't have a second argument, so just mark it as 'found'
         else if(!hasArgument){
-            defaultValue = 1;
-            *i += 1;
-        }
-        // else if it has an argument and we don't have it
-        else{
-            fprintf(stderr, "[E] %s requires an additional argument\n", argName);
-            exit(ERR_INVALID_ARG);
-        }
-
-        *found = true;
-    }
-
-    return defaultValue;
-}
-
-float getOrDefaultF(int argc, char** argv, bool* found, int* i, const char* argName, const char* argNameShort, bool hasArgument, float defaultValue){
-    if(*i >= argc)
-        return defaultValue;
-
-    if(strcmp(argv[*i], argName) == 0 || strcmp(argv[*i], argNameShort) == 0){
-        // If it has an argument and we have it...
-        if(hasArgument && (*i + 1) < argc){
-            defaultValue = atof(argv[*i+1]);
-            *i += 2;
-        }
-        // else if it doesn't have a second argument, so just mark it as 'found'
-        else if(!hasArgument){
-            defaultValue = 1;
+            defaultValue = {};
             *i += 1;
         }
         // else if it has an argument and we don't have it
@@ -124,6 +107,7 @@ void printHelp(){
         "To run on cluster: mpirun --host localhost,localhost,remotehost1,remotehost2 ~/DESFramework/parallelFramework <options>\n\n"
         "Available options (every option takes a number as an argument. For true-false arguments use 0 or 1. -cpu, -gpu, -both don't require an argument.):\n"
         "Model/Grid selection (must be the same for every participating system):\n"
+        "--data                     -d              The directory containing the data files\n"
         "--model-start              -ms             The first model to test (1-4).\n"
         "--model-end                -me             The last model to test (1-4).\n"
         "--grid-start               -gs             The first grid to test (1-6).\n"
@@ -175,6 +159,7 @@ void parseArgs(int argc, char** argv){
     bool found;
     while(i < argc){
         found = false;
+        dataPath   = getOrDefault(argc, argv, &found, &i,"--data",          "-d", true, dataPath);
         startModel = getOrDefault(argc, argv, &found, &i, "--model-start", "-ms", true, startModel + 1) - 1;
         endModel   = getOrDefault(argc, argv, &found, &i, "--model-end",   "-me", true, endModel + 1) - 1;
         startGrid  = getOrDefault(argc, argv, &found, &i, "--grid-start",  "-gs", true, startGrid);
@@ -182,9 +167,9 @@ void parseArgs(int argc, char** argv){
         onlyOne    = getOrDefault(argc, argv, &found, &i, "--only-one",    "-oo", false, onlyOne ? 1 : 0) == 1 ? true : false;
 
         batchSize            = getOrDefault(argc, argv, &found, &i, "--batch-size",  "-bs", true, batchSize);
-        batchSizeFactor      = getOrDefaultF(argc, argv, &found, &i, "--batch-size-factor", "-bsf", true, batchSizeFactor);
+        batchSizeFactor      = getOrDefault(argc, argv, &found, &i, "--batch-size-factor", "-bsf", true, batchSizeFactor);
         slaveBatchSize       = getOrDefault(argc, argv, &found, &i, "--slave-batch-size",  "-sbs", true, slaveBatchSize);
-        slaveBatchSizeFactor = getOrDefaultF(argc, argv, &found, &i, "--slave-batch-size-factor",  "-sbsf", true, slaveBatchSizeFactor);
+        slaveBatchSizeFactor = getOrDefault(argc, argv, &found, &i, "--slave-batch-size-factor",  "-sbsf", true, slaveBatchSizeFactor);
         computeBatchSize     = getOrDefault(argc, argv, &found, &i, "--compute-batch-size",  "-cbs", true, computeBatchSize);
         cpuComputeBatchSize  = getOrDefault(argc, argv, &found, &i, "--cpu-compute-batch-size",  "-ccbs", true, cpuComputeBatchSize);
 
@@ -216,10 +201,13 @@ void parseArgs(int argc, char** argv){
             break;
         }
     }
+
+    if(dataPath.size() == 0 || dataPath.back() != '/')
+        dataPath.append("/");
 }
 
 int main(int argc, char** argv){
-    const char* modelNames[4] = {
+    const std::string modelNames[4] = {
         "mogi1",
         "mogi2",
         "okada1",
@@ -229,15 +217,14 @@ int main(int argc, char** argv){
     // Scale factor, must be >0
     float k = 2;
 
-    char displFilename[1024];
-    char gridFilename[1024];
-    char outFilename[1024];
+    std::string displFilename;
+    std::string gridFilename;
+    std::string outFilename;
     bool isMaster;
     ifstream dispfile, gridfile;
     ofstream outfile;
     string tmp;
     int stations, dims, i, j, m, g, result, rank, commSize;
-    float *modelDataPtr, *dispPtr;
     float x, y, z, de, dn, dv, se, sn, sv;
     float low, high, step;
 
@@ -264,7 +251,7 @@ int main(int argc, char** argv){
     for(m=startModel; m<=endModel; m++){
         if(isMaster) printf("[%d] Starting model %d/4...\n", rank, m+1);
         // Open displacements file
-        sprintf(displFilename, "../../data/%s/displ.txt", modelNames[m]);
+        displFilename = dataPath + modelNames[m] + "/displ.txt";
         dispfile.open(displFilename, ios::in);
 
         // Count stations
@@ -272,7 +259,7 @@ int main(int argc, char** argv){
         while(getline(dispfile, tmp)) stations++;
 
         if(stations < 1){
-            printf("[%d] [%s \\ %d] Got 0 displacements. Exiting.\n", rank, modelNames[m], g);
+            printf("[%d] [%s \\ %d] Got 0 displacements. Exiting.\n", rank, modelNames[m].c_str(), g);
             exit(2);
         }
 
@@ -281,11 +268,11 @@ int main(int argc, char** argv){
         dispfile.open(displFilename, ios::in);
 
         // Create the model's parameters struct (the model's input data)
-        modelDataPtr = new float[1 + stations * (9 - (m<2 ? 0 : 1))];
+        float modelDataPtr[1 + stations * (9 - (m<2 ? 0 : 1))];
         modelDataPtr[0] = (float) stations;
 
         // Read each station's displacement data
-        dispPtr = &modelDataPtr[1];
+        float *dispPtr = &modelDataPtr[1];
         i = 0;
         if(m < 2){
             // Mogi models have x,y,z,...
@@ -327,7 +314,7 @@ int main(int argc, char** argv){
                 continue;
 
             // Open grid file
-            sprintf(gridFilename, "./data/%s/grid%d.txt", modelNames[m], g);
+            gridFilename = dataPath + modelNames[m] + "/grid" + to_string(g) + ".txt";
             gridfile.open(gridFilename, ios::in);
 
             // Count dimensions
@@ -346,7 +333,7 @@ int main(int argc, char** argv){
             while(gridfile >> low >> high >> step){
                 // Create the limit (lower is inclusive, upper is exclusive)
                 high += step;
-                limits[i] = Limit{ low, high, (unsigned int) ((high-low)/step) };
+                limits[i] = Limit{ low, high, (unsigned int) ((high-low)/step), step };
                 totalElements *= limits[i].N;
                 i++;
             }
@@ -391,32 +378,32 @@ int main(int argc, char** argv){
             // Run at least 10 seconds, and stop after 10 runs or 2 minutes
             while(true){
                 // Initialize the framework object
-                ParallelFramework* framework = new ParallelFramework(false);
-                framework->init(limits, parameters);
-                if (! framework->isValid()) {
-                    printf("[%d] [%s \\ %d] Error initializing framework\n", rank, modelNames[m], g);
+                ParallelFramework framework(false);
+                framework.init(limits, parameters);
+                if (! framework.isValid()) {
+                    printf("[%d] [%s \\ %d] Error initializing framework\n", rank, modelNames[m].c_str(), g);
                     exit(-1);
                 }
 
                 // Start the computation
                 sw.start();
                 switch(m){
-                    case 0: framework->run<validate_cpuM1, validate_gpuM1, toBool_cpu, toBool_gpu>(); break;
-                    case 1: framework->run<validate_cpuM2, validate_gpuM2, toBool_cpu, toBool_gpu>(); break;
-                    case 2: framework->run<validate_cpuO1, validate_gpuO1, toBool_cpu, toBool_gpu>(); break;
-                    case 3: framework->run<validate_cpuO2, validate_gpuO2, toBool_cpu, toBool_gpu>(); break;
+                    case 0: framework.run<validate_cpuM1, validate_gpuM1, toBool_cpu, toBool_gpu>(); break;
+                    case 1: framework.run<validate_cpuM2, validate_gpuM2, toBool_cpu, toBool_gpu>(); break;
+                    case 2: framework.run<validate_cpuO1, validate_gpuO1, toBool_cpu, toBool_gpu>(); break;
+                    case 3: framework.run<validate_cpuO2, validate_gpuO2, toBool_cpu, toBool_gpu>(); break;
                 }
                 sw.stop();
                 if (result != 0) {
-                    printf("[%d] [%s \\ %d] Error running the computation: %d\n", rank, modelNames[m], g, result);
+                    printf("[%d] [%s \\ %d] Error running the computation: %d\n", rank, modelNames[m].c_str(), g, result);
                     exit(-1);
                 }
 
                 if(isMaster){
-                    framework->getList(&length);
+                    framework.getList(&length);
                     if(length != numOfResults && numOfResults != -2){
                         printf("[%s \\ %d] Number of results from run %d don't match: %d -> %d.\n",
-                                        modelNames[m], g, numOfRuns, numOfResults, length);
+                                        modelNames[m].c_str(), g, numOfRuns, numOfResults, length);
                     }
                     numOfResults = length;
                     // printf("[%s \\ %d] Run %d: %f ms, %d results\n", modelNames[m], g, numOfRuns, length, sw.getMsec());
@@ -431,23 +418,23 @@ int main(int argc, char** argv){
                     if(onlyOne || (totalTime > 10 * 1000 && (numOfRuns >= 10 || totalTime >= 1 * 60 * 1000))){
                         finalResults[m][g] = totalTime/numOfRuns;
                         printf("[%s \\ %d] Time: %f ms in %d runs\n",
-                                    modelNames[m], g, totalTime/numOfRuns, numOfRuns);
+                                    modelNames[m].c_str(), g, totalTime/numOfRuns, numOfRuns);
 
-                        sprintf(outFilename, "results_%s_%d.txt", modelNames[m], g);
+                        outFilename = "results_" + modelNames[m] + "_" + to_string(g) + ".txt";
                         // Open file to write results
                         outfile.open(outFilename, ios::out | ios::trunc);
 
-                        list = framework->getList(&length);
-                        printf("[%s \\ %d] Results: %d\n", modelNames[m], g, length);
+                        list = framework.getList(&length);
+                        printf("[%s \\ %d] Results: %d\n", modelNames[m].c_str(), g, length);
                         for(i=0; i<min(length, 5); i++){
-                            printf("[%s \\ %d] (", modelNames[m], g);
+                            printf("[%s \\ %d] (", modelNames[m].c_str(), g);
                             for(j=0; j<parameters.D-1; j++)
                                 printf("%lf ", list[i*parameters.D + j]);
 
                             printf("%lf)\n", list[i*parameters.D + j]);
                         }
                         if(length > 5)
-                            printf("[%s \\ %d] ...%d more results\n", modelNames[m], g, length-5);
+                            printf("[%s \\ %d] ...%d more results\n", modelNames[m].c_str(), g, length-5);
 
                         printf("\n");
                         if(g==6)
@@ -467,7 +454,6 @@ int main(int argc, char** argv){
                     }
                 }
 
-                delete framework;
                 MPI_Bcast(&next, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
                 if(next)
@@ -478,7 +464,6 @@ int main(int argc, char** argv){
                 break;
         } // end for each grid
 
-        delete [] modelDataPtr;
     }   // end for each model
 
     if(isMaster){
