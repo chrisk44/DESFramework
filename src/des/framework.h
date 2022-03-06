@@ -1,5 +1,4 @@
-#ifndef PARALLELFRAMEWORK_H
-#define PARALLELFRAMEWORK_H
+#pragma once
 
 #include <cuda.h>
 #include <nvml.h>
@@ -12,15 +11,15 @@
 #include <unistd.h>
 
 #include "utilities.h"
-#include "kernels.cu"
+#include "kernels.h"
 
 using namespace std;
 
 class ParallelFramework {
 private:
 	// Parameters
-	Limit* limits = NULL;						// This must be an array of length = parameters.D
-	ParallelFrameworkParameters* parameters = NULL;
+    Limit* limits = NULL;						// This must be an array of length = parameters.D
+    ParallelFrameworkParameters* parameters = NULL;
 
 	// Runtime variables
 	unsigned long long* idxSteps = NULL;		// Index steps for each dimension
@@ -73,27 +72,27 @@ int ParallelFramework::run() {
 
 	if(rank == 0){
 
-		if(parameters->printProgress)
+        if(parameters->printProgress)
 			printf("[%d] Master process starting\n", rank);
 
 		masterProcess();
 
-		if(parameters->printProgress)
+        if(parameters->printProgress)
 			printf("[%d] Master process finished\n", rank);
 
 	}else{
 
-		if(parameters->printProgress)
+        if(parameters->printProgress)
 			printf("[%d] Slave process starting\n", rank);
 
 		slaveProcess<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>();
 
-		if(parameters->printProgress)
+        if(parameters->printProgress)
 			printf("[%d] Slave process finished\n", rank);
 
 	}
 
-	if(parameters->finalizeAfterExecution)
+    if(parameters->finalizeAfterExecution)
 		MPI_Finalize();
 
 	return valid ? 0 : -1;
@@ -110,10 +109,10 @@ void ParallelFramework::slaveProcess() {
 	Stopwatch masterStopwatch;
 	masterStopwatch.start();
 
-	if(parameters->processingType != PROCESSING_TYPE_CPU)
+    if(parameters->processingType != PROCESSING_TYPE_CPU)
 		cudaGetDeviceCount(&numOfThreads);
 
-	if(parameters->processingType != PROCESSING_TYPE_GPU)
+    if(parameters->processingType != PROCESSING_TYPE_GPU)
 		numOfThreads++;
 
 	if(numOfThreads > 0){
@@ -148,7 +147,7 @@ void ParallelFramework::slaveProcess() {
 				coordinatorThread(computeThreadInfo, &threadCommonData, omp_get_num_threads()-1);
 			}else{
 				// Calculate id: -1 -> CPU, 0+ -> GPU[id]
-				computeThreadInfo[tid-1].id = tid - (parameters->processingType == PROCESSING_TYPE_GPU ? 1 : 2);
+                computeThreadInfo[tid-1].id = tid - (parameters->processingType == PROCESSING_TYPE_GPU ? 1 : 2);
 
 				computeThreadInfo[tid-1].masterStopwatch.start();
 				computeThread<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>(computeThreadInfo[tid - 1], &threadCommonData);
@@ -211,7 +210,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 	void* deviceDataPtr;						// GPU Memory to store the model's constant data
 
 	// GPU Runtime
-	cudaStream_t streams[parameters->gpuStreams];
+    cudaStream_t streams[parameters->gpuStreams];
 	unsigned long allocatedElements = 0;
 	cudaDeviceProp deviceProp;
 	unsigned long maxGpuBatchSize;
@@ -291,22 +290,22 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		cudaGetDeviceProperties(&deviceProp, cti.id);
 
 		// Use constant memory for data if they fit
-		useConstantMemoryForData = parameters->dataSize > 0 &&
-			parameters->dataSize <= (MAX_CONSTANT_MEMORY - parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
+        useConstantMemoryForData = parameters->dataSize > 0 &&
+            parameters->dataSize <= (MAX_CONSTANT_MEMORY - parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
 
 		// Max use 1/4 of the available shared memory for data, the rest will be used for each thread to store their point (x) and index vector (i)
 		// This seems to be worse than both global and constant memory
-		useSharedMemoryForData = false && parameters->dataSize > 0 && !useConstantMemoryForData &&
-								 parameters->dataSize <= deviceProp.sharedMemPerBlock / 4;
+        useSharedMemoryForData = false && parameters->dataSize > 0 && !useConstantMemoryForData &&
+                                 parameters->dataSize <= deviceProp.sharedMemPerBlock / 4;
 
 		// How many bytes are left in shared memory after using it for the model's data
-		availableSharedMemory = deviceProp.sharedMemPerBlock - (useSharedMemoryForData ? parameters->dataSize : 0);
+        availableSharedMemory = deviceProp.sharedMemPerBlock - (useSharedMemoryForData ? parameters->dataSize : 0);
 
 		// How many points can fit in shared memory (for each point we need D*DATA_TYPEs (for x) and D*u_int (for indices))
-		maxSharedPoints = availableSharedMemory / (parameters->D * (sizeof(DATA_TYPE) + sizeof(unsigned int)));
+        maxSharedPoints = availableSharedMemory / (parameters->D * (sizeof(DATA_TYPE) + sizeof(unsigned int)));
 
 		#ifdef DBG_START_STOP
-			if(parameters->printProgress){
+            if(parameters->printProgress){
 				printf("[%d] ComputeThread %d: useSharedMemoryForData = %d\n", rank, cti.id, useSharedMemoryForData);
 				printf("[%d] ComputeThread %d: useConstantMemoryForData = %d\n", rank, cti.id, useConstantMemoryForData);
 				printf("[%d] ComputeThread %d: availableSharedMemory = %d bytes\n", rank, cti.id, availableSharedMemory);
@@ -315,7 +314,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		#endif
 
 		// Create streams
-		for(int i=0; i<parameters->gpuStreams; i++){
+        for(int i=0; i<parameters->gpuStreams; i++){
 			cudaStreamCreate(&streams[i]);
 			cce();
 		}
@@ -324,8 +323,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		cudaMalloc(&deviceResults, allocatedElements * sizeof(RESULT_TYPE));	cce();
 		cudaMalloc(&deviceListIndexPtr, sizeof(int));							cce();
 		// If we have static model data but won't use constant memory, allocate global memory for it
-		if(parameters->dataSize > 0 && !useConstantMemoryForData){
-			cudaMalloc(&deviceDataPtr, parameters->dataSize);					cce();
+        if(parameters->dataSize > 0 && !useConstantMemoryForData){
+            cudaMalloc(&deviceDataPtr, parameters->dataSize);					cce();
 		}
 
 		#ifdef DBG_MEMORY
@@ -339,33 +338,33 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 			printf("[%d] ComputeThread %d: Copying limits at constant memory with offset %d\n",
 											rank, cti.id, 0);
 			printf("[%d] ComputeThread %d: Copying idxSteps at constant memory with offset %d\n",
-											rank, cti.id, parameters->D * sizeof(Limit));
+                                            rank, cti.id, parameters->D * sizeof(Limit));
 		#endif
 		cudaMemcpyToSymbolWrapper<nullptr, nullptr>(
-			limits, parameters->D * sizeof(Limit), 0);
+            limits, parameters->D * sizeof(Limit), 0);
 		cce();
 
 		cudaMemcpyToSymbolWrapper<nullptr, nullptr>(
-			idxSteps, parameters->D * sizeof(unsigned long long),
-			parameters->D * sizeof(Limit));
+            idxSteps, parameters->D * sizeof(unsigned long long),
+            parameters->D * sizeof(Limit));
 		cce();
 
 		// If we have data for the model...
-		if(parameters->dataSize > 0){
+        if(parameters->dataSize > 0){
 			// If we can use constant memory, copy it there
 			if(useConstantMemoryForData){
 				#ifdef DBG_MEMORY
 					printf("[%d] ComputeThread %d: Copying data at constant memory with offset %d\n",
-										rank, cti.id, parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
+                                        rank, cti.id, parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
 				#endif
 				cudaMemcpyToSymbolWrapper<nullptr, nullptr>(
-					parameters->dataPtr, parameters->dataSize,
-					parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
+                    parameters->dataPtr, parameters->dataSize,
+                    parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
 				cce()
 			}
 			// else copy the data to the global memory, either to be read from there or to be copied to shared memory
 			else{
-				cudaMemcpy(deviceDataPtr, parameters->dataPtr, parameters->dataSize, cudaMemcpyHostToDevice);
+                cudaMemcpy(deviceDataPtr, parameters->dataPtr, parameters->dataSize, cudaMemcpyHostToDevice);
 				cce();
 			}
 		}
@@ -457,7 +456,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 			localLast = min(localStartPoint + cti.batchSize - 1 , tcd->globalLast);
 			localNumOfElements = localLast - localStartPoint + 1;
 
-			if(parameters->resultSaveType == SAVE_TYPE_LIST)
+            if(parameters->resultSaveType == SAVE_TYPE_LIST)
 				localResults = tcd->results;
 			else
 				localResults = &tcd->results[localStartPoint - tcd->globalFirst];
@@ -527,7 +526,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 				cudaMemset(deviceListIndexPtr, 0, sizeof(int));
 
 				// Divide the chunk to smaller chunks to scatter accross streams
-				unsigned long elementsPerStream = localNumOfElements / parameters->gpuStreams;
+                unsigned long elementsPerStream = localNumOfElements / parameters->gpuStreams;
 				bool onlyOne = false;
 				unsigned long skip = 0;
 				if(elementsPerStream == 0){
@@ -536,19 +535,19 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 				}
 
 				// Queue the chunks to the streams
-				for(int i=0; i<parameters->gpuStreams; i++){
+                for(int i=0; i<parameters->gpuStreams; i++){
 					// Adjust elementsPerStream for last stream (= total-queued)
-					if(i == parameters->gpuStreams - 1){
+                    if(i == parameters->gpuStreams - 1){
 						elementsPerStream = localNumOfElements - skip;
 					}else{
 						elementsPerStream = min(elementsPerStream, localNumOfElements - skip);
 					}
 
 					// Queue the kernel in stream[i] (each GPU thread gets COMPUTE_BATCH_SIZE elements to calculate)
-					int gpuThreads = (elementsPerStream + parameters->computeBatchSize - 1) / parameters->computeBatchSize;
+                    int gpuThreads = (elementsPerStream + parameters->computeBatchSize - 1) / parameters->computeBatchSize;
 
 					// Minimum of (minimum of user-defined block size and number of threads to go to this stream) and number of points that can fit in shared memory
-					int blockSize = min(min(parameters->blockSize, gpuThreads), maxSharedPoints);
+                    int blockSize = min(min(parameters->blockSize, gpuThreads), maxSharedPoints);
 					int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
 
 					#ifdef DBG_QUEUE
@@ -559,14 +558,14 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 					// Note: Point at the start of deviceResults, because the offset (because of computeBatchSize) is calculated in the kernel
 					validate_kernel<validation_gpu, toBool_gpu><<<numOfBlocks, blockSize, deviceProp.sharedMemPerBlock, streams[i]>>>(
 						deviceResults, localStartPoint,
-						parameters->D, elementsPerStream, skip, deviceDataPtr,
-						parameters->dataSize, useSharedMemoryForData, useConstantMemoryForData,
-						parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr,
-						parameters->computeBatchSize
+                        parameters->D, elementsPerStream, skip, deviceDataPtr,
+                        parameters->dataSize, useSharedMemoryForData, useConstantMemoryForData,
+                        parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : deviceListIndexPtr,
+                        parameters->computeBatchSize
 					);
 
 					// Queue the memcpy in stream[i] only if we are saving as SAVE_TYPE_ALL (otherwise the results will be fetched at the end of the current computation)
-					if(parameters->resultSaveType == SAVE_TYPE_ALL){
+                    if(parameters->resultSaveType == SAVE_TYPE_ALL){
 						cudaMemcpyAsync(&localResults[skip], &deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, streams[i]);
 					}
 
@@ -584,13 +583,13 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 				#endif
 
 				// Wait for all streams to finish
-				for(int i=0; i<parameters->gpuStreams; i++){
+                for(int i=0; i<parameters->gpuStreams; i++){
 					cudaStreamSynchronize(streams[i]);
 					cce();
 				}
 
 				// If we are saving as SAVE_TYPE_LIST, fetch the results
-				if(parameters->resultSaveType == SAVE_TYPE_LIST){
+                if(parameters->resultSaveType == SAVE_TYPE_LIST){
 					// Get the current list index from the GPU
 					cudaMemcpy(&gpuListIndex, deviceListIndexPtr, sizeof(int), cudaMemcpyDeviceToHost);
 
@@ -637,8 +636,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 					sw.start();
 				#endif
 
-				cpu_kernel<validation_cpu, toBool_cpu>(localResults, limits, parameters->D, localNumOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
-							idxSteps, localStartPoint, parameters->cpuDynamicScheduling, parameters->cpuComputeBatchSize);
+                cpu_kernel<validation_cpu, toBool_cpu>(localResults, limits, parameters->D, localNumOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
+                            idxSteps, localStartPoint, parameters->cpuDynamicScheduling, parameters->cpuComputeBatchSize);
 
 			}
 
@@ -648,7 +647,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 			#endif
 
 			#ifdef DBG_RESULTS
-				if(parameters->resultSaveType == SAVE_TYPE_ALL){
+                if(parameters->resultSaveType == SAVE_TYPE_ALL){
 					printf("[%d] ComputeThread %d: Results are: ", rank, cti.id);
 					for (int i = 0; i < localNumOfElements; i++) {
 						printf("%f ", ((DATA_TYPE *)localResults)[i]);
@@ -663,7 +662,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 
 			cti.elementsCalculated += localNumOfElements;
 
-			if(!parameters->slaveDynamicScheduling)
+            if(!parameters->slaveDynamicScheduling)
 				break;
 
 			// End of assignment loop
@@ -704,7 +703,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 	// Finalize GPU
 	if (cti.id > -1) {
 		// Make sure streams are finished and destroy them
-		for(int i=0;i<parameters->gpuStreams;i++){
+        for(int i=0;i<parameters->gpuStreams;i++){
 			cudaStreamDestroy(streams[i]);
 			cce();
 		}
@@ -722,5 +721,3 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 		}
 	}
 }
-
-#endif

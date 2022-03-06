@@ -2,32 +2,30 @@
 #include <cstdlib>
 #include <fstream>
 #include <mpi.h>
+//#include <cuda_runtime.h>
 
-#include "framework.h"
+#include "des/framework.h"
 
 /*
  * Each one of these contain a __host__ __device__ doValidate[MO][123] function
 */
-#include "mogi1.h"
-#include "mogi2.h"
-#include "okada1.h"
-#include "okada2.h"
-#include "okada3.h"
+#include "models/mogi/mogi.h"
+#include "models/okada/okada.h"
 
-__host__   RESULT_TYPE validate_cpuM1(DATA_TYPE* x, void* dataPtr){ return doValidateM1(x, dataPtr); }
-__device__ RESULT_TYPE validate_gpuM1(DATA_TYPE* x, void* dataPtr){ return doValidateM1(x, dataPtr); }
+__host__   RESULT_TYPE validate_cpuM1(DATA_TYPE* x, void* dataPtr){ return mogi::doValidateM1(x, dataPtr); }
+__device__ RESULT_TYPE validate_gpuM1(DATA_TYPE* x, void* dataPtr){ return mogi::doValidateM1(x, dataPtr); }
 
-__host__   RESULT_TYPE validate_cpuM2(DATA_TYPE* x, void* dataPtr){ return doValidateM2(x, dataPtr); }
-__device__ RESULT_TYPE validate_gpuM2(DATA_TYPE* x, void* dataPtr){ return doValidateM2(x, dataPtr); }
+__host__   RESULT_TYPE validate_cpuM2(DATA_TYPE* x, void* dataPtr){ return mogi::doValidateM2(x, dataPtr); }
+__device__ RESULT_TYPE validate_gpuM2(DATA_TYPE* x, void* dataPtr){ return mogi::doValidateM2(x, dataPtr); }
 
-__host__   RESULT_TYPE validate_cpuO1(DATA_TYPE* x, void* dataPtr){ return doValidateO1(x, dataPtr); }
-__device__ RESULT_TYPE validate_gpuO1(DATA_TYPE* x, void* dataPtr){ return doValidateO1(x, dataPtr); }
+__host__   RESULT_TYPE validate_cpuO1(DATA_TYPE* x, void* dataPtr){ return okada::doValidateO1(x, dataPtr); }
+__device__ RESULT_TYPE validate_gpuO1(DATA_TYPE* x, void* dataPtr){ return okada::doValidateO1(x, dataPtr); }
 
-__host__   RESULT_TYPE validate_cpuO2(DATA_TYPE* x, void* dataPtr){ return doValidateO2(x, dataPtr); }
-__device__ RESULT_TYPE validate_gpuO2(DATA_TYPE* x, void* dataPtr){ return doValidateO2(x, dataPtr); }
+__host__   RESULT_TYPE validate_cpuO2(DATA_TYPE* x, void* dataPtr){ return okada::doValidateO2(x, dataPtr); }
+__device__ RESULT_TYPE validate_gpuO2(DATA_TYPE* x, void* dataPtr){ return okada::doValidateO2(x, dataPtr); }
 
-// __host__   RESULT_TYPE validate_cpuO3(DATA_TYPE* x, void* dataPtr){ return doValidateO2(x, dataPtr); }
-// __device__ RESULT_TYPE validate_gpuO4(DATA_TYPE* x, void* dataPtr){ return doValidateO2(x, dataPtr); }
+// __host__   RESULT_TYPE validate_cpuO3(DATA_TYPE* x, void* dataPtr){ return okada::doValidateO3(x, dataPtr); }
+// __device__ RESULT_TYPE validate_gpuO3(DATA_TYPE* x, void* dataPtr){ return okada::doValidateO3(x, dataPtr); }
 
 __host__ bool toBool_cpu(RESULT_TYPE result){ return result != 0; }
 __device__ bool toBool_gpu(RESULT_TYPE result){ return result != 0; }
@@ -266,7 +264,7 @@ int main(int argc, char** argv){
     for(m=startModel; m<=endModel; m++){
         if(isMaster) printf("[%d] Starting model %d/4...\n", rank, m+1);
         // Open displacements file
-        sprintf(displFilename, "./data/%s/displ.txt", modelNames[m]);
+        sprintf(displFilename, "../../data/%s/displ.txt", modelNames[m]);
         dispfile.open(displFilename, ios::in);
 
         // Count stations

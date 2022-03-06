@@ -1,8 +1,9 @@
+#include "okada.h"
 #include "okada_common.h"
 
-using namespace std;
+namespace okada {
 
-__host__ __device__ RESULT_TYPE doValidateO1(DATA_TYPE* x, void* dataPtr){
+__host__ __device__ float doValidateO1(double* x, void* dataPtr){
     float *xp, *yp, *de, *dn, *dv, *se, *sn, *sv;
     float stro1, dipo1, rakeo1, do1, nc1, ec1, a1, b1, x1, y1, p1, q1, ue1, un1, ux1, uy1, uz1, U11, U21, U31;
     float dux, duy, duz;
@@ -86,4 +87,6 @@ __host__ __device__ RESULT_TYPE doValidateO1(DATA_TYPE* x, void* dataPtr){
     }
 
     return bp;
+}
+
 }

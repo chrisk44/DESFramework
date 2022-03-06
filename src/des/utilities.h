@@ -1,5 +1,4 @@
-#ifndef UTILITIES_H
-#define UTILITIES_H
+#pragma once
 
 #include <cuda_runtime.h>
 #include <cuda.h>
@@ -179,5 +178,3 @@ struct ComputeThreadInfo{
     float idleTime = 0;
     Stopwatch masterStopwatch;
 };
-
-#endif

@@ -1,3 +1,4 @@
-parallelFramework
-*results*.txt
-time.txt
+build/
+results/
+
+CMakeLists.txt.user

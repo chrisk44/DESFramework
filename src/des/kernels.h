@@ -1,8 +1,8 @@
-#ifndef KERNELS_CU
-#define KERNELS_CU
+#pragma once
 
 #include <cuda.h>
 #include <omp.h>
+#include <cuda_runtime.h>
 
 #include "utilities.h"
 
@@ -229,5 +229,3 @@ void cpu_kernel(RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned lo
 	}
 
 }
-
-#endif
