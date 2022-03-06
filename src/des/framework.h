@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #include "utilities.h"
-#include "kernels.cu"
+#include "kernels.h"
 
 using namespace std;
 
@@ -41,7 +41,11 @@ public:
 	void init(Limit* limits, ParallelFrameworkParameters& parameters);
 
 	template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-	int run();
+    int run(){
+        return _run(validation_cpu, validation_gpu, toBool_cpu, toBool_gpu);
+    }
+
+    int _run(validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu);
 
 	RESULT_TYPE* getResults();
 	DATA_TYPE* getList(int* length);
@@ -56,15 +60,11 @@ private:
 	void coordinatorThread(ComputeThreadInfo* cti, ThreadCommonData* tcd, int numOfThreads);
 	void getPointFromIndex(unsigned long index, DATA_TYPE* result);
 
-	template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-	void slaveProcess();
-
-	template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-	void computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd);
+    void slaveProcess(validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu);
+    void computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd, validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu);
 };
 
-template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-int ParallelFramework::run() {
+int ParallelFramework::_run(validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu) {
 	if(!valid){
 		printf("[%d] run() called for invalid framework\n", rank);
 		return -1;
@@ -85,7 +85,7 @@ int ParallelFramework::run() {
         if(parameters->printProgress)
 			printf("[%d] Slave process starting\n", rank);
 
-		slaveProcess<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>();
+        slaveProcess(validation_cpu, validation_gpu, toBool_cpu, toBool_gpu);
 
         if(parameters->printProgress)
 			printf("[%d] Slave process finished\n", rank);
@@ -98,8 +98,7 @@ int ParallelFramework::run() {
 	return valid ? 0 : -1;
 }
 
-template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-void ParallelFramework::slaveProcess() {
+void ParallelFramework::slaveProcess(validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu) {
 	/*******************************************************************
 	********** Calculate number of worker threads (#GPUs + 1CPU) *******
 	********************************************************************/
@@ -150,7 +149,7 @@ void ParallelFramework::slaveProcess() {
                 computeThreadInfo[tid-1].id = tid - (parameters->processingType == PROCESSING_TYPE_GPU ? 1 : 2);
 
 				computeThreadInfo[tid-1].masterStopwatch.start();
-				computeThread<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>(computeThreadInfo[tid - 1], &threadCommonData);
+                computeThread(computeThreadInfo[tid - 1], &threadCommonData, validation_cpu, validation_gpu, toBool_cpu, toBool_gpu);
 				computeThreadInfo[tid-1].masterStopwatch.stop();
 			}
 		}
@@ -198,8 +197,7 @@ void ParallelFramework::slaveProcess() {
 	delete[] computeThreadInfo;
 }
 
-template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd){
+void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd, validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu){
 	int gpuListIndex, globalListIndexOld;
 	RESULT_TYPE* localResults;
     Stopwatch idleStopwatch;
@@ -340,11 +338,11 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 			printf("[%d] ComputeThread %d: Copying idxSteps at constant memory with offset %d\n",
                                             rank, cti.id, parameters->D * sizeof(Limit));
 		#endif
-		cudaMemcpyToSymbolWrapper<nullptr, nullptr>(
+        cudaMemcpyToSymbolWrapper(
             limits, parameters->D * sizeof(Limit), 0);
 		cce();
 
-		cudaMemcpyToSymbolWrapper<nullptr, nullptr>(
+        cudaMemcpyToSymbolWrapper(
             idxSteps, parameters->D * sizeof(unsigned long long),
             parameters->D * sizeof(Limit));
 		cce();
@@ -357,7 +355,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 					printf("[%d] ComputeThread %d: Copying data at constant memory with offset %d\n",
                                         rank, cti.id, parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
 				#endif
-				cudaMemcpyToSymbolWrapper<nullptr, nullptr>(
+                cudaMemcpyToSymbolWrapper(
                     parameters->dataPtr, parameters->dataSize,
                     parameters->D * (sizeof(Limit) + sizeof(unsigned long long)));
 				cce()
@@ -556,7 +554,8 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 					#endif
 
 					// Note: Point at the start of deviceResults, because the offset (because of computeBatchSize) is calculated in the kernel
-					validate_kernel<validation_gpu, toBool_gpu><<<numOfBlocks, blockSize, deviceProp.sharedMemPerBlock, streams[i]>>>(
+                    validate_kernel<<<numOfBlocks, blockSize, deviceProp.sharedMemPerBlock, streams[i]>>>(
+                        validation_gpu, toBool_gpu,
 						deviceResults, localStartPoint,
                         parameters->D, elementsPerStream, skip, deviceDataPtr,
                         parameters->dataSize, useSharedMemoryForData, useConstantMemoryForData,
@@ -636,7 +635,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
 					sw.start();
 				#endif
 
-                cpu_kernel<validation_cpu, toBool_cpu>(localResults, limits, parameters->D, localNumOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
+                cpu_kernel(validation_cpu, toBool_cpu, localResults, limits, parameters->D, localNumOfElements, parameters->dataPtr, parameters->resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
                             idxSteps, localStartPoint, parameters->cpuDynamicScheduling, parameters->cpuComputeBatchSize);
 
 			}

@@ -11,6 +11,7 @@ set(MODULE_NAME DES)
 add_library(${MODULE_NAME} framework.cu
                            framework.h
                            kernels.cu
+                           kernels.h
                            utilities.cpp
                            utilities.h)
 
