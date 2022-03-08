@@ -1,7 +1,5 @@
 #include "utilities.h"
 
-using namespace std;
-
 unsigned long getMaxCPUBytes(){
     long pages = sysconf(_SC_PHYS_PAGES);
     long page_size = sysconf(_SC_PAGE_SIZE);
@@ -16,7 +14,7 @@ unsigned long getMaxGPUBytes(){
 
     for(int i=0; i<gpus; i++){
         // Calculate and keep the minimum bytes
-        minBytes = min(minBytes, getMaxGPUBytesForGpu(i));
+        minBytes = std::min(minBytes, getMaxGPUBytesForGpu(i));
     }
 
     return minBytes;

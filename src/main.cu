@@ -35,8 +35,6 @@ __device__ bool toBool_gpu(RESULT_TYPE result){ return result != 0; }
 
 #define ERR_INVALID_ARG -1
 
-using namespace std;
-
 std::string dataPath = "../data";
 bool onlyOne = false;
 int startModel = 0;
@@ -221,9 +219,9 @@ int main(int argc, char** argv){
     std::string gridFilename;
     std::string outFilename;
     bool isMaster;
-    ifstream dispfile, gridfile;
-    ofstream outfile;
-    string tmp;
+    std::ifstream dispfile, gridfile;
+    std::ofstream outfile;
+    std::string tmp;
     int stations, dims, result, rank, commSize;
     float x, y, z, de, dn, dv, se, sn, sv;
     float low, high, step;
@@ -250,7 +248,7 @@ int main(int argc, char** argv){
         if(isMaster) printf("[%d] Starting model %d/4...\n", rank, m+1);
         // Open displacements file
         displFilename = dataPath + modelNames[m] + "/displ.txt";
-        dispfile.open(displFilename, ios::in);
+        dispfile.open(displFilename, std::ios::in);
 
         // Count stations
         stations = 0;
@@ -263,7 +261,7 @@ int main(int argc, char** argv){
 
         // Reset the file
         dispfile.close();
-        dispfile.open(displFilename, ios::in);
+        dispfile.open(displFilename, std::ios::in);
 
         // Create the model's parameters struct (the model's input data)
         float modelDataPtr[1 + stations * (9 - (m<2 ? 0 : 1))];
@@ -313,8 +311,8 @@ int main(int argc, char** argv){
                 continue;
 
             // Open grid file
-            gridFilename = dataPath + modelNames[m] + "/grid" + to_string(g) + ".txt";
-            gridfile.open(gridFilename, ios::in);
+            gridFilename = dataPath + modelNames[m] + "/grid" + std::to_string(g) + ".txt";
+            gridfile.open(gridFilename, std::ios::in);
 
             // Count dimensions
             dims = 0;
@@ -322,7 +320,7 @@ int main(int argc, char** argv){
 
             // Reset the file
             gridfile.close();
-            gridfile.open(gridFilename, ios::in);
+            gridfile.open(gridFilename, std::ios::in);
 
             // Read each dimension's grid information
             std::vector<Limit> limits;
@@ -421,9 +419,9 @@ int main(int argc, char** argv){
                         printf("[%s \\ %d] Time: %f ms in %d runs\n",
                                     modelNames[m].c_str(), g, totalTime/numOfRuns, numOfRuns);
 
-                        outFilename = "results_" + modelNames[m] + "_" + to_string(g) + ".txt";
+                        outFilename = "results_" + modelNames[m] + "_" + std::to_string(g) + ".txt";
                         // Open file to write results
-                        outfile.open(outFilename, ios::out | ios::trunc);
+                        outfile.open(outFilename, std::ios::out | std::ios::trunc);
 
                         auto list = framework.getList();
                         printf("[%s \\ %d] Results: %lu\n", modelNames[m].c_str(), g, list.size());
@@ -445,7 +443,7 @@ int main(int argc, char** argv){
                             for(auto v : point)
                                 outfile << v << " ";
 
-                            outfile << endl;
+                            outfile << std::endl;
                         }
 
                         outfile.close();
