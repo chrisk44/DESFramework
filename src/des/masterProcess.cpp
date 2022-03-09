@@ -54,7 +54,7 @@ void ParallelFramework::masterProcess() {
         SlaveProcessInfo& pinfo = slaveProcessInfo[mpiSource-1];
 
         #ifdef DBG_MPI_STEPS
-            printf("[%d] Master: Received %d from %d\n", rank, status.MPI_TAG, mpiSource);
+            printf("[%d] Master: Received %d from %d\n", rank, request, mpiSource);
         #endif
 
         switch(request){
@@ -146,7 +146,7 @@ void ParallelFramework::masterProcess() {
                     if(parameters.resultSaveType == SAVE_TYPE_ALL)
                         printf("[%d] Master: Saving %lu results from slave %d to finalResults[%lu]...\n", rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
                     else
-                        printf("[%d] Master: Saving %lu points from slave %d to listResults[%lu]...\n", rank, tmpNumOfPoints, mpiSource, listResultsSaved);
+                        printf("[%d] Master: Saving %d points from slave %d to listResults...\n", rank, tmpNumOfPoints, mpiSource);
 
                 #endif
                 #ifdef DBG_RESULTS
@@ -158,14 +158,14 @@ void ParallelFramework::masterProcess() {
                         printf(" at %lu\n", pinfo.work.startPoint);
                     }else{
                         printf("[%d] Master: Saving tmpResultsList: ", rank);
-                        for (int i = 0; i < tmpNumOfPoints; i++){
+                        for (const auto& point : tmpResultsList){
                             printf("[ ");
-                            for(int j=0; j<parameters.D; j++){
-                                printf("%f ", tmpResultsList[i*parameters.D + j]);
+                            for(const auto& v : point){
+                                printf("%f ", v);
                             }
                             printf("]");
                         }
-                        printf(" at %d\n", listResultsSaved);
+                        printf("\n");
                     }
                 #endif
 

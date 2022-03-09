@@ -1,6 +1,6 @@
 #include "framework.h"
 
-void ParallelFramework::slaveProcess(validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu) {
+void ParallelFramework::slaveProcessImpl(CallComputeThreadCallback callComputeThread) {
     /*******************************************************************
     ********** Calculate number of worker threads (#GPUs + 1CPU) *******
     ********************************************************************/
@@ -51,7 +51,7 @@ void ParallelFramework::slaveProcess(validationFunc_t validation_cpu, validation
                 computeThreadInfo[tid-1].id = tid - (parameters.processingType == PROCESSING_TYPE_GPU ? 1 : 2);
 
                 computeThreadInfo[tid-1].masterStopwatch.start();
-                computeThread(computeThreadInfo[tid - 1], &threadCommonData, validation_cpu, validation_gpu, toBool_cpu, toBool_gpu);
+                callComputeThread(computeThreadInfo[tid - 1], &threadCommonData);
                 computeThreadInfo[tid-1].masterStopwatch.stop();
             }
         }

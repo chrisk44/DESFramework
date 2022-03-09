@@ -11,7 +11,7 @@ MPI_ARGS_REMOTE=-npernode 1 --hostfile hostfile #--mca mpi_yield_when_idle 1 # N
 MPI_ARGS_LOCAL=-n $(N) # --mca mpi_yield_when_idle 1
 
 MODELS_SRC=models/mogi/mogi1.cpp models/mogi/mogi2.cpp models/okada/okada1.cpp models/okada/okada2.cpp models/okada/okada3.cpp
-DES_SRC=des/computeThread.cu des/coordinatorThread.cpp des/framework.cpp des/kernels.cu des/masterProcess.cpp des/messaging.cpp des/slaveProcess.cpp des/utilities.cpp
+DES_SRC=des/computeThread.cu des/coordinatorThread.cpp des/framework.cpp des/gpuKernel.cu des/masterProcess.cpp des/messaging.cpp des/slaveProcess.cpp des/utilities.cpp
 SRC=main.cu $(MODELS_SRC) $(DES_SRC)
 TARGET=parallelFramework
 

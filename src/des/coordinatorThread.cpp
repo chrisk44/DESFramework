@@ -186,7 +186,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 		#endif
 
 		#ifdef DBG_MPI_STEPS
-			printf("[%d] Coordinator: Waiting for results...\n", rank);
+            printf("[%d] Coordinator: Waiting for results from %d threads...\n", rank, numOfThreads);
 		#endif
 		// Wait for all worker threads to finish their work
 		for(int i=0; i<numOfThreads; i++){

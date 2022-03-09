@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd, validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu){
+void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonData* tcd, CallCpuKernelCallback callCpuKernel, CallGpuKernelCallback callGpuKernel){
     int gpuListIndex, globalListIndexOld;
     RESULT_TYPE* localResults;
     Stopwatch idleStopwatch;
@@ -361,8 +361,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
                     #endif
 
                     // Note: Point at the start of deviceResults, because the offset (because of computeBatchSize) is calculated in the kernel
-                    validate_kernel<<<numOfBlocks, blockSize, deviceProp.sharedMemPerBlock, streams[i]>>>(
-                        validation_gpu, toBool_gpu,
+                    callGpuKernel(numOfBlocks, blockSize, deviceProp.sharedMemPerBlock, streams[i],
                         deviceResults, localStartPoint,
                         parameters.D, elementsPerStream, skip, deviceDataPtr,
                         parameters.dataSize, useSharedMemoryForData, useConstantMemoryForData,
@@ -442,7 +441,7 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* 
                     sw.start();
                 #endif
 
-                cpu_kernel(validation_cpu, toBool_cpu, localResults, limits.data(), parameters.D, localNumOfElements, parameters.dataPtr, parameters.resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
+                callCpuKernel(localResults, limits.data(), parameters.D, localNumOfElements, parameters.dataPtr, parameters.resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
                             idxSteps.data(), localStartPoint, parameters.cpuDynamicScheduling, parameters.cpuComputeBatchSize);
 
             }

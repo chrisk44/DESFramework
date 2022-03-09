@@ -129,41 +129,6 @@ bool ParallelFramework::isValid() {
 	return valid;
 }
 
-
-int ParallelFramework::_run(validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu) {
-    if(!valid){
-        printf("[%d] run() called for invalid framework\n", rank);
-        return -1;
-    }
-
-    if(rank == 0){
-
-        if(parameters.printProgress)
-            printf("[%d] Master process starting\n", rank);
-
-        masterProcess();
-
-        if(parameters.printProgress)
-            printf("[%d] Master process finished\n", rank);
-
-    }else{
-
-        if(parameters.printProgress)
-            printf("[%d] Slave process starting\n", rank);
-
-        slaveProcess(validation_cpu, validation_gpu, toBool_cpu, toBool_gpu);
-
-        if(parameters.printProgress)
-            printf("[%d] Slave process finished\n", rank);
-
-    }
-
-    if(parameters.finalizeAfterExecution)
-        MPI_Finalize();
-
-    return valid ? 0 : -1;
-}
-
 RESULT_TYPE* ParallelFramework::getResults() {
 	if(rank != 0){
 		printf("Error: Results can only be fetched by the master process. Are you the master process?\n");

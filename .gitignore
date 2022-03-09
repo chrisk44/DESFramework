@@ -1,4 +1,9 @@
 build/
+build-docker/
 results/
 
 CMakeLists.txt.user
+
+src/parallelFramework
+
+*.patch
