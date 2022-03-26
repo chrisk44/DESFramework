@@ -213,7 +213,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 		#ifdef DBG_RESULTS
             if(parameters.resultSaveType == SAVE_TYPE_ALL){
 				printf("[%d] Coordinator: Results: [", rank);
-				for(int i=0; i<work.numOfElements; i++){
+                for(unsigned long i=0; i<work.numOfElements; i++){
 					printf("%f ", localResults[i]);
 				}
 				printf("]\n");
@@ -221,7 +221,7 @@ void ParallelFramework::coordinatorThread(ComputeThreadInfo* cti, ThreadCommonDa
 				printf("[%d] Coordinator: Results (*globalListIndexPtr = %d):", rank, *globalListIndexPtr);
                 for(int i=0; i<*globalListIndexPtr; i+=parameters.D){
 					printf("[ ");
-                    for(int j=0; j<parameters.D; j++){
+                    for(unsigned int j=0; j<parameters.D; j++){
 						printf("%f ", ((DATA_TYPE *)localResults)[i + j]);
 					}
 					printf("]");

@@ -47,18 +47,18 @@ public:
 	template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
     int run();
 
-	RESULT_TYPE* getResults();
-    std::vector<std::vector<DATA_TYPE>> getList();
-	void getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst);
-	unsigned long getIndexFromIndices(unsigned long* pointIdx);
-	unsigned long getIndexFromPoint(DATA_TYPE* point);
-	bool isValid();
-	int getRank();
+    const RESULT_TYPE* getResults() const;
+    const std::vector<std::vector<DATA_TYPE>>& getList() const;
+    void getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst) const;
+    unsigned long getIndexFromIndices(unsigned long* pointIdx) const;
+    unsigned long getIndexFromPoint(DATA_TYPE* point) const;
+    bool isValid() const;
+    int getRank() const;
 
 private:
 	void masterProcess();
     void coordinatorThread(ComputeThreadInfo* cti, ThreadCommonData* tcd, int numOfThreads);
-	void getPointFromIndex(unsigned long index, DATA_TYPE* result);
+    void getPointFromIndex(unsigned long index, DATA_TYPE* result) const;
 
     template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
     void slaveProcess();

@@ -103,8 +103,8 @@ void ParallelFramework::init(const std::vector<Limit>& _limits, const ParallelFr
 			}// else listResults will be allocated through realloc when they are needed
 		}
 
-        if (this->parameters.batchSize == 0)
-            this->parameters.batchSize = totalElements;
+        if (parameters.batchSize == 0)
+            parameters.batchSize = totalElements;
 	}
 
 	valid = true;
@@ -125,25 +125,23 @@ ParallelFramework::~ParallelFramework() {
 	valid = false;
 }
 
-bool ParallelFramework::isValid() {
+bool ParallelFramework::isValid() const {
 	return valid;
 }
 
-RESULT_TYPE* ParallelFramework::getResults() {
+const RESULT_TYPE* ParallelFramework::getResults() const {
 	if(rank != 0){
-		printf("Error: Results can only be fetched by the master process. Are you the master process?\n");
-		return nullptr;
+        throw std::runtime_error("Error: Results can only be fetched by the master process. Are you the master process?\n");
 	}
 
     if(parameters.resultSaveType != SAVE_TYPE_ALL){
-		printf("Error: Can't get all results when resultSaveType is not SAVE_TYPE_ALL\n");
-		return nullptr;
+        throw std::runtime_error("Error: Can't get all results when resultSaveType is not SAVE_TYPE_ALL\n");
 	}
 
 	return finalResults;
 }
 
-std::vector<std::vector<DATA_TYPE>> ParallelFramework::getList(){
+const std::vector<std::vector<DATA_TYPE>>& ParallelFramework::getList() const {
     if(rank != 0)
         throw std::runtime_error("Error: Results can only be fetched by the master process. Are you the master process?\n");
 
@@ -154,13 +152,12 @@ std::vector<std::vector<DATA_TYPE>> ParallelFramework::getList(){
 	return listResults;
 }
 
-void ParallelFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst) {
+void ParallelFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst) const {
 	unsigned int i;
 
     for (i = 0; i < parameters.D; i++) {
 		if (point[i] < limits[i].lowerLimit || point[i] >= limits[i].upperLimit) {
-			printf("Result query for out-of-bounds point\n");
-			return;
+            throw std::invalid_argument("Result query for out-of-bounds point\n");
 		}
 
 		// Calculate the steps for dimension i
@@ -168,7 +165,7 @@ void ParallelFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst
 	}
 }
 
-unsigned long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) {
+unsigned long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) const {
 	unsigned int i;
 	unsigned long index = 0;
 
@@ -180,18 +177,17 @@ unsigned long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) {
 	return index;
 }
 
-unsigned long ParallelFramework::getIndexFromPoint(DATA_TYPE* point){
-    unsigned long* indices = new unsigned long[parameters.D];
+unsigned long ParallelFramework::getIndexFromPoint(DATA_TYPE* point) const {
+    unsigned long indices[parameters.D];
 	unsigned long index;
 
 	getIndicesFromPoint(point, indices);
 	index = getIndexFromIndices(indices);
 
-	delete[] indices;
 	return index;
 }
 
-void ParallelFramework::getPointFromIndex(unsigned long index, DATA_TYPE* result){
+void ParallelFramework::getPointFromIndex(unsigned long index, DATA_TYPE* result) const {
     for(int i=parameters.D - 1; i>=0; i--){
 		int currentIndex = index / idxSteps[i];
 		result[i] = limits[i].lowerLimit + currentIndex*limits[i].step;
@@ -200,6 +196,6 @@ void ParallelFramework::getPointFromIndex(unsigned long index, DATA_TYPE* result
 	}
 }
 
-int ParallelFramework::getRank(){
-	return this->rank;
+int ParallelFramework::getRank() const {
+    return rank;
 }

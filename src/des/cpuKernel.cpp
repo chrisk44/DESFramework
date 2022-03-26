@@ -15,7 +15,7 @@ void cpu_kernel(validationFunc_t validationFunc, toBool_t toBool, RESULT_TYPE* r
         DATA_TYPE point[D];
         unsigned long* currentIndex = new unsigned long[D];
         unsigned long carry, processed, localNumOfElements, elementsPerThread, start, lastElement;
-        int d;
+        int d;  // This needs to be signed because it is used to iterate from D-1 to 0 and we need it to get to -1 to stop the iteration
 
         // Adjust for small workloads
         if(batchSize > numOfElements/omp_get_num_threads() && numOfElements >= omp_get_num_threads()){

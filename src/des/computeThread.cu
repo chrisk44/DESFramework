@@ -142,7 +142,7 @@ void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonDa
         #ifdef DBG_MEMORY
             printf("[%d] ComputeThread %d: Copying limits at constant memory with offset %d\n",
                                             rank, cti.id, 0);
-            printf("[%d] ComputeThread %d: Copying idxSteps at constant memory with offset %d\n",
+            printf("[%d] ComputeThread %d: Copying idxSteps at constant memory with offset %lu\n",
                                             rank, cti.id, parameters.D * sizeof(Limit));
         #endif
         cudaMemcpyToSymbolWrapper(
@@ -159,7 +159,7 @@ void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonDa
             // If we can use constant memory, copy it there
             if(useConstantMemoryForData){
                 #ifdef DBG_MEMORY
-                    printf("[%d] ComputeThread %d: Copying data at constant memory with offset %d\n",
+                    printf("[%d] ComputeThread %d: Copying data at constant memory with offset %lu\n",
                                         rank, cti.id, parameters.D * (sizeof(Limit) + sizeof(unsigned long long)));
                 #endif
                 cudaMemcpyToSymbolWrapper(
@@ -423,7 +423,7 @@ void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonDa
                         result = nvmlDeviceGetSamples(gpuHandle, NVML_GPU_UTILIZATION_SAMPLES, lastSeenTimeStamp, &sampleValType, &tmpSamples, samples);
                         if (result == NVML_SUCCESS) {
                             numOfSamples += tmpSamples;
-                            for(int i=0; i<tmpSamples; i++){
+                            for(unsigned int i=0; i<tmpSamples; i++){
                                 totalUtilization += samples[i].sampleValue.uiVal;
                             }
                         }else if(result != NVML_ERROR_NOT_FOUND){
@@ -454,7 +454,7 @@ void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonDa
             #ifdef DBG_RESULTS
                 if(parameters.resultSaveType == SAVE_TYPE_ALL){
                     printf("[%d] ComputeThread %d: Results are: ", rank, cti.id);
-                    for (int i = 0; i < localNumOfElements; i++) {
+                    for (unsigned long i = 0; i < localNumOfElements; i++) {
                         printf("%f ", ((DATA_TYPE *)localResults)[i]);
                     }
                     printf("\n");
