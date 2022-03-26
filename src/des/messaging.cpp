@@ -48,3 +48,28 @@ void ParallelFramework::syncWithSlaves() const {
     int a = 0;
     MPI_Bcast(&a, 1, MPI_INT, 0, MPI_COMM_WORLD);
 }
+
+void ParallelFramework::sendReadyRequest(unsigned long maxBatchSize) const {
+    MPI_Send(nullptr, 0, MPI_INT, 0, TAG_READY, MPI_COMM_WORLD);
+    MPI_Send(&maxBatchSize, 1, MPI_UNSIGNED_LONG, 0, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD);
+}
+
+AssignedWork ParallelFramework::receiveWorkFromMaster() const {
+    AssignedWork work;
+    MMPI_Recv(&work, 2, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, nullptr);
+    return work;
+}
+
+void ParallelFramework::sendResults(RESULT_TYPE *data, size_t count) const {
+    MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
+    MPI_Send(data, count, RESULT_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
+}
+
+void ParallelFramework::sendListResults(DATA_TYPE *data, size_t numOfPoints) const {
+    MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
+    MPI_Send(data, numOfPoints * parameters.D, DATA_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
+}
+
+void ParallelFramework::sendExitSignal() const {
+    MPI_Send(nullptr, 0, MPI_INT, 0, TAG_EXITING, MPI_COMM_WORLD);
+}

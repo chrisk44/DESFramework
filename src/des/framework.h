@@ -77,6 +77,12 @@ private:
     void receiveAllResults(RESULT_TYPE* dst, size_t count, int mpiSource) const;
     int receiveListResults(DATA_TYPE* dst, size_t maxCount, int mpiSource) const;
     void syncWithSlaves() const;
+
+    void sendReadyRequest(unsigned long maxBatchSize) const;
+    AssignedWork receiveWorkFromMaster() const;
+    void sendResults(RESULT_TYPE* data, size_t count) const;
+    void sendListResults(DATA_TYPE* data, size_t numOfPoints) const;
+    void sendExitSignal() const;
 };
 
 template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>

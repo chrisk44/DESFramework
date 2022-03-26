@@ -56,13 +56,11 @@ void ParallelFramework::slaveProcessImpl(CallComputeThreadCallback callComputeTh
 
     // Synchronize with the rest of the processes
     #ifdef DBG_START_STOP
-        printf("[%d] Waiting in barrier...\n", rank);
+        printf("[%d] Syncing with other slave processes...\n", rank);
     #endif
-    // MPI_Barrier(MPI_COMM_WORLD);
-    int a = 0;
-    MPI_Bcast(&a, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    syncWithSlaves();
     #ifdef DBG_START_STOP
-        printf("[%d] Passed the barrier...\n", rank);
+        printf("[%d] Synced with other slave processes...\n", rank);
     #endif
 
     masterStopwatch.stop();

@@ -6,8 +6,7 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& comput
 	AssignedWork work;
 	unsigned long maxBatchSize;
 	unsigned long allocatedElements = 0;
-	RESULT_TYPE* localResults = nullptr;
-	MPI_Status status;
+    RESULT_TYPE* localResults = nullptr;
 	int numOfRatioAdjustments = 0;
 	unsigned long maxCpuElements = getMaxCPUBytes();
     if(parameters.resultSaveType == SAVE_TYPE_ALL)
@@ -63,11 +62,9 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& comput
 			sw.start();
 		#endif
 
-		MPI_Send(nullptr, 0, MPI_INT, 0, TAG_READY, MPI_COMM_WORLD);
-		MPI_Send(&maxBatchSize, 1, MPI_UNSIGNED_LONG, 0, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD);
-
-		// Receive a batch of data from master
-		MMPI_Recv(&work, 2, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, &status);
+        // Get a batch of data from master
+        sendReadyRequest(maxBatchSize);
+        work = receiveWorkFromMaster();
 
 		#ifdef DBG_DATA
 			printf("[%d] Coordinator: Received %lu elements starting from %lu\n", rank, work.numOfElements, work.startPoint);
@@ -301,13 +298,10 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& comput
 			sw.start();
 		#endif
 
-		MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
         if(parameters.resultSaveType == SAVE_TYPE_ALL){
-			// Send all the results
-			MPI_Send(localResults, work.numOfElements, RESULT_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
+            sendResults(localResults, work.numOfElements);
 		}else{
-			// Send the list of points
-			MPI_Send(localResults, *globalListIndexPtr, DATA_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
+            sendListResults((DATA_TYPE*) localResults, (*globalListIndexPtr) / parameters.D);
 		}
 
 		#ifdef DBG_TIME
@@ -324,8 +318,8 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& comput
 		#endif
 	}
 
-	// Notify about exiting
-	MPI_Send(nullptr, 0, MPI_INT, 0, TAG_EXITING, MPI_COMM_WORLD);
+    // Notify about exiting
+    sendExitSignal();
 
 	// Signal worker threads to finish
     tcd.globalFirst = 1;
