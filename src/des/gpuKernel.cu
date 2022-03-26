@@ -2,7 +2,6 @@
 #include <cuda_runtime.h>
 
 #include "gpuKernel.h"
-#include "utilities.h"
 
 __constant__ char constantMemoryPtr[MAX_CONSTANT_MEMORY];
 

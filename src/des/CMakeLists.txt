@@ -19,8 +19,10 @@ add_library(${MODULE_NAME} framework.cpp
                            cpuKernel.cpp
                            gpuKernel.h
                            gpuKernel.cu
-                           utilities.cpp
-                           utilities.h)
+                           utilities/stopwatch.h
+                           utilities/stopwatch.cpp
+                           utilities/utilities.cpp
+                           utilities/utilities.h)
 
 file(GLOB DES_SRC CONFIGURE_DEPENDS "*.cpp")
 set_source_files_properties(${DES_SRC} PROPERTIES LANGUAGE CUDA)

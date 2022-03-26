@@ -4,60 +4,54 @@ void ParallelFramework::slaveProcessImpl(CallComputeThreadCallback callComputeTh
     /*******************************************************************
     ********** Calculate number of worker threads (#GPUs + 1CPU) *******
     ********************************************************************/
-    int numOfThreads = 0;
-    ComputeThreadInfo* computeThreadInfo;
-    ThreadCommonData threadCommonData;
     Stopwatch masterStopwatch;
     masterStopwatch.start();
 
-    if(parameters.processingType != PROCESSING_TYPE_CPU)
-        cudaGetDeviceCount(&numOfThreads);
+    bool useCpu = parameters.processingType == PROCESSING_TYPE_CPU || parameters.processingType == PROCESSING_TYPE_BOTH;
+    bool useGpu = parameters.processingType == PROCESSING_TYPE_GPU || parameters.processingType == PROCESSING_TYPE_BOTH;
+    int numOfCpus = useCpu ? 1 : 0;
+    int numOfGpus = 0;
 
-    if(parameters.processingType != PROCESSING_TYPE_GPU)
-        numOfThreads++;
-
-    if(numOfThreads > 0){
-
-        /*******************************************************************
-        ********************** Initialization ******************************
-        ********************************************************************/
-
-        sem_init(&threadCommonData.semResults, 0, 0);
-        sem_init(&threadCommonData.semSync, 0, 1);
-        threadCommonData.results = nullptr;
-
-        computeThreadInfo = new ComputeThreadInfo[numOfThreads];
-        for(int i=0; i<numOfThreads; i++){
-            sem_init(&computeThreadInfo[i].semStart, 0, 0);
-            computeThreadInfo[i].ratio = (float)1/numOfThreads;
-            computeThreadInfo[i].totalRatio = 0;
-            computeThreadInfo[i].name[0] = '\0';
-        }
-
-        #ifdef DBG_START_STOP
-            printf("[%d] SlaveProcess: Spawning %d worker threads...\n", rank, numOfThreads);
-        #endif
-
-        /*******************************************************************
-        *************** Launch coordinator and worker threads **************
-        ********************************************************************/
-        #pragma omp parallel num_threads(numOfThreads + 1) shared(computeThreadInfo) 	// +1 thread to handle the communication with masterProcess
-        {
-            int tid = omp_get_thread_num();
-            if(tid == 0){
-                coordinatorThread(computeThreadInfo, &threadCommonData, omp_get_num_threads()-1);
-            }else{
-                // Calculate id: -1 -> CPU, 0+ -> GPU[id]
-                computeThreadInfo[tid-1].id = tid - (parameters.processingType == PROCESSING_TYPE_GPU ? 1 : 2);
-
-                computeThreadInfo[tid-1].masterStopwatch.start();
-                callComputeThread(computeThreadInfo[tid - 1], &threadCommonData);
-                computeThreadInfo[tid-1].masterStopwatch.stop();
+    if(useGpu){
+        cudaGetDeviceCount(&numOfGpus);
+        if(numOfGpus == 0){
+            if(useCpu){
+                printf("[%d] SlaveProcess: Warning: cudaGetDeviceCount returned 0. Will use only CPU(s).\n", rank);
+            } else {
+                printf("[%d] SlaveProcess: Error: cudaGetDeviceCount returned 0. Exiting.", rank);
+                valid = false;
+                return;
             }
         }
-    } else {
-        printf("[%d] SlaveProcess: Error: cudaGetDeviceCount returned 0\n", rank);
-        valid = false;
+    }
+
+    /*******************************************************************
+    ********************** Initialization ******************************
+    ********************************************************************/
+    ThreadCommonData threadCommonData;
+
+    std::vector<ComputeThreadInfo> computeThreadInfo;
+    for(int i=0; i<numOfCpus; i++) computeThreadInfo.emplace_back(-i-1, "CPU" + std::to_string(i), 0, numOfCpus + numOfGpus);
+    for(int i=0; i<numOfGpus; i++) computeThreadInfo.emplace_back(i,  "GPU" + std::to_string(i), 0, numOfCpus + numOfGpus);
+
+    #ifdef DBG_START_STOP
+        printf("[%d] SlaveProcess: Spawning %d worker threads...\n", rank, numOfThreads);
+    #endif
+
+    /*******************************************************************
+    *************** Launch coordinator and worker threads **************
+    ********************************************************************/
+    #pragma omp parallel num_threads(computeThreadInfo.size() + 1) shared(computeThreadInfo) 	// +1 thread to handle the communication with masterProcess
+    {
+        int tid = omp_get_thread_num();
+        if(tid == 0){
+            coordinatorThread(computeThreadInfo, threadCommonData);
+        }else{
+            auto& cti = computeThreadInfo[tid-1];
+            cti.masterStopwatch.start();
+            callComputeThread(cti, threadCommonData);
+            cti.masterStopwatch.stop();
+        }
     }
 
     // Synchronize with the rest of the processes
@@ -73,29 +67,20 @@ void ParallelFramework::slaveProcessImpl(CallComputeThreadCallback callComputeTh
 
     masterStopwatch.stop();
     float masterTime = masterStopwatch.getMsec();
-    for(int i=0; i<numOfThreads; i++){
-        // if(computeThreadInfo[i].averageUtilization >= 0){
-            float resourceTime = computeThreadInfo[i].masterStopwatch.getMsec();
+    for(auto& cti : computeThreadInfo){
+        // if(cti.averageUtilization >= 0){
+            float resourceTime = cti.masterStopwatch.getMsec();
             float finishIdleTime = masterTime - resourceTime;
-            computeThreadInfo[i].idleTime += finishIdleTime;
+            cti.idleTime += finishIdleTime;
             printf("[%d] Resource %d utilization: %.02f%%, total idle time: %.02f%% (%.02fms) (%s)\n", rank,
-                    computeThreadInfo[i].id,
-                    computeThreadInfo[i].averageUtilization,
-                    (computeThreadInfo[i].idleTime / masterTime) * 100,
-                    computeThreadInfo[i].idleTime,
-                    computeThreadInfo[i].name.size() == 0 ? "unnamed" : computeThreadInfo[i].name.c_str()
+                    cti.id,
+                    cti.averageUtilization,
+                    (cti.idleTime / masterTime) * 100,
+                    cti.idleTime,
+                    cti.name.size() == 0 ? "unnamed" : cti.name.c_str()
             );
         // }
     }
 
-    /*******************************************************************
-    ***************************** Finalize *****************************
-    ********************************************************************/
-    sem_destroy(&threadCommonData.semResults);
-    sem_destroy(&threadCommonData.semSync);
-    for(int i=0; i<numOfThreads; i++){
-        sem_destroy(&computeThreadInfo[i].semStart);
-    }
-    delete[] computeThreadInfo;
 }
 

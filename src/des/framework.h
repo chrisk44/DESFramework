@@ -6,17 +6,18 @@
 
 #include <cmath>
 #include <iostream>
+#include <map>
 #include <omp.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <vector>
 #include <functional>
 
-#include "utilities.h"
+#include "utilities/utilities.h"
 #include "cpuKernel.h"
 #include "gpuKernel.h"
 
-typedef std::function<void(ComputeThreadInfo&, ThreadCommonData*)> CallComputeThreadCallback;
+typedef std::function<void(ComputeThreadInfo&, ThreadCommonData&)> CallComputeThreadCallback;
 typedef std::function<void(RESULT_TYPE*, Limit*, unsigned int, unsigned long, void*, int*, unsigned long long*, unsigned long, bool, int)> CallCpuKernelCallback;
 typedef std::function<void(int, int, unsigned long, cudaStream_t, RESULT_TYPE*, unsigned long, const unsigned int, const unsigned long, const unsigned long, void*, int, bool, bool, int*, const int)> CallGpuKernelCallback;
 
@@ -56,8 +57,8 @@ public:
     int getRank() const;
 
 private:
-	void masterProcess();
-    void coordinatorThread(ComputeThreadInfo* cti, ThreadCommonData* tcd, int numOfThreads);
+    void masterProcess();
+    void coordinatorThread(std::vector<ComputeThreadInfo>& cti, ThreadCommonData& tcd);
     void getPointFromIndex(unsigned long index, DATA_TYPE* result) const;
 
     template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
@@ -65,8 +66,8 @@ private:
     void slaveProcessImpl(CallComputeThreadCallback callComputeThread);
 
     template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-    void computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd);
-    void computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonData* tcd, CallCpuKernelCallback callCpuKernel, CallGpuKernelCallback callGpuKernel);
+    void computeThread(ComputeThreadInfo& cti, ThreadCommonData& tcd);
+    void computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonData& tcd, CallCpuKernelCallback callCpuKernel, CallGpuKernelCallback callGpuKernel);
 
     int getNumOfProcesses() const;
     int receiveRequest(int& source) const;
@@ -103,13 +104,13 @@ int ParallelFramework::run() {
 
 template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
 void ParallelFramework::slaveProcess() {
-    slaveProcessImpl([&](ComputeThreadInfo& cti, ThreadCommonData* tcd){
+    slaveProcessImpl([&](ComputeThreadInfo& cti, ThreadCommonData& tcd){
         computeThread<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>(cti, tcd);
     });
 }
 
 template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData* tcd) {
+void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData& tcd) {
     CallCpuKernelCallback callCpuKernel = [&](RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
             unsigned long long* idxSteps, unsigned long startingPointLinearIndex, bool dynamicScheduling, int batchSize){
         cpu_kernel(validation_cpu, toBool_cpu, results, limits, D, numOfElements, dataPtr, listIndexPtr, idxSteps, startingPointLinearIndex, dynamicScheduling, batchSize);

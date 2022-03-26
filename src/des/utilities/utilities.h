@@ -5,11 +5,13 @@
 #include <nvml.h>
 #include <limits.h>
 #include <mpi.h>
+#include <mutex>
 #include <semaphore.h>
 #include <string>
 #include <sys/sysinfo.h>
-#include <sys/time.h>
 #include <unistd.h>
+
+#include "stopwatch.h"
 
 #define cce() {                                          \
   cudaError_t e = cudaGetLastError();                    \
@@ -26,15 +28,25 @@
 }
 
 // Memory parameters
-#define MEM_GPU_SPARE_BYTES 100*1024*1024
+#ifndef MEM_GPU_SPARE_BYTES
+    #define MEM_GPU_SPARE_BYTES 100*1024*1024
+#endif
 
 // Computing parameters
 #define MAX_DIMENSIONS 30
 
-#define RESULT_TYPE float
-#define DATA_TYPE double
-#define RESULT_MPI_TYPE MPI_FLOAT
-#define DATA_MPI_TYPE MPI_DOUBLE
+#ifndef RESULT_TYPE
+    #define RESULT_TYPE float
+#endif
+#ifndef DATA_TYPE
+    #define DATA_TYPE double
+#endif
+#ifndef RESULT_MPI_TYPE
+    #define RESULT_MPI_TYPE MPI_FLOAT
+#endif
+#ifndef DATA_MPI_TYPE
+    #define DATA_MPI_TYPE MPI_DOUBLE
+#endif
 
 // Debugging
 // #define DBG_START_STOP      // Messages about starting/stopping processes and threads
@@ -59,17 +71,6 @@
 typedef RESULT_TYPE (*validationFunc_t)(DATA_TYPE*, void*);
 typedef bool (*toBool_t)(RESULT_TYPE);
 
-class Stopwatch{
-private:
-    timespec t1, t2;
-
-public:
-    void start();
-    void stop();
-    float getNsec();
-    float getMsec();
-};
-
 unsigned long getMaxCPUBytes();
 unsigned long getMaxGPUBytes();
 unsigned long getMaxGPUBytesForGpu(int id);
@@ -79,9 +80,9 @@ int getCpuStats(float* uptime, float* idleTime);
 void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status* status);
 
 struct Limit {
-	DATA_TYPE lowerLimit;
-	DATA_TYPE upperLimit;
-	unsigned int N;
+    DATA_TYPE lowerLimit;
+    DATA_TYPE upperLimit;
+    unsigned int N;
     DATA_TYPE step;
 };
 
@@ -91,9 +92,9 @@ struct AssignedWork {
 };
 
 enum ProcessingType {
-	PROCESSING_TYPE_CPU,
-	PROCESSING_TYPE_GPU,
-	PROCESSING_TYPE_BOTH
+    PROCESSING_TYPE_CPU,
+    PROCESSING_TYPE_GPU,
+    PROCESSING_TYPE_BOTH
 };
 
 enum ResultSaveType {
@@ -101,14 +102,19 @@ enum ResultSaveType {
     SAVE_TYPE_LIST
 };
 
+enum WorkerThreadType {
+    CPU,
+    GPU
+};
+
 struct ParallelFrameworkParameters {
-	unsigned int D;
-	ProcessingType processingType = PROCESSING_TYPE_BOTH;
+    unsigned int D;
+    ProcessingType processingType = PROCESSING_TYPE_BOTH;
     ResultSaveType resultSaveType = SAVE_TYPE_LIST;
     bool overrideMemoryRestrictions = false;
     bool finalizeAfterExecution = true;
     bool printProgress = true;
-	bool benchmark = false;
+    bool benchmark = false;
 
     std::string saveFile;
     void* dataPtr = nullptr;
@@ -120,7 +126,7 @@ struct ParallelFrameworkParameters {
     bool cpuDynamicScheduling = true;
     bool threadBalancingAverage = false;
 
-	unsigned long batchSize;
+    unsigned long batchSize;
     unsigned long slaveBatchSize;
     int computeBatchSize = 200;
     int cpuComputeBatchSize = 10000;
@@ -150,9 +156,9 @@ struct SlaveProcessInfo {
     float ratio;
 };
 
-struct ThreadCommonData {
-    sem_t semResults;
-    sem_t semSync;
+class ThreadCommonData {
+public:
+    std::mutex syncMutex;
 
     int listIndex;
     unsigned long currentBatchStart;
@@ -160,21 +166,59 @@ struct ThreadCommonData {
     unsigned long globalFirst;
     unsigned long globalLast;
     unsigned long globalBatchStart;
+
+    ThreadCommonData()
+    {
+        sem_init(&resultsSem, 0, 0);
+    }
+
+    ~ThreadCommonData()
+    {
+        sem_destroy(&resultsSem);
+    }
+
+    void postResultsSemaphore(){ sem_post(&resultsSem); }
+    void waitResultsSemaphore(){ sem_wait(&resultsSem); }
+
+private:
+    sem_t resultsSem;
+
 };
 
-struct ComputeThreadInfo{
+class ComputeThreadInfo {
+public:
     int id;
+    std::string name;
+    WorkerThreadType type;
 
     unsigned long batchSize;
     unsigned long elementsCalculated;
-    sem_t semStart;
 
     Stopwatch stopwatch;
     float ratio;
     float totalRatio;
 
-    std::string name;
     float averageUtilization = -1;
     float idleTime = 0;
     Stopwatch masterStopwatch;
+
+    ComputeThreadInfo(int _id, std::string _name, int initSemValue, int numOfThreads)
+        : id(_id),
+          name(std::move(_name)),
+          ratio(1.f / (float)numOfThreads),
+          totalRatio(0)
+    {
+        sem_init(&semStart, 0, initSemValue);
+    }
+
+    ~ComputeThreadInfo() {
+        sem_destroy(&semStart);
+    }
+
+    void postStartSemaphore(){ sem_post(&semStart); }
+    void waitStartSemaphore(){ sem_wait(&semStart); }
+
+private:
+    sem_t semStart;
+
 };

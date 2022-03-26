@@ -152,7 +152,7 @@ void ParallelFramework::masterProcess() {
                 #ifdef DBG_RESULTS
                     if(parameters.resultSaveType == SAVE_TYPE_ALL){
                         printf("[%d] Master: Saving tmpResults: ", rank);
-                        for (int i = 0; i < pinfo.work.numOfElements; i++) {
+                        for (unsigned long i = 0; i < pinfo.work.numOfElements; i++) {
                             printf("%f ", tmpResults[i]);
                         }
                         printf(" at %lu\n", pinfo.work.startPoint);

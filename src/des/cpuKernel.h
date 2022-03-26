@@ -1,6 +1,6 @@
 #pragma once
 
-#include "utilities.h"
+#include "utilities/utilities.h"
 
 // CPU kernel to run the computation
 void cpu_kernel(validationFunc_t validationFunc, toBool_t toBool,

@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonData* tcd, CallCpuKernelCallback callCpuKernel, CallGpuKernelCallback callGpuKernel){
+void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonData& tcd, CallCpuKernelCallback callCpuKernel, CallGpuKernelCallback callGpuKernel){
     int gpuListIndex, globalListIndexOld;
     RESULT_TYPE* localResults;
     Stopwatch idleStopwatch;
@@ -197,7 +197,7 @@ void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonDa
         #endif
 
         idleStopwatch.start();
-        sem_wait(&cti.semStart);
+        cti.waitStartSemaphore();
         idleStopwatch.stop();
         cti.idleTime += idleStopwatch.getMsec();
 
@@ -213,7 +213,7 @@ void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonDa
         #endif
 
         // If coordinator thread is signaling to terminate...
-        if (tcd->globalFirst > tcd->globalLast)
+        if (tcd.globalFirst > tcd.globalLast)
             break;
 
         /*****************************************************************
@@ -234,37 +234,37 @@ void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonDa
             #endif
 
             idleStopwatch.start();
-            sem_wait(&tcd->semSync);
-            idleStopwatch.stop();
-            cti.idleTime += idleStopwatch.getMsec();
+            {
+                std::lock_guard<std::mutex> lock(tcd.syncMutex);
+                idleStopwatch.stop();
+                cti.idleTime += idleStopwatch.getMsec();
 
-            // Get the current global batch start point as our starting point
-            localStartPoint = tcd->globalBatchStart;
-            // Increment the global batch start point by our batch size
-            tcd->globalBatchStart += cti.batchSize;
+                // Get the current global batch start point as our starting point
+                localStartPoint = tcd.globalBatchStart;
+                // Increment the global batch start point by our batch size
+                tcd.globalBatchStart += cti.batchSize;
 
-            // Check for globalBatchStart overflow and limit it to globalLast+1 to avoid later overflows
-            // If the new globalBatchStart is smaller than our local start point, the increment caused an overflow
-            // If the localStart point in larger than the global last, then the elements have already been exhausted
-            if(tcd->globalBatchStart < localStartPoint || localStartPoint > tcd->globalLast){
-                // printf("[%d] ComputeThread %d: Fixing globalBatchStart from %lu to %lu\n",
-                // 				rank, cti.id, tcd->globalBatchStart, tcd->globalLast + 1);
-                tcd->globalBatchStart = tcd->globalLast + 1;
+                // Check for globalBatchStart overflow and limit it to globalLast+1 to avoid later overflows
+                // If the new globalBatchStart is smaller than our local start point, the increment caused an overflow
+                // If the localStart point in larger than the global last, then the elements have already been exhausted
+                if(tcd.globalBatchStart < localStartPoint || localStartPoint > tcd.globalLast){
+                    // printf("[%d] ComputeThread %d: Fixing globalBatchStart from %lu to %lu\n",
+                    // 				rank, cti.id, tcd.globalBatchStart, tcd.globalLast + 1);
+                    tcd.globalBatchStart = tcd.globalLast + 1;
+                }
             }
 
-            sem_post(&tcd->semSync);
-
             // If we are out of elements then terminate the loop
-            if(localStartPoint > tcd->globalLast)
+            if(localStartPoint > tcd.globalLast)
                 break;
 
-            localLast = std::min(localStartPoint + cti.batchSize - 1 , tcd->globalLast);
+            localLast = std::min(localStartPoint + cti.batchSize - 1 , tcd.globalLast);
             localNumOfElements = localLast - localStartPoint + 1;
 
             if(parameters.resultSaveType == SAVE_TYPE_LIST)
-                localResults = tcd->results;
+                localResults = tcd.results;
             else
-                localResults = &tcd->results[localStartPoint - tcd->globalFirst];
+                localResults = &tcd.results[localStartPoint - tcd.globalFirst];
 
             #ifdef DBG_TIME
                 sw.stop();
@@ -399,7 +399,7 @@ void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonDa
                     cudaMemcpy(&gpuListIndex, deviceListIndexPtr, sizeof(int), cudaMemcpyDeviceToHost);
 
                     // Increment the global list index counter
-                    globalListIndexOld = __sync_fetch_and_add(&tcd->listIndex, gpuListIndex);
+                    globalListIndexOld = __sync_fetch_and_add(&tcd.listIndex, gpuListIndex);
 
                     // Get the results from the GPU
                     cudaMemcpy(&((DATA_TYPE*)localResults)[globalListIndexOld], deviceResults, gpuListIndex * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
@@ -441,7 +441,7 @@ void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonDa
                     sw.start();
                 #endif
 
-                callCpuKernel(localResults, limits.data(), parameters.D, localNumOfElements, parameters.dataPtr, parameters.resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd->listIndex,
+                callCpuKernel(localResults, limits.data(), parameters.D, localNumOfElements, parameters.dataPtr, parameters.resultSaveType == SAVE_TYPE_ALL ? nullptr : &tcd.listIndex,
                             idxSteps.data(), localStartPoint, parameters.cpuDynamicScheduling, parameters.cpuComputeBatchSize);
 
             }
@@ -486,7 +486,7 @@ void ParallelFramework::computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonDa
         #endif
 
         // Let coordinatorThread know that the results are ready
-        sem_post(&tcd->semResults);
+        tcd.postResultsSemaphore();
     }
 
     #ifdef DBG_START_STOP

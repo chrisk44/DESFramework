@@ -1,5 +1,7 @@
 #!/bin/bash
 
+DES_BIN="../build-docker/desframework"
+
 set -x
 
 # GPU tests for compute batch sizes
@@ -9,7 +11,7 @@ set -x
 #        echo ------------------------------ compute batch size = $cbs ------------------------------ | tee -a results_exp.txt
 
 #        kill `pidof parallelFramework`
-#        mpirun -n 2 --bind-to none --mca btl_base_warn_component_unused 0 ./parallelFramework -gs 3 -gpu -cbs $cbs -ssl 0 | tee -a results_exp.txt
+#        mpirun -n 2 --bind-to none --mca btl_base_warn_component_unused 0 ${DES_BIN} -gs 3 -gpu -cbs $cbs -ssl 0 | tee -a results_exp.txt
 
 #done
 
@@ -17,36 +19,38 @@ set -x
 
 # CPU tests for cpu compute batch sizes
 
-for ccbs in 100000 1000000; do
-
-        echo ------------------ ccbs = $ccbs ------------------- | tee -a results_exp.txt
-
-        kill `pidof parallelFramework`
-        mpirun -n 2 --bind-to none --mca btl_base_warn_component_unused 0 ./parallelFramework -gs 3 -cpu -ccbs $ccbs -ssl 0 | tee -a results_exp.txt
-
-        if [[ $? != 0 ]]; then
-        	exit 1
-        fi
-
-done
-
-mv results_exp.txt results_cpu2.txt
+#for ccbs in 100000 1000000; do
+#
+#        echo ------------------ ccbs = $ccbs ------------------- | tee -a results_exp.txt
+#
+#        kill `pidof parallelFramework`
+#        mpirun -n 2 --bind-to none --mca btl_base_warn_component_unused 0 ${DES_BIN} -gs 3 -cpu -ccbs $ccbs -ssl 0 | tee -a results_exp.txt
+#
+#        if [[ $? != 0 ]]; then
+#        	exit 1
+#        fi
+#
+#done
+#
+#mv results_exp.txt results_cpu2.txt
 
 # CPU+GPU tests for slave batch sizes = 1e5 -> 1e11 and both balancing types (last, average)
 
-#ccbs=10000
-#cbs=20
+ccbs=10000
+cbs=20
 
-#for tba in 0 1; do
-#for sbs in 100000 1000000 10000000 100000000 1000000000 10000000000 100000000000; do
+for tba in 0 1; do
+for sbs in 100000 1000000 10000000 100000000 1000000000 10000000000 100000000000; do
 
-#        echo ------------------ tba = $tba, sbs = $sbs ------------------- | tee -a results_exp.txt
+        echo ------------------ tba = $tba, sbs = $sbs ------------------- | tee -a results_exp.txt
 
-#        kill `pidof parallelFramework`
-#        mpirun -n 2 --bind-to none --mca btl_base_warn_component_unused 0 ./parallelFramework -gs 3 -both -tba $tba -sbs $sbs -cbs $cbs -ccbs $ccbs -ssl 0 | tee -a results_exp.txt
+        kill `pidof parallelFramework`
+        mpirun -n 2 --bind-to none --mca btl_base_warn_component_unused 0 ${DES_BIN} -gs 3 -both -tba $tba -sbs $sbs -cbs $cbs -ccbs $ccbs -ssl 0 | tee -a results_exp.txt
 
-#done
-#done
+done
+done
+
+mv results_exp.txt results_cpugpu.txt
 
 # CPU+GPU tests for slave batch size factor = 1/4, 1/8, 1/16, 1/32, 1/64 and both balancing types (last, average)
 
@@ -58,7 +62,7 @@ mv results_exp.txt results_cpu2.txt
 #        echo ------------------ tba = $tba, sbsf = $sbsf ------------------- | tee -a results_exp.txt
 
 #        kill `pidof parallelFramework`
-#        mpirun -n 2 --bind-to none --mca btl_base_warn_component_unused 0 ./parallelFramework -gs 3 -both -tba $tba -sbsf $sbsf -cbs $cbs -ccbs $ccbs -ssl 0 | tee -a results_exp.txt
+#        mpirun -n 2 --bind-to none --mca btl_base_warn_component_unused 0 ${DES_BIN} -gs 3 -both -tba $tba -sbsf $sbsf -cbs $cbs -ccbs $ccbs -ssl 0 | tee -a results_exp.txt
         
 #        if [[ $? != 0 ]]; then
 #        	exit 1
