@@ -1,6 +1,8 @@
 #include "framework.h"
 
-void ParallelFramework::slaveProcessImpl(CallComputeThreadCallback callComputeThread) {
+#include <list>
+
+void ParallelFramework::slaveProcessImpl(CallCpuKernelCallback callCpuKernel, CallGpuKernelCallback callGpuKernel) {
     /*******************************************************************
     ********** Calculate number of worker threads (#GPUs + 1CPU) *******
     ********************************************************************/
@@ -28,31 +30,20 @@ void ParallelFramework::slaveProcessImpl(CallComputeThreadCallback callComputeTh
     /*******************************************************************
     ********************** Initialization ******************************
     ********************************************************************/
-    ThreadCommonData threadCommonData;
+    ThreadCommonData tcd;
 
-    std::vector<ComputeThreadInfo> computeThreadInfo;
-    for(int i=0; i<numOfCpus; i++) computeThreadInfo.emplace_back(-i-1, "CPU" + std::to_string(i), 0, numOfCpus + numOfGpus);
-    for(int i=0; i<numOfGpus; i++) computeThreadInfo.emplace_back(i,  "GPU" + std::to_string(i), 0, numOfCpus + numOfGpus);
+    std::vector<ComputeThread> computeThreads;
+    for(int i=0; i<numOfCpus; i++) computeThreads.emplace_back(-i-1, "CPU" + std::to_string(i), WorkerThreadType::CPU, *this, tcd, callCpuKernel, callGpuKernel);
+    for(int i=0; i<numOfGpus; i++) computeThreads.emplace_back(i,  "GPU" + std::to_string(i), WorkerThreadType::GPU, *this, tcd, callCpuKernel, callGpuKernel);
 
     #ifdef DBG_START_STOP
-        printf("[%d] SlaveProcess: Spawning %d worker threads...\n", rank, numOfThreads);
+        printf("[%d] SlaveProcess: Created %lu compute threads...\n", rank, computeThreads.size());
     #endif
 
-    /*******************************************************************
-    *************** Launch coordinator and worker threads **************
-    ********************************************************************/
-    #pragma omp parallel num_threads(computeThreadInfo.size() + 1) shared(computeThreadInfo) 	// +1 thread to handle the communication with masterProcess
-    {
-        int tid = omp_get_thread_num();
-        if(tid == 0){
-            coordinatorThread(computeThreadInfo, threadCommonData);
-        }else{
-            auto& cti = computeThreadInfo[tid-1];
-            cti.masterStopwatch.start();
-            callComputeThread(cti, threadCommonData);
-            cti.masterStopwatch.stop();
-        }
-    }
+    coordinatorThread(computeThreads, tcd);
+
+    // Notify master about exiting
+    sendExitSignal();
 
     // Synchronize with the rest of the processes
     #ifdef DBG_START_STOP
@@ -64,21 +55,20 @@ void ParallelFramework::slaveProcessImpl(CallComputeThreadCallback callComputeTh
     #endif
 
     masterStopwatch.stop();
-    float masterTime = masterStopwatch.getMsec();
-    for(auto& cti : computeThreadInfo){
+//    float masterTime = masterStopwatch.getMsec();
+    for(auto& cti : computeThreads){
         // if(cti.averageUtilization >= 0){
-            float resourceTime = cti.masterStopwatch.getMsec();
-            float finishIdleTime = masterTime - resourceTime;
-            cti.idleTime += finishIdleTime;
+//            float resourceTime = cti.masterStopwatch.getMsec();
+//            float finishIdleTime = masterTime - resourceTime;
+//            cti.idleTime += finishIdleTime;
             printf("[%d] Resource %d utilization: %.02f%%, total idle time: %.02f%% (%.02fms) (%s)\n", rank,
-                    cti.id,
-                    cti.averageUtilization,
-                    (cti.idleTime / masterTime) * 100,
-                    cti.idleTime,
-                    cti.name.size() == 0 ? "unnamed" : cti.name.c_str()
+                    cti.getId(),                                // cti.id,
+                    cti.getUtilization(),                       // cti.averageUtilization,
+                    cti.getIdleTime() / cti.getTotalTime(),     // (cti.idleTime / masterTime) * 100,
+                    cti.getIdleTime(),                          // cti.idleTime,
+                    cti.getName().c_str()                       // cti.name.size() == 0 ? "unnamed" : cti.name.c_str()
             );
         // }
     }
-
 }
 

@@ -10,6 +10,7 @@ set(MODULE_NAME DES)
 
 add_library(${MODULE_NAME} framework.cpp
                            framework.h
+                           computeThread.h
                            computeThread.cu
                            coordinatorThread.cpp
                            masterProcess.cpp
@@ -19,10 +20,12 @@ add_library(${MODULE_NAME} framework.cpp
                            cpuKernel.cpp
                            gpuKernel.h
                            gpuKernel.cu
-                           utilities/stopwatch.h
-                           utilities/stopwatch.cpp
-                           utilities/utilities.cpp
-                           utilities/utilities.h)
+                           defs.h
+                           types.h
+                           stopwatch.h
+                           stopwatch.cpp
+                           utilities.cpp
+                           utilities.h)
 
 file(GLOB DES_SRC CONFIGURE_DEPENDS "*.cpp")
 set_source_files_properties(${DES_SRC} PROPERTIES LANGUAGE CUDA)
@@ -36,7 +39,7 @@ target_compile_options(${MODULE_NAME} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:
                        --generate-line-info
                        --use_fast_math
                        --relocatable-device-code=true
-                       -Xcompiler "-fopenmp -O3 -g"
+                       -Xcompiler "-fopenmp -O3 -g -Wall -Wextra"
                        >)
 
 set_property(TARGET ${MODULE_NAME} PROPERTY CUDA_ARCHITECTURES 61)

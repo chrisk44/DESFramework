@@ -1,6 +1,8 @@
 #include "framework.h"
 
-void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& computeThreadInfo, ThreadCommonData& tcd){
+#include "utilities.h"
+
+void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThreads, ThreadCommonData& tcd){
     int* globalListIndexPtr = &tcd.listIndex;
 
 	AssignedWork work;
@@ -13,6 +15,13 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& comput
 		maxCpuElements /= sizeof(RESULT_TYPE);
 	else
         maxCpuElements /= parameters.D * sizeof(DATA_TYPE);
+
+    std::map<ComputeThreadID, float> ratios;
+    std::map<ComputeThreadID, float> ratioSums;
+    for(const auto& ct : computeThreads){
+        ratios[ct.getId()] = 1.f / (float) computeThreads.size();
+        ratioSums[ct.getId()] = 0.f;
+    }
 
 	#ifdef DBG_TIME
 		Stopwatch sw;
@@ -108,47 +117,47 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& comput
 		 * ratio * min(slaveBatchSize, numOfElements).
 		 * Otherwise it will be ratio * work.numOfElements and we will make sure
 		 * later that exactly work.numOfElements elements have been assigned.
-		 */
-		unsigned long total = 0;
-        for(auto& cti : computeThreadInfo){
+         */
+        std::map<ComputeThreadID, size_t> batchSizes;
+        unsigned long total = 0;
+        for(auto& ct : computeThreads){
             if(parameters.slaveDynamicScheduling)
-                cti.batchSize = std::max((unsigned long) 1, (unsigned long) (cti.ratio * std::min(
+                batchSizes[ct.getId()] = std::max((unsigned long) 1, (unsigned long) (ratios[ct.getId()] * std::min(
                     parameters.slaveBatchSize, work.numOfElements)));
-			else{
-                cti.batchSize = std::max((unsigned long) 1, (unsigned long) (cti.ratio * work.numOfElements));
-                total += cti.batchSize;
-			}
-		}
+            else{
+                batchSizes[ct.getId()] = std::max((unsigned long) 1, (unsigned long) (ratios[ct.getId()] * work.numOfElements));
+                total += batchSizes[ct.getId()];
+            }
+        }
 
-		/*
-		 * If we are NOT using dynamic scheduling, make sure that exactly
-		 * work.numOfElements elements have been assigned
-		 */
+        /*
+         * If we are NOT using dynamic scheduling, make sure that exactly
+         * work.numOfElements elements have been assigned
+         */
         if(!parameters.slaveDynamicScheduling){
-			if(total < work.numOfElements){
-				// Something was left out, assign it to first thread
-                computeThreadInfo.begin()->batchSize += work.numOfElements - total;
-			}else if(total > work.numOfElements){
-				// More elements were given, remove from the first threads
-                for(auto& cti : computeThreadInfo){
-					// If thread i has enough elements, remove all the extra from it
-                    if(cti.batchSize > total - work.numOfElements){
-                        cti.batchSize -= total - work.numOfElements;
-						total = work.numOfElements;
-						break;
-					}
+            if(total < work.numOfElements){
+                // Something was left out, assign it to first thread
+                batchSizes.begin()->second += work.numOfElements - total;
+            }else if(total > work.numOfElements){
+                // More elements were given, remove from the first threads
+                for(auto& ct : computeThreads){
+                    // If thread i has enough elements, remove all the extra from it
+                    if(batchSizes[ct.getId()] > total - work.numOfElements){
+                        batchSizes[ct.getId()] -= total - work.numOfElements;
+                        total = work.numOfElements;
+                        break;
+                    }
 
-					// else assign 0 elements to it and move to the next thread
-                    total -= cti.batchSize;
-                    cti.batchSize = 0;
-				}
-			}
-		}
+                    // else assign 0 elements to it and move to the next thread
+                    total -= batchSizes[ct.getId()];
+                    batchSizes[ct.getId()] = 0;
+                }
+            }
+        }
 
 		#ifdef DBG_RATIO
-            for(auto& pair : computeThreadInfo){
-				printf("[%d] Coordinator: Thread %d -> Assigning batch size = %lu elements\n",
-                        rank, pair.first, pair.second.batchSize);
+            for(const auto& pair : batchSizes){
+                printf("[%d] Coordinator: Thread %d -> Assigning batch size = %lu elements\n", rank, pair.first, pair.second);
             }
 		#endif
 
@@ -171,9 +180,8 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& comput
 		*globalListIndexPtr = 0;
 
 		// Start all the worker threads
-        for(auto& cti : computeThreadInfo){
-            cti.elementsCalculated = 0;
-            cti.postStartSemaphore();
+        for(auto& cti : computeThreads){
+            cti.dispatch(batchSizes[cti.getId()]);
 		}
 
 		#ifdef DBG_TIME
@@ -183,11 +191,11 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& comput
 		#endif
 
 		#ifdef DBG_MPI_STEPS
-            printf("[%d] Coordinator: Waiting for results from %d threads...\n", rank, numOfThreads);
+            printf("[%d] Coordinator: Waiting for results from %lu threads...\n", rank, computeThreads.size());
 		#endif
 		// Wait for all worker threads to finish their work
-        for(size_t i=0; i<computeThreadInfo.size(); i++){
-            tcd.waitResultsSemaphore();
+        for(auto& ct : computeThreads){
+            ct.wait();
 		}
 
 		#ifdef DBG_TIME
@@ -196,13 +204,17 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& comput
 		#endif
 
 		// Sanity check
-		unsigned long totalCalculated = 0;
-        for(const auto& cti : computeThreadInfo)
-            totalCalculated += cti.elementsCalculated;
+        size_t totalCalculated = 0;
+        for(const auto& ct : computeThreads)
+            totalCalculated += ct.getLastCalculatedElements();
 
 		if(totalCalculated != work.numOfElements){
 			printf("[%d] Coordinator: Shit happened. Total calculated elements are %lu but %lu were assigned to this slave\n",
 								rank, totalCalculated, work.numOfElements);
+
+            for(const auto& ct : computeThreads){
+                printf("[%d] Coordinator: Thread %d calculated %lu elements\n", rank, ct.getId(), ct.getLastCalculatedElements());
+            }
 
 			exit(-123);
 		}
@@ -235,16 +247,17 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& comput
 			bool failed = false;
 			float totalScore = 0;
 			float newRatio;
-            std::map<int, float> scores;
+            std::map<ComputeThreadID, float> scores;
 
-            for(const auto& cti : computeThreadInfo){
-                if(cti.stopwatch.getMsec() < 0){
+            for(const auto& cti : computeThreads){
+                float runTime = cti.getLastRunTime();
+                if(runTime < 0){
 					printf("[%d] Coordinator: Error: Skipping ratio correction due to negative time\n", rank);
 					failed = true;
 					break;
 				}
 
-                if(cti.stopwatch.getMsec() < parameters.minMsForRatioAdjustment){
+                if(runTime < parameters.minMsForRatioAdjustment){
 					#ifdef DBG_RATIO
 						printf("[%d] Coordinator: Skipping ratio correction due to fast execution\n", rank);
 					#endif
@@ -254,30 +267,30 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& comput
 				}
 
                 if(parameters.benchmark){
-                    printf("[%d] Coordinator: Thread %d time: %f ms\n", rank, cti.id, cti.stopwatch.getMsec());
+                    printf("[%d] Coordinator: Thread %d time: %f ms\n", rank, cti.getId(), runTime);
 				}
 
-                scores[cti.id] = cti.elementsCalculated / cti.stopwatch.getMsec();
-                totalScore += scores[cti.id];
+                scores[cti.getId()] = cti.getLastCalculatedElements() / runTime;
+                totalScore += scores[cti.getId()];
 			}
 
 			if(!failed){
 				// Adjust the ratio for each thread
 				numOfRatioAdjustments++;
-                for(auto& cti : computeThreadInfo){
-                    newRatio = scores[cti.id] / totalScore;
-                    cti.totalRatio += newRatio;
+                for(auto& ct : computeThreads){
+                    newRatio = scores[ct.getId()] / totalScore;
+                    ratioSums[ct.getId()] += newRatio;
 
                     if(parameters.threadBalancingAverage){
-                        cti.ratio = cti.totalRatio / numOfRatioAdjustments;
+                        ratios[ct.getId()] = ratioSums[ct.getId()] / numOfRatioAdjustments;
 					}else{
-                        cti.ratio = newRatio;
+                        ratios[ct.getId()] = newRatio;
 					}
 
 					#ifdef DBG_RATIO
                         printf("[%d] Coordinator: Adjusting thread %d ratio to %f (elements = %lu, time = %f ms, score = %f)\n",
-                                rank, cti.id, cti.ratio, cti.elementsCalculated,
-                                cti.stopwatch.getMsec(), cti.elementsCalculated/cti.stopwatch.getMsec());
+                                rank, ct.getId(), ratios[ct.getId()], ct.getLastCalculatedElements(),
+                                ct.getLastRunTime(), ct.getLastCalculatedElements()/ct.getLastRunTime());
 					#endif
 				}
 			}
@@ -316,17 +329,15 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThreadInfo>& comput
 			printf("Time for scores: %f ms\n", time_scores);
 			printf("Time for results: %f ms\n", time_results);
 		#endif
-	}
-
-    // Notify about exiting
-    sendExitSignal();
+    }
 
 	// Signal worker threads to finish
     tcd.globalFirst = 1;
     tcd.globalLast = 0;
-    for(auto& cti : computeThreadInfo){
-        cti.postStartSemaphore();
-	}
+//    for(auto& ct : computeThreads){
+////        cti.postStartSemaphore();
+//        ct.stop();
+//	}
 
 	free(localResults);
 }

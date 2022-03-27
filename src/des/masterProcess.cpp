@@ -1,4 +1,5 @@
 #include "framework.h"
+#include "utilities.h"
 
 #include <cstring>
 
@@ -66,7 +67,7 @@ void ParallelFramework::masterProcess() {
                 pinfo.maxBatchSize = receiveMaxBatchSize(mpiSource);
 
                 // For the first batches, use low batch size so the process can optimize its computeThread scores early
-                if(pinfo.jobsCompleted < parameters.slowStartLimit){
+                if((int) pinfo.jobsCompleted < parameters.slowStartLimit){
                     pinfo.maxBatchSize = std::min(pinfo.maxBatchSize, (unsigned long) (parameters.slowStartBase * pow(2, pinfo.jobsCompleted)));
                     #ifdef DBG_RATIO
                         printf("[%d] Master: Setting temporary maxBatchSize=%lu for slave %d\n", rank, pinfo.maxBatchSize, mpiSource);

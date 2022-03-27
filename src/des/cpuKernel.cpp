@@ -3,8 +3,8 @@
 #include "cpuKernel.h"
 
 // CPU kernel to run the computation
-void cpu_kernel(validationFunc_t validationFunc, toBool_t toBool, RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
-    unsigned long long* idxSteps, unsigned long startingPointLinearIndex, bool dynamicScheduling, int batchSize) {
+void cpu_kernel(validationFunc_t validationFunc, toBool_t toBool, RESULT_TYPE* results, const Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
+    const unsigned long long* idxSteps, unsigned long startingPointLinearIndex, bool dynamicScheduling, int batchSize) {
 
     unsigned long currentBatchStart = startingPointLinearIndex;
     unsigned long globalLast = startingPointLinearIndex + numOfElements - 1;
@@ -67,7 +67,7 @@ void cpu_kernel(validationFunc_t validationFunc, toBool_t toBool, RESULT_TYPE* r
                     if(toBool(validationFunc(point, dataPtr))){
                         // Append element to the list
                         carry = __sync_fetch_and_add(listIndexPtr, D);
-                        for(d = 0; d < D; d++){
+                        for(d = 0; d < (int) D; d++){
                             ((DATA_TYPE *)results)[carry + d] = point[d];
                         }
                     }
@@ -75,7 +75,7 @@ void cpu_kernel(validationFunc_t validationFunc, toBool_t toBool, RESULT_TYPE* r
 
                 // Increment indices and point
                 d = 0;
-                while(d < D){
+                while(d < (int) D){
                     // Increment dimension d
                     currentIndex[d]++;
 

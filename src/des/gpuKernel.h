@@ -3,7 +3,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#include "utilities/utilities.h"
+#include "types.h"
 
 #define MAX_CONSTANT_MEMORY (65536 - 24)			// Don't know why...
 extern __constant__ char constantMemoryPtr[MAX_CONSTANT_MEMORY];

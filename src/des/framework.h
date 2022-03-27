@@ -6,20 +6,20 @@
 
 #include <cmath>
 #include <iostream>
+#include <list>
 #include <map>
+#include <mpi.h>
 #include <omp.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <vector>
 #include <functional>
 
-#include "utilities/utilities.h"
+#include "computeThread.h"
 #include "cpuKernel.h"
 #include "gpuKernel.h"
 
-typedef std::function<void(ComputeThreadInfo&, ThreadCommonData&)> CallComputeThreadCallback;
-typedef std::function<void(RESULT_TYPE*, Limit*, unsigned int, unsigned long, void*, int*, unsigned long long*, unsigned long, bool, int)> CallCpuKernelCallback;
-typedef std::function<void(int, int, unsigned long, cudaStream_t, RESULT_TYPE*, unsigned long, const unsigned int, const unsigned long, const unsigned long, void*, int, bool, bool, int*, const int)> CallGpuKernelCallback;
+typedef std::function<void(ComputeThread&, ThreadCommonData&)> ComputeThreadStarter;
 
 class ParallelFramework {
 private:
@@ -48,8 +48,13 @@ public:
 	template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
     int run();
 
+    const decltype(parameters)& getParameters() const { return parameters; }
+    const decltype(limits)& getLimits() const { return limits; }
+    const decltype(idxSteps)& getIndexSteps() const { return idxSteps; }
+
     const RESULT_TYPE* getResults() const;
     const std::vector<std::vector<DATA_TYPE>>& getList() const;
+
     void getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst) const;
     unsigned long getIndexFromIndices(unsigned long* pointIdx) const;
     unsigned long getIndexFromPoint(DATA_TYPE* point) const;
@@ -58,16 +63,12 @@ public:
 
 private:
     void masterProcess();
-    void coordinatorThread(std::vector<ComputeThreadInfo>& cti, ThreadCommonData& tcd);
+    void coordinatorThread(std::vector<ComputeThread>& cti, ThreadCommonData& tcd);
     void getPointFromIndex(unsigned long index, DATA_TYPE* result) const;
 
     template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
     void slaveProcess();
-    void slaveProcessImpl(CallComputeThreadCallback callComputeThread);
-
-    template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-    void computeThread(ComputeThreadInfo& cti, ThreadCommonData& tcd);
-    void computeThreadImpl(ComputeThreadInfo& cti, ThreadCommonData& tcd, CallCpuKernelCallback callCpuKernel, CallGpuKernelCallback callGpuKernel);
+    void slaveProcessImpl(CallCpuKernelCallback callCpuKernel, CallGpuKernelCallback callGpuKernel);
 
     int getNumOfProcesses() const;
     int receiveRequest(int& source) const;
@@ -110,15 +111,8 @@ int ParallelFramework::run() {
 
 template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
 void ParallelFramework::slaveProcess() {
-    slaveProcessImpl([&](ComputeThreadInfo& cti, ThreadCommonData& tcd){
-        computeThread<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>(cti, tcd);
-    });
-}
-
-template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData& tcd) {
-    CallCpuKernelCallback callCpuKernel = [&](RESULT_TYPE* results, Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
-            unsigned long long* idxSteps, unsigned long startingPointLinearIndex, bool dynamicScheduling, int batchSize){
+    CallCpuKernelCallback callCpuKernel = [&](RESULT_TYPE* results, const Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
+            const unsigned long long* idxSteps, unsigned long startingPointLinearIndex, bool dynamicScheduling, int batchSize){
         cpu_kernel(validation_cpu, toBool_cpu, results, limits, D, numOfElements, dataPtr, listIndexPtr, idxSteps, startingPointLinearIndex, dynamicScheduling, batchSize);
     };
 
@@ -134,6 +128,6 @@ void ParallelFramework::computeThread(ComputeThreadInfo& cti, ThreadCommonData& 
         );
     };
 
-    computeThreadImpl(cti, tcd, callCpuKernel, callGpuKernel);
+    slaveProcessImpl(callCpuKernel, callGpuKernel);
 }
 

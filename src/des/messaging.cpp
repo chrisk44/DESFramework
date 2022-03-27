@@ -1,11 +1,23 @@
 #include "framework.h"
 
+#include "defs.h"
+#include "utilities.h"
+
 #include <mpi.h>
 
 int ParallelFramework::getNumOfProcesses() const {
     int num;
     MPI_Comm_size(MPI_COMM_WORLD, &num);
     return num;
+}
+
+void ParallelFramework::sendReadyRequest(unsigned long maxBatchSize) const {
+    MPI_Send(nullptr, 0, MPI_INT, 0, TAG_READY, MPI_COMM_WORLD);
+    MPI_Send(&maxBatchSize, 1, MPI_UNSIGNED_LONG, 0, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD);
+}
+
+void ParallelFramework::sendBatchSize(const AssignedWork& work, int mpiSource) const {
+    MPI_Send(&work, 2, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, MPI_COMM_WORLD);
 }
 
 int ParallelFramework::receiveRequest(int& source) const {
@@ -22,16 +34,32 @@ unsigned long ParallelFramework::receiveMaxBatchSize(int mpiSource) const {
     return maxBatchSize;
 }
 
-void ParallelFramework::sendBatchSize(const AssignedWork& work, int mpiSource) const {
-    MPI_Send(&work, 2, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, MPI_COMM_WORLD);
+void ParallelFramework::sendExitSignal() const {
+    MPI_Send(nullptr, 0, MPI_INT, 0, TAG_EXITING, MPI_COMM_WORLD);
 }
 
-void ParallelFramework::receiveAllResults(float *dst, size_t count, int mpiSource) const {
+AssignedWork ParallelFramework::receiveWorkFromMaster() const {
+    AssignedWork work;
+    MMPI_Recv(&work, 2, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, nullptr);
+    return work;
+}
+
+void ParallelFramework::sendResults(RESULT_TYPE *data, size_t count) const {
+    MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
+    MPI_Send(data, count, RESULT_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
+}
+
+void ParallelFramework::receiveAllResults(RESULT_TYPE *dst, size_t count, int mpiSource) const {
     MPI_Status status;
     MMPI_Recv(dst, count, RESULT_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
 }
 
-int ParallelFramework::receiveListResults(double *dst, size_t maxCount, int mpiSource) const {
+void ParallelFramework::sendListResults(DATA_TYPE *data, size_t numOfPoints) const {
+    MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
+    MPI_Send(data, numOfPoints * parameters.D, DATA_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
+}
+
+int ParallelFramework::receiveListResults(DATA_TYPE *dst, size_t maxCount, int mpiSource) const {
     MPI_Status status;
     MMPI_Recv(dst, parameters.overrideMemoryRestrictions ? INT_MAX : maxCount * parameters.D, DATA_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
 
@@ -47,29 +75,4 @@ void ParallelFramework::syncWithSlaves() const {
     // MPI_Barrier(MPI_COMM_WORLD);
     int a = 0;
     MPI_Bcast(&a, 1, MPI_INT, 0, MPI_COMM_WORLD);
-}
-
-void ParallelFramework::sendReadyRequest(unsigned long maxBatchSize) const {
-    MPI_Send(nullptr, 0, MPI_INT, 0, TAG_READY, MPI_COMM_WORLD);
-    MPI_Send(&maxBatchSize, 1, MPI_UNSIGNED_LONG, 0, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD);
-}
-
-AssignedWork ParallelFramework::receiveWorkFromMaster() const {
-    AssignedWork work;
-    MMPI_Recv(&work, 2, MPI_UNSIGNED_LONG, 0, TAG_DATA, MPI_COMM_WORLD, nullptr);
-    return work;
-}
-
-void ParallelFramework::sendResults(RESULT_TYPE *data, size_t count) const {
-    MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
-    MPI_Send(data, count, RESULT_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
-}
-
-void ParallelFramework::sendListResults(DATA_TYPE *data, size_t numOfPoints) const {
-    MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
-    MPI_Send(data, numOfPoints * parameters.D, DATA_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
-}
-
-void ParallelFramework::sendExitSignal() const {
-    MPI_Send(nullptr, 0, MPI_INT, 0, TAG_EXITING, MPI_COMM_WORLD);
 }
