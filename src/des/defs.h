@@ -54,3 +54,4 @@
 #define TAG_MAX_DATA_COUNT 4
 #define TAG_EXITING 5
 #define TAG_RESULTS_DATA 6
+#define TAG_RESULTS_COUNT 7

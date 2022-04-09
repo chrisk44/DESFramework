@@ -9,16 +9,7 @@ void ParallelFramework::masterProcess() {
 
     SlaveProcessInfo slaveProcessInfo[numOfSlaves];
 
-    void* tmpResultsMem;
-    if(m_parameters.overrideMemoryRestrictions){
-        tmpResultsMem = malloc(getMaxCPUBytes());
-    }else{
-        tmpResultsMem = malloc(m_parameters.resultSaveType == SAVE_TYPE_ALL ? m_parameters.batchSize * sizeof(RESULT_TYPE) : m_parameters.batchSize * m_parameters.D * sizeof(DATA_TYPE));
-    }
-    if(tmpResultsMem == nullptr){
-        printf("[%d] Master: Error: Can't allocate memory for tmpResultsMem\n", m_rank);
-        exit(-1);
-    }
+    std::vector<DATA_TYPE> tmpList;
 
     #ifdef DBG_TIME
         Stopwatch sw;
@@ -121,14 +112,14 @@ void ParallelFramework::masterProcess() {
                         printf("\n");
                     #endif
                 }else{
-                    auto count = receiveListResults((DATA_TYPE*) tmpResultsMem, pinfo.work.numOfElements, mpiSource);
+                    auto count = receiveListResults(tmpList, pinfo.work.numOfElements, mpiSource);
                     #ifdef DBG_RESULTS_RAW
                         printf("[%d] Master: Received %d list results from %d: ", m_rank, count, pinfo.id);
                     #endif
                     for(int i=0; i<count; i++){
                         std::vector<DATA_TYPE> point;
                         for(unsigned int j=0; j<m_parameters.D; j++){
-                            point.push_back(((DATA_TYPE*)tmpResultsMem)[i*m_parameters.D + j]);
+                            point.push_back(tmpList[i*m_parameters.D + j]);
                         }
                         m_listResults.push_back(point);
                         #ifdef DBG_RESULTS_RAW
@@ -141,7 +132,7 @@ void ParallelFramework::masterProcess() {
                         printf("\n");
                     #endif
                     #ifdef DBG_RESULTS
-                        printf("[%d] Master: Received %u elements from %d, new total is %lu\n", rank, count, pinfo.id, listResults.size());
+                        printf("[%d] Master: Received %u elements from %d, new total is %lu\n", m_rank, count, pinfo.id, m_listResults.size());
                     #endif
                 }
 
@@ -236,8 +227,6 @@ void ParallelFramework::masterProcess() {
                 break;
         }
     }
-
-    free(tmpResultsMem);
 
     // Synchronize with the rest of the processes
     #ifdef DBG_START_STOP

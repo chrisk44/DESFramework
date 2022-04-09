@@ -76,7 +76,7 @@ private:
     void sendBatchSize(const AssignedWork& work, int mpiSource) const;
 
     void receiveAllResults(RESULT_TYPE* dst, size_t count, int mpiSource) const;
-    int receiveListResults(DATA_TYPE* dst, size_t maxCount, int mpiSource) const;
+    int receiveListResults(std::vector<DATA_TYPE>& dst, size_t maxCount, int mpiSource) const;
     void syncWithSlaves() const;
 
     void sendReadyRequest(unsigned long maxBatchSize) const;

@@ -56,19 +56,28 @@ void ParallelFramework::receiveAllResults(RESULT_TYPE *dst, size_t count, int mp
 
 void ParallelFramework::sendListResults(DATA_TYPE *data, size_t numOfPoints) const {
     MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
+
+    MPI_Send(&numOfPoints, 1, MPI_UNSIGNED_LONG, 0, TAG_RESULTS_COUNT, MPI_COMM_WORLD);
     MPI_Send(data, numOfPoints * m_parameters.D, DATA_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
 }
 
-int ParallelFramework::receiveListResults(DATA_TYPE *dst, size_t maxCount, int mpiSource) const {
+int ParallelFramework::receiveListResults(std::vector<DATA_TYPE>& dst, size_t maxCount, int mpiSource) const {
     MPI_Status status;
-    MMPI_Recv(dst, m_parameters.overrideMemoryRestrictions ? INT_MAX : maxCount * m_parameters.D, DATA_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
 
-    // Find the number of points in list
-    int receivedCount;
-    MPI_Get_count(&status, DATA_MPI_TYPE, &receivedCount);
+    size_t count;
+    MMPI_Recv(&count, 1, MPI_UNSIGNED_LONG, mpiSource, TAG_RESULTS_COUNT, MPI_COMM_WORLD, &status);
 
-    // MPI_Get_count returned the count of DATA_TYPE elements received, so divide with D to get the count of points
-    return receivedCount / m_parameters.D;
+    if(count > maxCount)
+        throw std::runtime_error("Attempted to receive " + std::to_string(count) + " list points but max was " + std::to_string(maxCount));
+
+    if(count * m_parameters.D > dst.capacity())
+        dst.reserve(count * m_parameters.D);
+
+    if(count > dst.capacity())
+        throw std::runtime_error("Failed to allocate memory for " + std::to_string(count) + " list points");
+
+    MMPI_Recv(dst.data(), count * m_parameters.D, DATA_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
+    return count;
 }
 
 void ParallelFramework::syncWithSlaves() const {
