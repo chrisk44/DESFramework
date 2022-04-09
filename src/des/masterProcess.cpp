@@ -23,9 +23,6 @@ void ParallelFramework::masterProcess() {
         printf("[%d] Master: Error: Can't allocate memory for tmpResultsMem\n", rank);
         exit(-1);
     }
-    RESULT_TYPE* tmpResults = (RESULT_TYPE*) tmpResultsMem;
-    decltype(listResults) tmpResultsList;// = (DATA_TYPE*) tmpResultsMem;
-    int tmpNumOfPoints;
 
     #ifdef DBG_TIME
         Stopwatch sw;
@@ -108,23 +105,47 @@ void ParallelFramework::masterProcess() {
 
                 break;
 
-            case TAG_RESULTS:
+            case TAG_RESULTS: {
                 #ifdef DBG_TIME
                     sw.start();
                 #endif
 
                 // Receive the results
                 if(parameters.resultSaveType == SAVE_TYPE_ALL){
-                    receiveAllResults(tmpResults, pinfo.work.numOfElements, mpiSource);
+                    receiveAllResults(&finalResults[pinfo.work.startPoint], pinfo.work.numOfElements, mpiSource);
+                    #ifdef DBG_RESULTS
+                        printf("[%d] Master: Received results from %d starting at %lu\n", rank, pinfo.id, pinfo.work.startPoint);
+                    #endif
+                    #ifdef DBG_RESULTS_RAW
+                        printf("[%d] Master: Received results starting at %lu: ", rank, pinfo.work.startPoint);
+                        for (unsigned long i = 0; i < pinfo.work.numOfElements; i++) {
+                            printf("%.2f ", finalResults[pinfo.work.startPoint + i]);
+                        }
+                        printf("\n");
+                    #endif
                 }else{
-                    tmpNumOfPoints = receiveListResults((DATA_TYPE*) tmpResultsMem, pinfo.work.numOfElements, mpiSource);
-                    for(int i=0; i<tmpNumOfPoints; i++){
+                    auto count = receiveListResults((DATA_TYPE*) tmpResultsMem, pinfo.work.numOfElements, mpiSource);
+                    #ifdef DBG_RESULTS_RAW
+                        printf("[%d] Master: Received %d list results from %d: ", rank, count, pinfo.id);
+                    #endif
+                    for(int i=0; i<count; i++){
                         std::vector<DATA_TYPE> point;
                         for(unsigned int j=0; j<parameters.D; j++){
                             point.push_back(((DATA_TYPE*)tmpResultsMem)[i*parameters.D + j]);
                         }
-                        tmpResultsList.push_back(point);
+                        listResults.push_back(point);
+                        #ifdef DBG_RESULTS_RAW
+                            printf("[ ");
+                            for(const auto& v : point) printf("%.2f ", v);
+                            printf("]");
+                        #endif
                     }
+                    #ifdef DBG_RESULTS_RAW
+                        printf("\n");
+                    #endif
+                    #ifdef DBG_RESULTS
+                        printf("[%d] Master: Received %u elements from %d, new total is %lu\n", rank, count, pinfo.id, listResults.size());
+                    #endif
                 }
 
                 this->totalReceived += pinfo.work.numOfElements;
@@ -150,34 +171,6 @@ void ParallelFramework::masterProcess() {
                         printf("[%d] Master: Saving %d points from slave %d to listResults...\n", rank, tmpNumOfPoints, mpiSource);
 
                 #endif
-                #ifdef DBG_RESULTS
-                    if(parameters.resultSaveType == SAVE_TYPE_ALL){
-                        printf("[%d] Master: Saving tmpResults: ", rank);
-                        for (unsigned long i = 0; i < pinfo.work.numOfElements; i++) {
-                            printf("%f ", tmpResults[i]);
-                        }
-                        printf(" at %lu\n", pinfo.work.startPoint);
-                    }else{
-                        printf("[%d] Master: Saving tmpResultsList: ", rank);
-                        for (const auto& point : tmpResultsList){
-                            printf("[ ");
-                            for(const auto& v : point){
-                                printf("%f ", v);
-                            }
-                            printf("]");
-                        }
-                        printf("\n");
-                    }
-                #endif
-
-                // Copy the received results to finalResults or listResults
-                if( ! (parameters.benchmark)){
-                    if(parameters.resultSaveType == SAVE_TYPE_ALL){
-                        memcpy(&finalResults[pinfo.work.startPoint], tmpResults, pinfo.work.numOfElements*sizeof(RESULT_TYPE));
-                    }else if(tmpNumOfPoints > 0){
-                        listResults.insert(listResults.end(), tmpResultsList.begin(), tmpResultsList.end());
-                    }
-                }
 
                 // Update pinfo
                 pinfo.jobsCompleted++;
@@ -228,6 +221,7 @@ void ParallelFramework::masterProcess() {
                 #endif
 
                 break;
+            }
 
             case TAG_EXITING:
                 #ifdef DBG_MPI_STEPS

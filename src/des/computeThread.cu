@@ -430,7 +430,7 @@ void ComputeThread::start(size_t batchSize){
             time_calc += sw.getMsec();
         #endif
 
-        #ifdef DBG_RESULTS
+        #ifdef DBG_RESULTS_RAW
             if(parameters.resultSaveType == SAVE_TYPE_ALL){
                 log("Results are: ");
                 for (unsigned long i = 0; i < work.numOfElements; i++) {

@@ -42,7 +42,8 @@
 // #define DBG_RATIO           // Messages about changes in ratios (masterProcess and coordinatorThread)
 // #define DBG_DATA            // Messages about the exact data being assigned (start points)
 // #define DBG_MEMORY          // Messages about memory management (addresses, reallocations)
-// #define DBG_RESULTS         // Messages with the exact results being passed around
+// #define DBG_RESULTS_RAW     // Messages with the exact results being passed around
+// #define DBG_RESULTS         // Messages about the results
 // #define DBG_TIME            // Print time measuraments for various parts of the code
 #define DBG_SNH             // Should not happen
 

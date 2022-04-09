@@ -219,23 +219,28 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
 			exit(-123);
 		}
 
-		#ifdef DBG_RESULTS
+        #ifdef DBG_RESULTS
+            if(parameters.resultSaveType == SAVE_TYPE_LIST){
+                printf("[%d] Coordinator: Found %u results\n", rank, *globalListIndexPtr / parameters.D);
+            }
+        #endif
+        #ifdef DBG_RESULTS_RAW
             if(parameters.resultSaveType == SAVE_TYPE_ALL){
 				printf("[%d] Coordinator: Results: [", rank);
                 for(unsigned long i=0; i<work.numOfElements; i++){
 					printf("%f ", localResults[i]);
 				}
 				printf("]\n");
-			}else{
-				printf("[%d] Coordinator: Results (*globalListIndexPtr = %d):", rank, *globalListIndexPtr);
+            }else{
+                printf("[%d] Coordinator: Results (*globalListIndexPtr = %d):", rank, *globalListIndexPtr);
                 for(int i=0; i<*globalListIndexPtr; i+=parameters.D){
-					printf("[ ");
+                    printf("[ ");
                     for(unsigned int j=0; j<parameters.D; j++){
-						printf("%f ", ((DATA_TYPE *)localResults)[i + j]);
-					}
-					printf("]");
-				}
-				printf("\n");
+                        printf("%f ", ((DATA_TYPE *)localResults)[i + j]);
+                    }
+                    printf("]");
+                }
+                printf("\n");
 			}
 		#endif
 
