@@ -6,9 +6,18 @@
 #include "types.h"
 
 #define MAX_CONSTANT_MEMORY (65536 - 24)			// Don't know why...
-extern __constant__ char constantMemoryPtr[MAX_CONSTANT_MEMORY];
 
+#ifndef DES_DIRECT_COMPILATION
+extern __device__ __constant__ char constantMemoryPtr[MAX_CONSTANT_MEMORY];
 void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offset);
+#else
+__device__ __constant__ char constantMemoryPtr[MAX_CONSTANT_MEMORY];
+
+static void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offset){
+    cudaMemcpyToSymbol(constantMemoryPtr, src, count, offset, cudaMemcpyHostToDevice);
+}
+#endif
+
 
 // CUDA kernel to run the computation
 template<validationFunc_t validationFunc, toBool_t toBool>
