@@ -9,8 +9,8 @@ void ParallelFramework::slaveProcessImpl(CallCpuKernelCallback callCpuKernel, Ca
     Stopwatch masterStopwatch;
     masterStopwatch.start();
 
-    bool useCpu = parameters.processingType == PROCESSING_TYPE_CPU || parameters.processingType == PROCESSING_TYPE_BOTH;
-    bool useGpu = parameters.processingType == PROCESSING_TYPE_GPU || parameters.processingType == PROCESSING_TYPE_BOTH;
+    bool useCpu = m_parameters.processingType == PROCESSING_TYPE_CPU || m_parameters.processingType == PROCESSING_TYPE_BOTH;
+    bool useGpu = m_parameters.processingType == PROCESSING_TYPE_GPU || m_parameters.processingType == PROCESSING_TYPE_BOTH;
     int numOfCpus = useCpu ? 1 : 0;
     int numOfGpus = 0;
 
@@ -18,10 +18,10 @@ void ParallelFramework::slaveProcessImpl(CallCpuKernelCallback callCpuKernel, Ca
         cudaGetDeviceCount(&numOfGpus);
         if(numOfGpus == 0){
             if(useCpu){
-                printf("[%d] SlaveProcess: Warning: cudaGetDeviceCount returned 0. Will use only CPU(s).\n", rank);
+                printf("[%d] SlaveProcess: Warning: cudaGetDeviceCount returned 0. Will use only CPU(s).\n", m_rank);
             } else {
-                printf("[%d] SlaveProcess: Error: cudaGetDeviceCount returned 0. Exiting.", rank);
-                valid = false;
+                printf("[%d] SlaveProcess: Error: cudaGetDeviceCount returned 0. Exiting.", m_rank);
+                m_valid = false;
                 return;
             }
         }
@@ -37,7 +37,7 @@ void ParallelFramework::slaveProcessImpl(CallCpuKernelCallback callCpuKernel, Ca
     for(int i=0; i<numOfGpus; i++) computeThreads.emplace_back(i,  "GPU" + std::to_string(i), WorkerThreadType::GPU, *this, tcd, callCpuKernel, callGpuKernel);
 
     #ifdef DBG_START_STOP
-        printf("[%d] SlaveProcess: Created %lu compute threads...\n", rank, computeThreads.size());
+        printf("[%d] SlaveProcess: Created %lu compute threads...\n", m_rank, computeThreads.size());
     #endif
 
     coordinatorThread(computeThreads, tcd);
@@ -47,11 +47,11 @@ void ParallelFramework::slaveProcessImpl(CallCpuKernelCallback callCpuKernel, Ca
 
     // Synchronize with the rest of the processes
     #ifdef DBG_START_STOP
-        printf("[%d] Syncing with other slave processes...\n", rank);
+        printf("[%d] Syncing with other slave processes...\n", m_rank);
     #endif
     syncWithSlaves();
     #ifdef DBG_START_STOP
-        printf("[%d] Synced with other slave processes...\n", rank);
+        printf("[%d] Synced with other slave processes...\n", m_rank);
     #endif
 
     masterStopwatch.stop();
@@ -61,7 +61,7 @@ void ParallelFramework::slaveProcessImpl(CallCpuKernelCallback callCpuKernel, Ca
 //            float resourceTime = cti.masterStopwatch.getMsec();
 //            float finishIdleTime = masterTime - resourceTime;
 //            cti.idleTime += finishIdleTime;
-            printf("[%d] Resource %d utilization: %.02f%%, total idle time: %.02f%% (%.02fms) (%s)\n", rank,
+            printf("[%d] Resource %d utilization: %.02f%%, total idle time: %.02f%% (%.02fms) (%s)\n", m_rank,
                     cti.getId(),                                // cti.id,
                     cti.getUtilization(),                       // cti.averageUtilization,
                     cti.getIdleTime() / cti.getTotalTime(),     // (cti.idleTime / masterTime) * 100,

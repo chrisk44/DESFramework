@@ -5,22 +5,18 @@
 
 void ParallelFramework::masterProcess() {
     int finished = 0;
-    float totalScore;
-    int t, eta;
-    int numOfProcesses = getNumOfProcesses();
-    int numOfSlaves = numOfProcesses - 1;
-    Stopwatch masterStopwatch;
+    int numOfSlaves = getNumOfProcesses() - 1;
 
     SlaveProcessInfo slaveProcessInfo[numOfSlaves];
 
     void* tmpResultsMem;
-    if(parameters.overrideMemoryRestrictions){
+    if(m_parameters.overrideMemoryRestrictions){
         tmpResultsMem = malloc(getMaxCPUBytes());
     }else{
-        tmpResultsMem = malloc(parameters.resultSaveType == SAVE_TYPE_ALL ? parameters.batchSize * sizeof(RESULT_TYPE) : parameters.batchSize * parameters.D * sizeof(DATA_TYPE));
+        tmpResultsMem = malloc(m_parameters.resultSaveType == SAVE_TYPE_ALL ? m_parameters.batchSize * sizeof(RESULT_TYPE) : m_parameters.batchSize * m_parameters.D * sizeof(DATA_TYPE));
     }
     if(tmpResultsMem == nullptr){
-        printf("[%d] Master: Error: Can't allocate memory for tmpResultsMem\n", rank);
+        printf("[%d] Master: Error: Can't allocate memory for tmpResultsMem\n", m_rank);
         exit(-1);
     }
 
@@ -30,7 +26,7 @@ void ParallelFramework::masterProcess() {
 
     for(int i=0; i<numOfSlaves; i++){
         slaveProcessInfo[i].id = i + 1;
-        slaveProcessInfo[i].currentBatchSize = parameters.batchSize;
+        slaveProcessInfo[i].currentBatchSize = m_parameters.batchSize;
         slaveProcessInfo[i].jobsCompleted = 0;
         slaveProcessInfo[i].elementsCalculated = 0;
         slaveProcessInfo[i].finished = false;
@@ -38,11 +34,12 @@ void ParallelFramework::masterProcess() {
         slaveProcessInfo[i].ratio = (float)1/numOfSlaves;
     }
 
+    Stopwatch masterStopwatch;
     masterStopwatch.start();
-    while (totalReceived < totalElements || finished < numOfSlaves) {
+    while (m_totalReceived < m_totalElements || finished < numOfSlaves) {
         // Receive request from any worker thread
         #ifdef DBG_MPI_STEPS
-            printf("[%d] Master: Waiting for signal...\n", rank);
+            printf("[%d] Master: Waiting for signal...\n", m_rank);
         #endif
         fflush(stdout);
 
@@ -52,7 +49,7 @@ void ParallelFramework::masterProcess() {
         SlaveProcessInfo& pinfo = slaveProcessInfo[mpiSource-1];
 
         #ifdef DBG_MPI_STEPS
-            printf("[%d] Master: Received %d from %d\n", rank, request, mpiSource);
+            printf("[%d] Master: Received %d from %d\n", m_rank, request, mpiSource);
         #endif
 
         switch(request){
@@ -64,32 +61,32 @@ void ParallelFramework::masterProcess() {
                 pinfo.maxBatchSize = receiveMaxBatchSize(mpiSource);
 
                 // For the first batches, use low batch size so the process can optimize its computeThread scores early
-                if((int) pinfo.jobsCompleted < parameters.slowStartLimit){
-                    pinfo.maxBatchSize = std::min(pinfo.maxBatchSize, (unsigned long) (parameters.slowStartBase * pow(2, pinfo.jobsCompleted)));
+                if((int) pinfo.jobsCompleted < m_parameters.slowStartLimit){
+                    pinfo.maxBatchSize = std::min(pinfo.maxBatchSize, (unsigned long) (m_parameters.slowStartBase * pow(2, pinfo.jobsCompleted)));
                     #ifdef DBG_RATIO
-                        printf("[%d] Master: Setting temporary maxBatchSize=%lu for slave %d\n", rank, pinfo.maxBatchSize, mpiSource);
+                        printf("[%d] Master: Setting temporary maxBatchSize=%lu for slave %d\n", m_rank, pinfo.maxBatchSize, mpiSource);
                     #endif
                 }
 
                 // Get next data batch to calculate
-                if(totalSent == totalElements){
+                if(m_totalSent == m_totalElements){
                     pinfo.work.startPoint = 0;
                     pinfo.work.numOfElements = 0;
                 }else{
-                    pinfo.work.startPoint = totalSent;
-                    pinfo.work.numOfElements = std::min(std::min((unsigned long) (pinfo.ratio * parameters.batchSize), (unsigned long) pinfo.maxBatchSize), totalElements-totalSent);
+                    pinfo.work.startPoint = m_totalSent;
+                    pinfo.work.numOfElements = std::min(std::min((unsigned long) (pinfo.ratio * m_parameters.batchSize), (unsigned long) pinfo.maxBatchSize), m_totalElements-m_totalSent);
 
-                    // printf("pinfo.ratio = %f, paramters->batchSize = %lu, pinfo.maxBatchSize = %lu, totalElements = %lu, totalSent = %lu, product = %lu\n",
-                    // 		pinfo.ratio, parameters.batchSize, pinfo.maxBatchSize, totalElements, totalSent, (unsigned long) (pinfo.ratio * parameters.batchSize));
+                    // printf("pinfo.ratio = %f, paramters->batchSize = %lu, pinfo.maxBatchSize = %lu, m_totalElements = %lu, m_totalSent = %lu, product = %lu\n",
+                    // 		pinfo.ratio, m_parameters.batchSize, pinfo.maxBatchSize, m_totalElements, m_totalSent, (unsigned long) (pinfo.ratio * m_parameters.batchSize));
 
-                    totalSent += pinfo.work.numOfElements;
+                    m_totalSent += pinfo.work.numOfElements;
                 }
 
                 #ifdef DBG_MPI_STEPS
-                    printf("[%d] Master: Sending %lu elements to %d with index %lu\n", rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
+                    printf("[%d] Master: Sending %lu elements to %d with index %lu\n", m_rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
                 #endif
                 #ifdef DBG_DATA
-                    printf("[%d] Master: Sending %lu elements to %d with index %lu\n", rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
+                    printf("[%d] Master: Sending %lu elements to %d with index %lu\n", m_rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
                 #endif
 
                 // Send the batch to the slave process
@@ -100,7 +97,7 @@ void ParallelFramework::masterProcess() {
 
                 #ifdef DBG_TIME
                     sw.stop();
-                    printf("[%d] Master: Benchmark: Time for TAG_READY: %f ms\n", rank, sw.getMsec());
+                    printf("[%d] Master: Benchmark: Time for TAG_READY: %f ms\n", m_rank, sw.getMsec());
                 #endif
 
                 break;
@@ -111,29 +108,29 @@ void ParallelFramework::masterProcess() {
                 #endif
 
                 // Receive the results
-                if(parameters.resultSaveType == SAVE_TYPE_ALL){
-                    receiveAllResults(&finalResults[pinfo.work.startPoint], pinfo.work.numOfElements, mpiSource);
+                if(m_parameters.resultSaveType == SAVE_TYPE_ALL){
+                    receiveAllResults(&m_finalResults[pinfo.work.startPoint], pinfo.work.numOfElements, mpiSource);
                     #ifdef DBG_RESULTS
-                        printf("[%d] Master: Received results from %d starting at %lu\n", rank, pinfo.id, pinfo.work.startPoint);
+                        printf("[%d] Master: Received results from %d starting at %lu\n", m_rank, pinfo.id, pinfo.work.startPoint);
                     #endif
                     #ifdef DBG_RESULTS_RAW
-                        printf("[%d] Master: Received results starting at %lu: ", rank, pinfo.work.startPoint);
+                        printf("[%d] Master: Received results from %d starting at %lu: ", m_rank, pinfo.id, pinfo.work.startPoint);
                         for (unsigned long i = 0; i < pinfo.work.numOfElements; i++) {
-                            printf("%.2f ", finalResults[pinfo.work.startPoint + i]);
+                            printf("%.2f ", m_finalResults[pinfo.work.startPoint + i]);
                         }
                         printf("\n");
                     #endif
                 }else{
                     auto count = receiveListResults((DATA_TYPE*) tmpResultsMem, pinfo.work.numOfElements, mpiSource);
                     #ifdef DBG_RESULTS_RAW
-                        printf("[%d] Master: Received %d list results from %d: ", rank, count, pinfo.id);
+                        printf("[%d] Master: Received %d list results from %d: ", m_rank, count, pinfo.id);
                     #endif
                     for(int i=0; i<count; i++){
                         std::vector<DATA_TYPE> point;
-                        for(unsigned int j=0; j<parameters.D; j++){
-                            point.push_back(((DATA_TYPE*)tmpResultsMem)[i*parameters.D + j]);
+                        for(unsigned int j=0; j<m_parameters.D; j++){
+                            point.push_back(((DATA_TYPE*)tmpResultsMem)[i*m_parameters.D + j]);
                         }
-                        listResults.push_back(point);
+                        m_listResults.push_back(point);
                         #ifdef DBG_RESULTS_RAW
                             printf("[ ");
                             for(const auto& v : point) printf("%.2f ", v);
@@ -148,14 +145,14 @@ void ParallelFramework::masterProcess() {
                     #endif
                 }
 
-                this->totalReceived += pinfo.work.numOfElements;
+                m_totalReceived += pinfo.work.numOfElements;
 
                 masterStopwatch.stop();
-                t = masterStopwatch.getMsec()/1000;
-                eta = t * ((float)totalElements/totalReceived) - t;
+                int t = masterStopwatch.getMsec()/1000;
+                int eta = t * ((float)m_totalElements/m_totalReceived) - t;
 
-                if(parameters.printProgress){
-                    printf("Progress: %lu/%lu, %.2f %%", this->totalReceived, this->totalElements, ((float)this->totalReceived / this->totalElements)*100);
+                if(m_parameters.printProgress){
+                    printf("Progress: %lu/%lu, %.2f %%", this->m_totalReceived, this->m_totalElements, ((float)this->m_totalReceived / this->m_totalElements)*100);
 
                     if(t < 3600)	printf(", Elapsed time: %02d:%02d", t/60, t%60);
                     else			printf(", Elapsed time: %02d:%02d:%02d", t/3600, (t%3600)/60, t%60);
@@ -165,11 +162,10 @@ void ParallelFramework::masterProcess() {
                 }
 
                 #ifdef DBG_MPI_STEPS
-                    if(parameters.resultSaveType == SAVE_TYPE_ALL)
-                        printf("[%d] Master: Saving %lu results from slave %d to finalResults[%lu]...\n", rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
+                    if(m_parameters.resultSaveType == SAVE_TYPE_ALL)
+                        printf("[%d] Master: Received results from slave %d\n", m_rank, mpiSource);
                     else
-                        printf("[%d] Master: Saving %d points from slave %d to listResults...\n", rank, tmpNumOfPoints, mpiSource);
-
+                        printf("[%d] Master: Received list results from slave %d\n", m_rank, mpiSource);
                 #endif
 
                 // Update pinfo
@@ -180,13 +176,13 @@ void ParallelFramework::masterProcess() {
                 pinfo.lastAssignedElements = pinfo.work.numOfElements;
 
                 // Print benchmark results
-                if (parameters.benchmark && parameters.printProgress) {
-                    printf("[%d] Master: Slave %d benchmark: %lu elements, %f ms\n\n", rank, mpiSource, pinfo.work.numOfElements, pinfo.stopwatch.getMsec());
+                if (m_parameters.benchmark && m_parameters.printProgress) {
+                    printf("[%d] Master: Slave %d benchmark: %lu elements, %f ms\n\n", m_rank, mpiSource, pinfo.work.numOfElements, pinfo.stopwatch.getMsec());
                 }
 
-                if(parameters.slaveBalancing && numOfSlaves > 1){
+                if(m_parameters.slaveBalancing && numOfSlaves > 1){
                     // Check other scores and calculate the sum
-                    totalScore = 0;
+                    float totalScore = 0;
                     for(int i=0; i<numOfSlaves; i++){
                         totalScore += slaveProcessInfo[i].lastScore;
 
@@ -202,12 +198,12 @@ void ParallelFramework::masterProcess() {
                         for(int i=0; i<numOfSlaves; i++){
                             slaveProcessInfo[i].ratio = slaveProcessInfo[i].lastScore / totalScore;
                             #ifdef DBG_RATIO
-                                printf("[%d] Master: Adjusting slave %d ratio = %f\n", rank, slaveProcessInfo[i].id, slaveProcessInfo[i].ratio);
+                                printf("[%d] Master: Adjusting slave %d ratio = %f\n", m_rank, slaveProcessInfo[i].id, slaveProcessInfo[i].ratio);
                             #endif
                         }
                     }else{
                         #ifdef DBG_RATIO
-                            printf("[%d] Master: Skipping ratio adjustment\n", rank);
+                            printf("[%d] Master: Skipping ratio adjustment\n", m_rank);
                         #endif
                     }
                 }
@@ -217,7 +213,7 @@ void ParallelFramework::masterProcess() {
 
                 #ifdef DBG_TIME
                     sw.stop();
-                    printf("[%d] Master: Benchmark: Time for TAG_RESULTS: %f ms\n", rank, sw.getMsec());
+                    printf("[%d] Master: Benchmark: Time for TAG_RESULTS: %f ms\n", m_rank, sw.getMsec());
                 #endif
 
                 break;
@@ -225,14 +221,14 @@ void ParallelFramework::masterProcess() {
 
             case TAG_EXITING:
                 #ifdef DBG_MPI_STEPS
-                    printf("[%d] Master: Slave %d exiting\n", rank, mpiSource);
+                    printf("[%d] Master: Slave %d exiting\n", m_rank, mpiSource);
                 #endif
 
                 if(pinfo.work.numOfElements != 0){
-                    printf("[%d] Master: Error: Slave %d exited with %lu assigned elements!!\n", rank, mpiSource, pinfo.work.numOfElements);
+                    printf("[%d] Master: Error: Slave %d exited with %lu assigned elements!!\n", m_rank, mpiSource, pinfo.work.numOfElements);
                 }
 
-                pinfo.work.startPoint = totalElements;
+                pinfo.work.startPoint = m_totalElements;
                 pinfo.finished = true;
 
                 finished++;
@@ -245,11 +241,11 @@ void ParallelFramework::masterProcess() {
 
     // Synchronize with the rest of the processes
     #ifdef DBG_START_STOP
-        printf("[%d] Waiting in barrier...\n", rank);
+        printf("[%d] Waiting in barrier...\n", m_rank);
     #endif
     syncWithSlaves();
     #ifdef DBG_START_STOP
-        printf("[%d] Passed the barrier...\n", rank);
+        printf("[%d] Passed the barrier...\n", m_rank);
     #endif
 }
 

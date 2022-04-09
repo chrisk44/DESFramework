@@ -93,21 +93,4 @@ public:
     unsigned long globalFirst;
     unsigned long globalLast;
     std::atomic_size_t globalBatchStart;
-
-//    ThreadCommonData()
-//    {
-//        sem_init(&resultsSem, 0, 0);
-//    }
-
-//    ~ThreadCommonData()
-//    {
-//        sem_destroy(&resultsSem);
-//    }
-
-//    void postResultsSemaphore(){ sem_post(&resultsSem); }
-//    void waitResultsSemaphore(){ sem_wait(&resultsSem); }
-
-//private:
-//    sem_t resultsSem;
-
 };

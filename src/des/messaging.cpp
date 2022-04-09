@@ -56,19 +56,19 @@ void ParallelFramework::receiveAllResults(RESULT_TYPE *dst, size_t count, int mp
 
 void ParallelFramework::sendListResults(DATA_TYPE *data, size_t numOfPoints) const {
     MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
-    MPI_Send(data, numOfPoints * parameters.D, DATA_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
+    MPI_Send(data, numOfPoints * m_parameters.D, DATA_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
 }
 
 int ParallelFramework::receiveListResults(DATA_TYPE *dst, size_t maxCount, int mpiSource) const {
     MPI_Status status;
-    MMPI_Recv(dst, parameters.overrideMemoryRestrictions ? INT_MAX : maxCount * parameters.D, DATA_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
+    MMPI_Recv(dst, m_parameters.overrideMemoryRestrictions ? INT_MAX : maxCount * m_parameters.D, DATA_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
 
     // Find the number of points in list
     int receivedCount;
     MPI_Get_count(&status, DATA_MPI_TYPE, &receivedCount);
 
     // MPI_Get_count returned the count of DATA_TYPE elements received, so divide with D to get the count of points
-    return receivedCount / parameters.D;
+    return receivedCount / m_parameters.D;
 }
 
 void ParallelFramework::syncWithSlaves() const {

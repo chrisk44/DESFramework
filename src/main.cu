@@ -379,10 +379,6 @@ int main(int argc, char** argv){
                 // Initialize the framework object
                 ParallelFramework framework(false);
                 framework.init(limits, parameters);
-                if (! framework.isValid()) {
-                    printf("[%d] [%s \\ %d] Error initializing framework\n", rank, modelNames[m].c_str(), g);
-                    exit(-1);
-                }
 
                 // Start the computation
                 sw.start();

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #define cce() {                                          \
   cudaError_t e = cudaGetLastError();                    \
   if (e != cudaSuccess) {                                \
@@ -10,17 +12,14 @@
 }
 
 #define fatal(e){                                        \
-    printf("Error: %s:%d: %s\n", __FILE__, __LINE__, e); \
-    exit(3);                                             \
+    std::string err = "DES Error: " + std::string(__FILE__) + ":" + std::to_string(__LINE__) + " - " + e; \
+    throw std::runtime_error(err); \
 }
 
 // Memory parameters
 #ifndef MEM_GPU_SPARE_BYTES
     #define MEM_GPU_SPARE_BYTES 100*1024*1024
 #endif
-
-// Computing parameters
-#define MAX_DIMENSIONS 30
 
 #ifndef RESULT_TYPE
     #define RESULT_TYPE float
