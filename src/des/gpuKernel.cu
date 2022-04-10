@@ -1,5 +1,3 @@
-#ifndef DES_DIRECT_COMPILATION
-
 #include <cuda.h>
 #include <cuda_runtime.h>
 
@@ -7,11 +5,13 @@
 
 namespace desf {
 
+#ifndef DES_MONILITHIC
 __device__ __constant__ char constantMemoryPtr[MAX_CONSTANT_MEMORY];
 
 void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offset){
     cudaMemcpyToSymbol(constantMemoryPtr, src, count, offset, cudaMemcpyHostToDevice);
 }
+#endif
 
 __global__ void validate_kernel(validationFunc_t validationFunc, toBool_t toBool, RESULT_TYPE* results, unsigned long startingPointLinearIndex,
     const unsigned int D, const unsigned long numOfElements, const unsigned long offset, void* dataPtr,
@@ -121,5 +121,3 @@ __global__ void validate_kernel(validationFunc_t validationFunc, toBool_t toBool
 }
 
 }
-
-#endif

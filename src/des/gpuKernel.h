@@ -9,7 +9,7 @@
 
 namespace desf {
 
-#ifndef DES_DIRECT_COMPILATION
+#ifndef DES_MONILITHIC
 extern __device__ __constant__ char constantMemoryPtr[MAX_CONSTANT_MEMORY];
 void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offset);
 #else
@@ -19,7 +19,6 @@ static void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offs
     cudaMemcpyToSymbol(constantMemoryPtr, src, count, offset, cudaMemcpyHostToDevice);
 }
 #endif
-
 
 // CUDA kernel to run the computation
 __global__ void validate_kernel(validationFunc_t validationFunc, toBool_t toBool, RESULT_TYPE* results, unsigned long startingPointLinearIndex,
