@@ -167,9 +167,9 @@ void ComputeThread::init() {
         }
 
         #ifdef DBG_MEMORY
-            log("deviceResults: 0x%x\n", (void*) m_gpuRuntime.deviceResults);
-            log("deviceListIndexPtr: 0x%x\n", (void*) m_gpuRuntime.deviceListIndexPtr);
-            log("deviceDataPtr: 0x%x\n", (void*) m_gpuRuntime.deviceDataPtr);
+            log("deviceResults: %p\n", (void*) m_gpuRuntime.deviceResults);
+            log("deviceListIndexPtr: %p\n", (void*) m_gpuRuntime.deviceListIndexPtr);
+            log("deviceDataPtr: %p\n", (void*) m_gpuRuntime.deviceDataPtr);
         #endif
 
         // Copy limits, idxSteps, and constant data to device
@@ -230,7 +230,7 @@ void ComputeThread::prepareForElements(size_t numOfElements) {
         cce();
 
         #ifdef DBG_MEMORY
-            log("deviceResults = 0x%x\n", m_gpuRuntime.deviceResults);
+            log("deviceResults = %p\n", m_gpuRuntime.deviceResults);
         #endif
     }
 }

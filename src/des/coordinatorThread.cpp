@@ -89,7 +89,7 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
 		// Make sure we have enough allocated memory for localResults
 		if(work.numOfElements > allocatedElements && allocatedElements < maxCpuElements){
 			#ifdef DBG_MEMORY
-                printf("[%d] Coordinator: Allocating more memory for localResults: %lu (0x%x) -> ", m_rank, allocatedElements, localResults);
+                printf("[%d] Coordinator: Allocating more memory for localResults: %lu (%p) -> ", m_rank, allocatedElements, localResults);
 			#endif
 
             allocatedElements = std::min(work.numOfElements, maxCpuElements);
@@ -101,7 +101,7 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
             tcd.results = localResults;
 
 			#ifdef DBG_MEMORY
-				printf("%lu (0x%x)\n", allocatedElements, localResults);
+                printf("%lu (%p)\n", allocatedElements, localResults);
 			#endif
 		}
 

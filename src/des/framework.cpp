@@ -84,7 +84,7 @@ void ParallelFramework::init(const std::vector<Limit>& limits, const ParallelFra
 					}
 
 					#ifdef DBG_MEMORY
-                        printf("[Init] finalResults: 0x%x\n", m_finalResults);
+                        printf("[Init] finalResults: %p\n", m_finalResults);
 					#endif
 				}
             }// else listResults will be dynamically allocated when needed
