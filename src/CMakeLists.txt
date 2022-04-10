@@ -2,7 +2,7 @@ find_package(CUDA REQUIRED)
 include_directories(${CUDA_INCLUDE_DIRS})
 
 find_package(MPI REQUIRED)
-include_directories(${MPI_INCLUDE_PATH})
+include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 
 find_package(OpenMP REQUIRED)
 
