@@ -100,7 +100,7 @@ T getOrDefault(int argc, char** argv, bool* found, int* i, const char* argName, 
 
 void printHelp(){
     printf(
-        "DES Framework Usage:\n"\
+        "DES Framework Usage:\n"
         "To run locally:    mpirun -n 2 ./parallelFramework <options>\n"
         "To run on cluster: mpirun --host localhost,localhost,remotehost1,remotehost2 ~/DESFramework/parallelFramework <options>\n\n"
         "Available options (every option takes a number as an argument. For true-false arguments use 0 or 1. -cpu, -gpu, -both don't require an argument.):\n"
@@ -157,7 +157,7 @@ void parseArgs(int argc, char** argv){
     bool found;
     while(i < argc){
         found = false;
-        dataPath   = getOrDefault(argc, argv, &found, &i,"--data",          "-d", true, dataPath);
+        dataPath   = getOrDefault(argc, argv, &found, &i, "--data",         "-d", true, dataPath);
         startModel = getOrDefault(argc, argv, &found, &i, "--model-start", "-ms", true, startModel + 1) - 1;
         endModel   = getOrDefault(argc, argv, &found, &i, "--model-end",   "-me", true, endModel + 1) - 1;
         startGrid  = getOrDefault(argc, argv, &found, &i, "--grid-start",  "-gs", true, startGrid);
@@ -178,7 +178,7 @@ void parseArgs(int argc, char** argv){
         threadBalancingAverage = getOrDefault(argc, argv, &found, &i, "--thread-balancing-avg", "-tba", true, threadBalancingAverage ? 1 : 0) == 1 ? true : false;
 
         blockSize  = getOrDefault(argc, argv, &found, &i, "--block-size",  "-bls", true, blockSize);
-        gpuStreams = getOrDefault(argc, argv, &found, &i, "--gpu-streams",  "-gs", true, gpuStreams);
+        gpuStreams = getOrDefault(argc, argv, &found, &i, "--gpu-streams", "-gstr", true, gpuStreams);
         slowStartLimit = getOrDefault(argc, argv, &found, &i, "--slow-start-limit",  "-ssl", true, slowStartLimit);
         slowStartBase = getOrDefault(argc, argv, &found, &i, "--slow-start-base",  "-ssb", true, slowStartBase);
         minMsForRatioAdjustment = getOrDefault(argc, argv, &found, &i, "--min-ms-ratio",  "-mmr", true, minMsForRatioAdjustment);
@@ -215,18 +215,7 @@ int main(int argc, char** argv){
     // Scale factor, must be >0
     float k = 2;
 
-    std::string displFilename;
-    std::string gridFilename;
-    std::string outFilename;
-    bool isMaster;
-    std::ifstream dispfile, gridfile;
-    std::ofstream outfile;
-    std::string tmp;
-    int stations, dims, rank, commSize;
-    float x, y, z, de, dn, dv, se, sn, sv;
-    float low, high, step;
-
-    Stopwatch sw;
+    int rank, commSize;
 
     float finalResults[4][6];
     for(int i=0; i<4; i++)
@@ -239,7 +228,7 @@ int main(int argc, char** argv){
     printf("Initializing MPI\n");
     MPI_Init(nullptr, nullptr);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    isMaster = rank == 0;
+    bool isMaster = rank == 0;
 
     MPI_Comm_rank(MPI_COMM_WORLD, &commSize);
 
@@ -267,12 +256,15 @@ int main(int argc, char** argv){
     for(int m=startModel; m<=endModel; m++){
         if(isMaster) printf("[%d] Starting model %d/4...\n", rank, m+1);
         // Open displacements file
-        displFilename = dataPath + modelNames[m] + "/displ.txt";
-        dispfile.open(displFilename, std::ios::in);
+        std::string displFilename = dataPath + modelNames[m] + "/displ.txt";
+        std::ifstream dispfile(displFilename, std::ios::in);
 
         // Count stations
-        stations = 0;
-        while(getline(dispfile, tmp)) stations++;
+        int stations = 0;
+        {
+            std::string tmp;
+            while(getline(dispfile, tmp)) stations++;
+        }
 
         if(stations < 1){
             printf("[%d] [%s \\ N/A] Got 0 displacements. Exiting.\n", rank, modelNames[m].c_str());
@@ -292,6 +284,7 @@ int main(int argc, char** argv){
         if(m < 2){
             // Mogi models have x,y,z,...
             int i = 0;
+            float x, y, z, de, dn, dv, se, sn, sv;
             while(dispfile >> x >> y >> z >> de >> dn >> dv >> se >> sn >> sv){
                 dispPtr[0*stations + i] = x;
                 dispPtr[1*stations + i] = y;
@@ -308,6 +301,7 @@ int main(int argc, char** argv){
         }else{
             // Okada models have x,y,...
             int i = 0;
+            float x, y, de, dn, dv, se, sn, sv;
             while(dispfile >> x >> y >> de >> dn >> dv >> se >> sn >> sv){
                 dispPtr[0*stations + i] = x;
                 dispPtr[1*stations + i] = y;
@@ -331,28 +325,20 @@ int main(int argc, char** argv){
                 continue;
 
             // Open grid file
-            gridFilename = dataPath + modelNames[m] + "/grid" + std::to_string(g) + ".txt";
-            gridfile.open(gridFilename, std::ios::in);
-
-            // Count dimensions
-            dims = 0;
-            while(getline(gridfile, tmp)) dims++;
-
-            // Reset the file
-            gridfile.close();
-            gridfile.open(gridFilename, std::ios::in);
+            std::string gridFilename = dataPath + modelNames[m] + "/grid" + std::to_string(g) + ".txt";
+            std::ifstream gridfile(gridFilename, std::ios::in);
 
             // Read each dimension's grid information
             std::vector<Limit> limits;
-            limits.resize(dims);
             unsigned long totalElements = 1;
             {
                 int i = 0;
+                float low, high, step;
                 while(gridfile >> low >> high >> step){
                     // Create the limit (lower is inclusive, upper is exclusive)
                     high += step;
-                    limits[i] = Limit{ low, high, (unsigned int) ((high-low)/step), step };
-                    totalElements *= limits[i].N;
+                    limits.push_back(Limit{ low, high, (unsigned int) ((high-low)/step), step });
+                    totalElements *= limits.back().N;
                     i++;
                 }
             }
@@ -362,7 +348,7 @@ int main(int argc, char** argv){
 
             // Create the framework's parameters struct
             ParallelFrameworkParameters parameters;
-            parameters.model.D = dims;
+            parameters.model.D = limits.size();
             parameters.resultSaveType = SAVE_TYPE_LIST;
             parameters.processingType = processingType;
             parameters.output.overrideMemoryRestrictions = true;
@@ -407,6 +393,7 @@ int main(int argc, char** argv){
                 framework.init(limits, parameters);
 
                 // Start the computation
+                Stopwatch sw;
                 sw.start();
                 auto result = framework.run();
                 sw.stop();
@@ -428,7 +415,7 @@ int main(int argc, char** argv){
                 totalTime += sw.getMsec();
                 numOfRuns++;
 
-                int next;
+                int moveToNext;
                 if(isMaster){
                     if(commSize > 2 || processingType == PROCESSING_TYPE_BOTH) printf("\n");
                     if(onlyOne || (totalTime > 10 * 1000 && (numOfRuns >= 10 || totalTime >= 1 * 60 * 1000))){
@@ -436,9 +423,9 @@ int main(int argc, char** argv){
                         printf("[%s \\ %d] Time: %f ms in %d runs\n",
                                     modelNames[m].c_str(), g, totalTime/numOfRuns, numOfRuns);
 
-                        outFilename = "results_" + modelNames[m] + "_" + std::to_string(g) + ".txt";
+                        std::string outFilename = "results_" + modelNames[m] + "_" + std::to_string(g) + ".txt";
                         // Open file to write results
-                        outfile.open(outFilename, std::ios::out | std::ios::trunc);
+                        std::ofstream outfile(outFilename, std::ios::out | std::ios::trunc);
 
                         auto list = framework.getList();
                         printf("[%s \\ %d] Results: %lu\n", modelNames[m].c_str(), g, list.size());
@@ -464,15 +451,15 @@ int main(int argc, char** argv){
                         }
 
                         outfile.close();
-                        next = 1;
+                        moveToNext = 1;
                     }else{
-                        next = 0;
+                        moveToNext = 0;
                     }
                 }
 
-                MPI_Bcast(&next, 1, MPI_INT, 0, MPI_COMM_WORLD);
+                MPI_Bcast(&moveToNext, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-                if(next)
+                if(moveToNext)
                     break;
             } // end while time too short
 

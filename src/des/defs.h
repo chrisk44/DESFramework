@@ -23,14 +23,11 @@
 
 #ifndef RESULT_TYPE
     #define RESULT_TYPE float
-#endif
-#ifndef DATA_TYPE
-    #define DATA_TYPE double
-#endif
-#ifndef RESULT_MPI_TYPE
     #define RESULT_MPI_TYPE MPI_FLOAT
 #endif
-#ifndef DATA_MPI_TYPE
+
+#ifndef DATA_TYPE
+    #define DATA_TYPE double
     #define DATA_MPI_TYPE MPI_DOUBLE
 #endif
 
@@ -47,7 +44,6 @@
 #define DBG_SNH             // Should not happen
 
 // MPI
-#define RECV_SLEEP_US 100     // Time in micro-seconds to sleep between checking for data in MPI_Recv
 #define TAG_READY 1
 #define TAG_DATA 2
 #define TAG_RESULTS 3

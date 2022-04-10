@@ -54,6 +54,7 @@ int getCpuStats(float* uptime, float* idleTime){
     }
 }
 
+#define RECV_SLEEP_US 100     // Time in micro-seconds to sleep between checking for data in MPI_Recv
 void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status* status){
     // MPI_Recv(buf, count, datatype, source, tag, comm, status);
     // return;
