@@ -23,10 +23,10 @@ ParallelFramework::ParallelFramework(bool initMPI)
 }
 
 void ParallelFramework::init(const std::vector<Limit>& limits, const ParallelFrameworkParameters& parameters){
-    if(limits.size() != parameters.D)
+    if(limits.size() != parameters.model.D)
         throw std::invalid_argument("The limits vector must have a size equal to parameters.D");
 
-    for (unsigned int i = 0; i < parameters.D; i++) {
+    for (unsigned int i = 0; i < parameters.model.D; i++) {
         if (limits[i].lowerLimit > limits[i].upperLimit)
             throw std::invalid_argument("Lower limit for dimension " + std::to_string(i) + " can't be higher than upper limit");
 
@@ -34,40 +34,40 @@ void ParallelFramework::init(const std::vector<Limit>& limits, const ParallelFra
             throw std::invalid_argument("N for dimension " + std::to_string(i) + " must be > 0");
     }
 
-    if(parameters.dataPtr == nullptr && parameters.dataSize > 0)
+    if(parameters.model.dataPtr == nullptr && parameters.model.dataSize > 0)
         throw std::invalid_argument("dataPtr is null but dataSize is > 0");
 
-    if(parameters.overrideMemoryRestrictions && parameters.resultSaveType != SAVE_TYPE_LIST)
+    if(parameters.output.overrideMemoryRestrictions && parameters.resultSaveType != SAVE_TYPE_LIST)
         throw std::invalid_argument("Can't override memory restrictions when saving as SAVE_TYPE_ALL");
 
     m_parameters = parameters;
     m_limits = limits;
 
-    for (unsigned int i = 0; i < parameters.D; i++) {
+    for (unsigned int i = 0; i < parameters.model.D; i++) {
         m_limits[i].step = abs(m_limits[i].upperLimit - m_limits[i].lowerLimit) / m_limits[i].N;
 
         m_idxSteps.push_back(i==0 ? 1 : m_idxSteps[i - 1] * m_limits[i-1].N);
     }
 
     #ifdef DBG_DATA
-        for(unsigned int i=0; i < parameters.D; i++){
+        for(unsigned int i=0; i < parameters.model.D; i++){
             printf("Dimension %u: Low=%lf, High=%lf, Step=%lf, N=%u, m_idxSteps=%llu\n", i, m_limits[i].lowerLimit, m_limits[i].upperLimit, m_limits[i].step, m_limits[i].N, m_idxSteps[i]);
         }
     #endif
 
     m_totalReceived = 0;
     m_totalSent = 0;
-    m_totalElements = (unsigned long long)(m_idxSteps[parameters.D - 1]) * (unsigned long long)(limits[parameters.D - 1].N);
+    m_totalElements = (unsigned long long)(m_idxSteps[parameters.model.D - 1]) * (unsigned long long)(limits[parameters.model.D - 1].N);
 
     if(m_rank == 0){
         if(! (m_parameters.benchmark)){
             if(m_parameters.resultSaveType == SAVE_TYPE_ALL){
-                if(m_parameters.saveFile.size()){
+                if(m_parameters.output.saveFile.size()){
 					// No saveFile given, save everything in memory
                     m_finalResults = new RESULT_TYPE[m_totalElements];		// Uninitialized
 				}else{
 					// Open save file
-                    m_saveFile = open(m_parameters.saveFile.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+                    m_saveFile = open(m_parameters.output.saveFile.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
                     if(m_saveFile == -1){
                         fatal("open failed");
 					}
@@ -99,7 +99,7 @@ void ParallelFramework::init(const std::vector<Limit>& limits, const ParallelFra
 
 ParallelFramework::~ParallelFramework() {
     if(m_rank == 0){
-        if(m_parameters.saveFile.size() == 0) {
+        if(m_parameters.output.saveFile.size() == 0) {
             delete [] m_finalResults;
         } else if(m_saveFile != -1) {
 			// Unmap the save file
@@ -139,7 +139,7 @@ const std::vector<std::vector<DATA_TYPE>>& ParallelFramework::getList() const {
 void ParallelFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst) const {
 	unsigned int i;
 
-    for (i = 0; i < m_parameters.D; i++) {
+    for (i = 0; i < m_parameters.model.D; i++) {
         if (point[i] < m_limits[i].lowerLimit || point[i] >= m_limits[i].upperLimit)
             throw std::invalid_argument("Result query for out-of-bounds point\n");
 
@@ -152,7 +152,7 @@ unsigned long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) co
 	unsigned int i;
 	unsigned long index = 0;
 
-    for (i = 0; i < m_parameters.D; i++) {
+    for (i = 0; i < m_parameters.model.D; i++) {
 		// Increase index by i*(index-steps for this dimension)
         index += pointIdx[i] * m_idxSteps[i];
 	}
@@ -161,7 +161,7 @@ unsigned long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) co
 }
 
 unsigned long ParallelFramework::getIndexFromPoint(DATA_TYPE* point) const {
-    unsigned long indices[m_parameters.D];
+    unsigned long indices[m_parameters.model.D];
 	unsigned long index;
 
 	getIndicesFromPoint(point, indices);
@@ -171,7 +171,7 @@ unsigned long ParallelFramework::getIndexFromPoint(DATA_TYPE* point) const {
 }
 
 void ParallelFramework::getPointFromIndex(unsigned long index, DATA_TYPE* result) const {
-    for(int i=m_parameters.D - 1; i>=0; i--){
+    for(int i=m_parameters.model.D - 1; i>=0; i--){
         int currentIndex = index / m_idxSteps[i];
         result[i] = m_limits[i].lowerLimit + currentIndex*m_limits[i].step;
 

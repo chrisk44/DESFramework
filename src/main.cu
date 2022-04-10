@@ -342,30 +342,30 @@ int main(int argc, char** argv){
 
             // Create the framework's parameters struct
             ParallelFrameworkParameters parameters;
-            parameters.D = dims;
+            parameters.model.D = dims;
             parameters.resultSaveType = SAVE_TYPE_LIST;
             parameters.processingType = processingType;
-            parameters.overrideMemoryRestrictions = true;
+            parameters.output.overrideMemoryRestrictions = true;
             parameters.finalizeAfterExecution = false;
             parameters.printProgress = false;
             parameters.benchmark = false;
 
-            parameters.dataPtr = (void*) modelDataPtr;
-            parameters.dataSize = (1 + stations*(9 - (m<2 ? 0 : 1))) * sizeof(float);
+            parameters.model.dataPtr = (void*) modelDataPtr;
+            parameters.model.dataSize = (1 + stations*(9 - (m<2 ? 0 : 1))) * sizeof(float);
 
             parameters.threadBalancing          = threadBalancing;
             parameters.slaveBalancing           = slaveBalancing;
             parameters.slaveDynamicScheduling   = slaveDynamicScheduling;
-            parameters.cpuDynamicScheduling     = cpuDynamicScheduling;
+            parameters.cpu.dynamicScheduling = cpuDynamicScheduling;
             parameters.threadBalancingAverage   = threadBalancingAverage;
 
             parameters.batchSize                = batchSizeFactor > 0 ? totalElements * batchSizeFactor : batchSize;
             parameters.slaveBatchSize           = slaveBatchSizeFactor > 0 ? totalElements * slaveBatchSizeFactor : slaveBatchSize;
-            parameters.computeBatchSize         = computeBatchSize;
-            parameters.cpuComputeBatchSize      = cpuComputeBatchSize;
+            parameters.gpu.computeBatchSize     = computeBatchSize;
+            parameters.cpu.computeBatchSize     = cpuComputeBatchSize;
 
-            parameters.blockSize                = blockSize;
-            parameters.gpuStreams               = gpuStreams;
+            parameters.gpu.blockSize            = blockSize;
+            parameters.gpu.streams              = gpuStreams;
 
             parameters.slowStartLimit           = slowStartLimit;
             parameters.slowStartBase            = slowStartBase;

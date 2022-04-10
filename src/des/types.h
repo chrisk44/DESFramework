@@ -35,35 +35,45 @@ enum ResultSaveType {
 };
 
 struct ParallelFrameworkParameters {
-    unsigned int D;
     ProcessingType processingType = PROCESSING_TYPE_BOTH;
     ResultSaveType resultSaveType = SAVE_TYPE_LIST;
-    bool overrideMemoryRestrictions = false;
     bool finalizeAfterExecution = true;
     bool printProgress = true;
     bool benchmark = false;
 
-    std::string saveFile;
-    void* dataPtr = nullptr;
-    unsigned long dataSize = 0;
+    struct {
+        bool overrideMemoryRestrictions = false;
+        std::string saveFile;
+    } output;
 
     bool threadBalancing = true;
     bool slaveBalancing = true;
     bool slaveDynamicScheduling = false;
-    bool cpuDynamicScheduling = true;
     bool threadBalancingAverage = false;
 
     unsigned long batchSize;
     unsigned long slaveBatchSize;
-    int computeBatchSize = 200;
-    int cpuComputeBatchSize = 10000;
-
-    int blockSize = 256;
-    int gpuStreams = 8;
 
     unsigned long slowStartBase = 5000000;
     int slowStartLimit = 3;
     int minMsForRatioAdjustment = 0;
+
+    struct {
+        unsigned int D;
+        void* dataPtr = nullptr;
+        unsigned long dataSize = 0;
+    } model;
+
+    struct {
+        bool dynamicScheduling = true;
+        int computeBatchSize = 10000;
+    } cpu;
+
+    struct {
+        int computeBatchSize = 200;
+        int blockSize = 256;
+        int streams = 8;
+    } gpu;
 };
 
 struct SlaveProcessInfo {

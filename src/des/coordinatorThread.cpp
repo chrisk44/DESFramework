@@ -14,7 +14,7 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
     if(m_parameters.resultSaveType == SAVE_TYPE_ALL)
 		maxCpuElements /= sizeof(RESULT_TYPE);
 	else
-        maxCpuElements /= m_parameters.D * sizeof(DATA_TYPE);
+        maxCpuElements /= m_parameters.model.D * sizeof(DATA_TYPE);
 
     std::map<ComputeThreadID, float> ratios;
     std::map<ComputeThreadID, float> ratioSums;
@@ -28,7 +28,7 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
 		float time_data, time_assign, time_start, time_wait, time_scores, time_results;
 	#endif
 
-    if(m_parameters.overrideMemoryRestrictions){
+    if(m_parameters.output.overrideMemoryRestrictions){
         maxBatchSize = m_parameters.batchSize;
 	}else{
         if(m_parameters.processingType == PROCESSING_TYPE_CPU)
@@ -42,15 +42,15 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
         if(m_parameters.resultSaveType == SAVE_TYPE_ALL)
             maxBatchSize /= sizeof(RESULT_TYPE);
         else
-            maxBatchSize /= m_parameters.D * sizeof(DATA_TYPE);
+            maxBatchSize /= m_parameters.model.D * sizeof(DATA_TYPE);
 
 		// Limit the batch size by the user-given value
         maxBatchSize = std::min((unsigned long)m_parameters.batchSize, (unsigned long)maxBatchSize);
 
 		// If we are saving a list, the max number of elements we might want to send is maxBatchSize * D, so limit the batch size
 		// so that the max number of elements is INT_MAX
-        if(m_parameters.resultSaveType == SAVE_TYPE_LIST && (unsigned long) (maxBatchSize*m_parameters.D) > (unsigned long) INT_MAX){
-            maxBatchSize = (INT_MAX - m_parameters.D) / m_parameters.D;
+        if(m_parameters.resultSaveType == SAVE_TYPE_LIST && (unsigned long) (maxBatchSize*m_parameters.model.D) > (unsigned long) INT_MAX){
+            maxBatchSize = (INT_MAX - m_parameters.model.D) / m_parameters.model.D;
 		}
 		// If we are saving all of the results, the max number of elements is maxBatchSize itself, so limit it to INT_MAX
         else if(m_parameters.resultSaveType == SAVE_TYPE_ALL && (unsigned long) maxBatchSize > (unsigned long) INT_MAX){
@@ -221,7 +221,7 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
 
         #ifdef DBG_RESULTS
             if(m_parameters.resultSaveType == SAVE_TYPE_LIST){
-                printf("[%d] Coordinator: Found %u results\n", m_rank, *globalListIndexPtr / m_parameters.D);
+                printf("[%d] Coordinator: Found %u results\n", m_rank, *globalListIndexPtr / m_parameters.model.D);
             }
         #endif
         #ifdef DBG_RESULTS_RAW
@@ -233,9 +233,9 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
 				printf("]\n");
             }else{
                 printf("[%d] Coordinator: Results (*globalListIndexPtr = %d):", m_rank, *globalListIndexPtr);
-                for(int i=0; i<*globalListIndexPtr; i+=m_parameters.D){
+                for(int i=0; i<*globalListIndexPtr; i+=m_parameters.model.D){
                     printf("[ ");
-                    for(unsigned int j=0; j<m_parameters.D; j++){
+                    for(unsigned int j=0; j<m_parameters.model.D; j++){
                         printf("%f ", ((DATA_TYPE *)localResults)[i + j]);
                     }
                     printf("]");
@@ -318,7 +318,7 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
         if(m_parameters.resultSaveType == SAVE_TYPE_ALL){
             sendResults(localResults, work.numOfElements);
 		}else{
-            sendListResults((DATA_TYPE*) localResults, (*globalListIndexPtr) / m_parameters.D);
+            sendListResults((DATA_TYPE*) localResults, (*globalListIndexPtr) / m_parameters.model.D);
 		}
 
 		#ifdef DBG_TIME

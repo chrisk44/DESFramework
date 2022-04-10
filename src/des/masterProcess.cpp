@@ -118,8 +118,8 @@ void ParallelFramework::masterProcess() {
                     #endif
                     for(int i=0; i<count; i++){
                         std::vector<DATA_TYPE> point;
-                        for(unsigned int j=0; j<m_parameters.D; j++){
-                            point.push_back(tmpList[i*m_parameters.D + j]);
+                        for(unsigned int j=0; j<m_parameters.model.D; j++){
+                            point.push_back(tmpList[i*m_parameters.model.D + j]);
                         }
                         m_listResults.push_back(point);
                         #ifdef DBG_RESULTS_RAW
