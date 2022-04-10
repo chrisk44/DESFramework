@@ -40,17 +40,19 @@ void ParallelFramework::init(const std::vector<Limit>& limits, const ParallelFra
     if(parameters.output.overrideMemoryRestrictions && parameters.resultSaveType != SAVE_TYPE_LIST)
         throw std::invalid_argument("Can't override memory restrictions when saving as SAVE_TYPE_ALL");
 
-    if(parameters.cpu.forwardModel == nullptr)
-        throw std::invalid_argument("CPU forward model function is nullptr");
+    if(m_rank != 0){
+        if(parameters.cpu.forwardModel == nullptr)
+            throw std::invalid_argument("CPU forward model function is nullptr");
 
-    if(parameters.cpu.objective == nullptr)
-        throw std::invalid_argument("CPU objective function is nullptr");
+        if(parameters.cpu.objective == nullptr)
+            throw std::invalid_argument("CPU objective function is nullptr");
 
-    if(parameters.gpu.forwardModel == nullptr)
-        throw std::invalid_argument("GPU forward model function is nullptr");
+        if(parameters.gpu.forwardModel == nullptr)
+            throw std::invalid_argument("GPU forward model function is nullptr");
 
-    if(parameters.gpu.objective == nullptr)
-        throw std::invalid_argument("GPU objective function is nullptr");
+        if(parameters.gpu.objective == nullptr)
+            throw std::invalid_argument("GPU objective function is nullptr");
+    }
 
     m_parameters = parameters;
     m_limits = limits;

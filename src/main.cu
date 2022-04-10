@@ -212,22 +212,6 @@ int main(int argc, char** argv){
         "okada2"
     };
 
-    const std::vector<validationFunc_t> cpuForwardModels = {
-        validate_cpuM1,
-        validate_cpuM2,
-        validate_cpuO1,
-        validate_cpuO2
-    };
-    const toBool_t cpuObjective = toBool_cpu;
-
-    const std::vector<validationFunc_t> gpuForwardModels = {
-        ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuM1>(0),
-        ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuM2>(0),
-        ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuO1>(0),
-        ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuO2>(0)
-    };
-    const toBool_t gpuObjective = ParallelFramework::getGpuPointerFromSymbol<toBool_t, toBool_gpu>(0);
-
     // Scale factor, must be >0
     float k = 2;
 
@@ -258,6 +242,26 @@ int main(int argc, char** argv){
     isMaster = rank == 0;
 
     MPI_Comm_rank(MPI_COMM_WORLD, &commSize);
+
+    const std::vector<validationFunc_t> cpuForwardModels = {
+        validate_cpuM1,
+        validate_cpuM2,
+        validate_cpuO1,
+        validate_cpuO2
+    };
+    const toBool_t cpuObjective = toBool_cpu;
+
+    std::vector<validationFunc_t> gpuForwardModels;
+    toBool_t gpuObjective = nullptr;
+    if(!isMaster){
+        gpuForwardModels = {
+            ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuM1>(0),
+            ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuM2>(0),
+            ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuO1>(0),
+            ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuO2>(0)
+        };
+        gpuObjective = ParallelFramework::getGpuPointerFromSymbol<toBool_t, toBool_gpu>(0);
+    } // else do not attempt to retrieve addresses
 
     // For each model...
     for(int m=startModel; m<=endModel; m++){
@@ -387,11 +391,11 @@ int main(int argc, char** argv){
             parameters.slowStartBase            = slowStartBase;
             parameters.minMsForRatioAdjustment  = minMsForRatioAdjustment;
 
-            parameters.cpu.forwardModel = cpuForwardModels[m];
-            parameters.cpu.objective = cpuObjective;
+            parameters.cpu.forwardModel = isMaster ? nullptr : cpuForwardModels[m];
+            parameters.cpu.objective = isMaster ? nullptr : cpuObjective;
 
-            parameters.gpu.forwardModel = gpuForwardModels[m];
-            parameters.gpu.objective = gpuObjective;
+            parameters.gpu.forwardModel = isMaster ? nullptr : gpuForwardModels[m];
+            parameters.gpu.objective = isMaster ? nullptr : gpuObjective;
 
             float totalTime = 0;        //msec
             int numOfRuns = 0;
