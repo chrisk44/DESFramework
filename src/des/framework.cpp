@@ -40,6 +40,18 @@ void ParallelFramework::init(const std::vector<Limit>& limits, const ParallelFra
     if(parameters.output.overrideMemoryRestrictions && parameters.resultSaveType != SAVE_TYPE_LIST)
         throw std::invalid_argument("Can't override memory restrictions when saving as SAVE_TYPE_ALL");
 
+    if(parameters.cpu.forwardModel == nullptr)
+        throw std::invalid_argument("CPU forward model function is nullptr");
+
+    if(parameters.cpu.objective == nullptr)
+        throw std::invalid_argument("CPU objective function is nullptr");
+
+    if(parameters.gpu.forwardModel == nullptr)
+        throw std::invalid_argument("GPU forward model function is nullptr");
+
+    if(parameters.gpu.objective == nullptr)
+        throw std::invalid_argument("GPU objective function is nullptr");
+
     m_parameters = parameters;
     m_limits = limits;
 
@@ -53,6 +65,13 @@ void ParallelFramework::init(const std::vector<Limit>& limits, const ParallelFra
         for(unsigned int i=0; i < parameters.model.D; i++){
             printf("Dimension %u: Low=%lf, High=%lf, Step=%lf, N=%u, m_idxSteps=%llu\n", i, m_limits[i].lowerLimit, m_limits[i].upperLimit, m_limits[i].step, m_limits[i].N, m_idxSteps[i]);
         }
+    #endif
+
+    #ifdef DBG_MEMORY
+        printf("CPU forward model function is @ %p\n", m_parameters.cpu.forwardModel);
+        printf("CPU objective function is @     %p\n", m_parameters.cpu.objective);
+        printf("GPU forward model function is @ %p\n", m_parameters.gpu.forwardModel);
+        printf("GPU objective function is @     %p\n", m_parameters.gpu.objective);
     #endif
 
     m_totalReceived = 0;
@@ -110,6 +129,28 @@ ParallelFramework::~ParallelFramework() {
 		}
 	}
     m_valid = false;
+}
+
+int ParallelFramework::run() {
+    if(!m_valid){
+        std::string error = "[" + std::to_string(m_rank) + "] run() called for invalid framework";
+        throw std::runtime_error(error);
+    }
+
+    if(m_rank == 0){
+        if(m_parameters.printProgress) printf("[%d] Master process starting\n", m_rank);
+        masterProcess();
+        if(m_parameters.printProgress) printf("[%d] Master process finished\n", m_rank);
+    }else{
+        if(m_parameters.printProgress) printf("[%d] Slave process starting\n", m_rank);
+        slaveProcess();
+        if(m_parameters.printProgress) printf("[%d] Slave process finished\n", m_rank);
+    }
+
+    if(m_parameters.finalizeAfterExecution)
+        MPI_Finalize();
+
+    return m_valid ? 0 : -1;
 }
 
 bool ParallelFramework::isValid() const {

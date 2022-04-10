@@ -45,7 +45,6 @@ public:
     ~ParallelFramework();
     void init(const std::vector<Limit>& limits, const ParallelFrameworkParameters& parameters);
 
-	template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
     int run();
 
     const decltype(m_parameters)& getParameters() const { return m_parameters; }
@@ -61,14 +60,47 @@ public:
     bool isValid() const;
     int getRank() const;
 
+    template<typename T, T symbol>
+    static T getGpuPointerFromSymbol(int gpuId) {
+        cudaSetDevice(gpuId);
+
+        T result;
+
+        /*
+         * This is the suggested way: Use cudaMemcpyFromSymbol(dst, symbol, size) to retrieve the address of the symbol.
+         * However, it fails at runtime with a "invalid device symbol" error. No idea why.
+         */
+//        cudaMemcpyFromSymbol(&result, symbol, sizeof(T)); cce();
+
+        /*
+         * This is more complicated to understand but works. We call a kernel that obviously runs on the device, which
+         * will save the address of the symbol to the device's memory which we allocate. Then we memcpy that memory back to the host.
+         * The retrieved address makes absolutely no sense on the host, but can be passed to a __device__ or __global__ function
+         * and will work correctly.
+         */
+        // Allocate memory on the device
+        T* deviceMem = nullptr;
+        cudaMalloc(&deviceMem, sizeof(T)); cce();
+
+        // Run the kernel that saves the address of the symbol to the allocated memory
+        getPointerFromSymbol<T, symbol><<<1, 1>>>(deviceMem);
+        cudaDeviceSynchronize(); cce();
+
+        // Retrieve the saved address from the allocated memory
+        cudaMemcpy(&result, deviceMem, sizeof(T), cudaMemcpyDeviceToHost); cce();
+
+        // Release the memory
+        cudaFree(deviceMem); cce();
+
+        return result;
+    }
+
 private:
     void masterProcess();
     void coordinatorThread(std::vector<ComputeThread>& cti, ThreadCommonData& tcd);
     void getPointFromIndex(unsigned long index, DATA_TYPE* result) const;
 
-    template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
     void slaveProcess();
-    void slaveProcessImpl(CallCpuKernelCallback callCpuKernel, CallGpuKernelCallback callGpuKernel);
 
     int getNumOfProcesses() const;
     int receiveRequest(int& source) const;
@@ -86,48 +118,5 @@ private:
     void sendExitSignal() const;
 };
 
-template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-int ParallelFramework::run() {
-    if(!m_valid){
-        std::string error = "[" + std::to_string(m_rank) + "] run() called for invalid framework";
-        throw std::runtime_error(error);
-    }
 
-    if(m_rank == 0){
-        if(m_parameters.printProgress) printf("[%d] Master process starting\n", m_rank);
-        masterProcess();
-        if(m_parameters.printProgress) printf("[%d] Master process finished\n", m_rank);
-    }else{
-        if(m_parameters.printProgress) printf("[%d] Slave process starting\n", m_rank);
-        slaveProcess<validation_cpu, validation_gpu, toBool_cpu, toBool_gpu>();
-        if(m_parameters.printProgress) printf("[%d] Slave process finished\n", m_rank);
-    }
-
-    if(m_parameters.finalizeAfterExecution)
-        MPI_Finalize();
-
-    return m_valid ? 0 : -1;
-}
-
-template<validationFunc_t validation_cpu, validationFunc_t validation_gpu, toBool_t toBool_cpu, toBool_t toBool_gpu>
-void ParallelFramework::slaveProcess() {
-    CallCpuKernelCallback callCpuKernel = [&](RESULT_TYPE* results, const Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
-            const unsigned long long* idxSteps, unsigned long startingPointLinearIndex, bool dynamicScheduling, int batchSize){
-        cpu_kernel(validation_cpu, toBool_cpu, results, limits, D, numOfElements, dataPtr, listIndexPtr, idxSteps, startingPointLinearIndex, dynamicScheduling, batchSize);
-    };
-
-    CallGpuKernelCallback callGpuKernel = [&](int numOfBlocks, int blockSize, unsigned long sharedMem, cudaStream_t stream,
-            RESULT_TYPE* results, unsigned long startingPointLinearIndex,
-            const unsigned int D, const unsigned long numOfElements, const unsigned long offset, void* dataPtr,
-            int dataSize, bool useSharedMemoryForData, bool useConstantMemoryForData, int* listIndexPtr,
-            const int computeBatchSize){
-        validate_kernel<validation_gpu, toBool_gpu><<<numOfBlocks, blockSize, sharedMem, stream>>>(
-            results, startingPointLinearIndex, D, numOfElements, offset,
-            dataPtr, dataSize, useSharedMemoryForData, useConstantMemoryForData,
-            listIndexPtr, computeBatchSize
-        );
-    };
-
-    slaveProcessImpl(callCpuKernel, callGpuKernel);
-}
 

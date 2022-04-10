@@ -20,9 +20,6 @@ enum WorkerThreadType {
     GPU
 };
 
-typedef std::function<void(RESULT_TYPE*, const Limit*, unsigned int, unsigned long, void*, int*, const unsigned long long*, unsigned long, bool, int)> CallCpuKernelCallback;
-typedef std::function<void(int, int, unsigned long, cudaStream_t, RESULT_TYPE*, unsigned long, const unsigned int, const unsigned long, const unsigned long, void*, int, bool, bool, int*, const int)> CallGpuKernelCallback;
-
 typedef int ComputeThreadID;
 
 class ParallelFramework;
@@ -33,13 +30,11 @@ public:
                   std::string name,
                   WorkerThreadType type,
                   ParallelFramework& framework,
-                  ThreadCommonData& tcd,
-                  CallCpuKernelCallback callCpuKernel,
-                  CallGpuKernelCallback callGpuKernel);
+                  ThreadCommonData& tcd);
 
     // Dummy copy constructor which does not actually copy the whole object, just recreates it in the new location
     ComputeThread(const ComputeThread& other)
-        : ComputeThread(other.m_id, other.m_name, other.m_type, other.m_framework, other.m_tcd, other.m_callCpuKernel, other.m_callGpuKernel)
+        : ComputeThread(other.m_id, other.m_name, other.m_type, other.m_framework, other.m_tcd)
     {}
 
     ~ComputeThread();
@@ -77,8 +72,6 @@ private:
     WorkerThreadType m_type;
     ParallelFramework& m_framework;
     ThreadCommonData& m_tcd;
-    CallCpuKernelCallback m_callCpuKernel;
-    CallGpuKernelCallback m_callGpuKernel;
     int m_rank;
 
     Stopwatch m_idleStopwatch;

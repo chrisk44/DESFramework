@@ -67,12 +67,18 @@ struct ParallelFrameworkParameters {
     struct {
         bool dynamicScheduling = true;
         int computeBatchSize = 10000;
+
+        validationFunc_t forwardModel = nullptr;
+        toBool_t objective = nullptr;
     } cpu;
 
     struct {
         int computeBatchSize = 200;
         int blockSize = 256;
         int streams = 8;
+
+        validationFunc_t forwardModel = nullptr;
+        toBool_t objective = nullptr;
     } gpu;
 };
 

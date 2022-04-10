@@ -212,6 +212,22 @@ int main(int argc, char** argv){
         "okada2"
     };
 
+    const std::vector<validationFunc_t> cpuForwardModels = {
+        validate_cpuM1,
+        validate_cpuM2,
+        validate_cpuO1,
+        validate_cpuO2
+    };
+    const toBool_t cpuObjective = toBool_cpu;
+
+    const std::vector<validationFunc_t> gpuForwardModels = {
+        ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuM1>(0),
+        ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuM2>(0),
+        ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuO1>(0),
+        ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuO2>(0)
+    };
+    const toBool_t gpuObjective = ParallelFramework::getGpuPointerFromSymbol<toBool_t, toBool_gpu>(0);
+
     // Scale factor, must be >0
     float k = 2;
 
@@ -222,7 +238,7 @@ int main(int argc, char** argv){
     std::ifstream dispfile, gridfile;
     std::ofstream outfile;
     std::string tmp;
-    int stations, dims, result, rank, commSize;
+    int stations, dims, rank, commSize;
     float x, y, z, de, dn, dv, se, sn, sv;
     float low, high, step;
 
@@ -371,6 +387,12 @@ int main(int argc, char** argv){
             parameters.slowStartBase            = slowStartBase;
             parameters.minMsForRatioAdjustment  = minMsForRatioAdjustment;
 
+            parameters.cpu.forwardModel = cpuForwardModels[m];
+            parameters.cpu.objective = cpuObjective;
+
+            parameters.gpu.forwardModel = gpuForwardModels[m];
+            parameters.gpu.objective = gpuObjective;
+
             float totalTime = 0;        //msec
             int numOfRuns = 0;
             int numOfResults = -2;
@@ -382,12 +404,7 @@ int main(int argc, char** argv){
 
                 // Start the computation
                 sw.start();
-                switch(m){
-                    case 0: result = framework.run<validate_cpuM1, validate_gpuM1, toBool_cpu, toBool_gpu>(); break;
-                    case 1: result = framework.run<validate_cpuM2, validate_gpuM2, toBool_cpu, toBool_gpu>(); break;
-                    case 2: result = framework.run<validate_cpuO1, validate_gpuO1, toBool_cpu, toBool_gpu>(); break;
-                    case 3: result = framework.run<validate_cpuO2, validate_gpuO2, toBool_cpu, toBool_gpu>(); break;
-                }
+                auto result = framework.run();
                 sw.stop();
                 if (result != 0) {
                     printf("[%d] [%s \\ %d] Error running the computation: %d\n", rank, modelNames[m].c_str(), g, result);

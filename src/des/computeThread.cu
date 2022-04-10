@@ -1,19 +1,18 @@
 #include "computeThread.h"
 #include "framework.h"
 #include "utilities.h"
+#include "gpuKernel.h"
 
 #include <cstring>
 #include <nvml.h>
 #include <stdarg.h>
 
-ComputeThread::ComputeThread(int id, std::string name, WorkerThreadType type, ParallelFramework& framework, ThreadCommonData& tcd, CallCpuKernelCallback callCpuKernel, CallGpuKernelCallback callGpuKernel)
+ComputeThread::ComputeThread(int id, std::string name, WorkerThreadType type, ParallelFramework& framework, ThreadCommonData& tcd)
     : m_id(id),
       m_name(std::move(name)),
       m_type(type),
       m_framework(framework),
       m_tcd(tcd),
-      m_callCpuKernel(callCpuKernel),
-      m_callGpuKernel(callGpuKernel),
       m_rank(m_framework.getRank()),
       m_totalCalculatedElements(0),
       m_lastCalculatedElements(0),
@@ -267,7 +266,7 @@ AssignedWork ComputeThread::getBatch(size_t batchSize) {
 
 void ComputeThread::doWorkCpu(const AssignedWork &work, RESULT_TYPE* results) {
     const auto& parameters = m_framework.getParameters();
-    m_callCpuKernel(results, m_framework.getLimits().data(), parameters.model.D, work.numOfElements, parameters.model.dataPtr, parameters.resultSaveType == SAVE_TYPE_ALL ? nullptr : &m_tcd.listIndex,
+    cpu_kernel(parameters.cpu.forwardModel, parameters.cpu.objective, results, m_framework.getLimits().data(), parameters.model.D, work.numOfElements, parameters.model.dataPtr, parameters.resultSaveType == SAVE_TYPE_ALL ? nullptr : &m_tcd.listIndex,
                     m_framework.getIndexSteps().data(), work.startPoint, parameters.cpu.dynamicScheduling, parameters.cpu.computeBatchSize);
 }
 
@@ -307,7 +306,8 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
         #endif
 
         // Note: Point at the start of deviceResults, because the offset (because of computeBatchSize) is calculated in the kernel
-        m_callGpuKernel(numOfBlocks, blockSize, m_gpuRuntime.deviceProp.sharedMemPerBlock, m_gpuRuntime.streams[i],
+        validate_kernel<<<numOfBlocks, blockSize, m_gpuRuntime.deviceProp.sharedMemPerBlock, m_gpuRuntime.streams[i]>>>(
+            parameters.gpu.forwardModel, parameters.gpu.objective,
             m_gpuRuntime.deviceResults, work.startPoint,
             parameters.model.D, elementsPerStream, skip, m_gpuRuntime.deviceDataPtr,
             parameters.model.dataSize, m_gpuRuntime.useSharedMemoryForData, m_gpuRuntime.useConstantMemoryForData,
