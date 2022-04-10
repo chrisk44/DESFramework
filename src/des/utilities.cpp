@@ -1,6 +1,6 @@
 #include "utilities.h"
 
-#include "defs.h"
+#include "definitions.h"
 
 unsigned long getMaxCPUBytes(){
     long pages = sysconf(_SC_PHYS_PAGES);

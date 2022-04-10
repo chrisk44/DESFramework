@@ -1,16 +1,16 @@
-#include "framework.h"
+#include "desf.h"
 
 #include <list>
 
-void ParallelFramework::slaveProcess() {
+void DesFramework::slaveProcess() {
     /*******************************************************************
     ********** Calculate number of worker threads (#GPUs + 1CPU) *******
     ********************************************************************/
     Stopwatch masterStopwatch;
     masterStopwatch.start();
 
-    bool useCpu = m_parameters.processingType == PROCESSING_TYPE_CPU || m_parameters.processingType == PROCESSING_TYPE_BOTH;
-    bool useGpu = m_parameters.processingType == PROCESSING_TYPE_GPU || m_parameters.processingType == PROCESSING_TYPE_BOTH;
+    bool useCpu = m_config.processingType == PROCESSING_TYPE_CPU || m_config.processingType == PROCESSING_TYPE_BOTH;
+    bool useGpu = m_config.processingType == PROCESSING_TYPE_GPU || m_config.processingType == PROCESSING_TYPE_BOTH;
     int numOfCpus = useCpu ? 1 : 0;
     int numOfGpus = 0;
 

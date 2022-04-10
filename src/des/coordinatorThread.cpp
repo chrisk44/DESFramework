@@ -1,8 +1,8 @@
-#include "framework.h"
+#include "desf.h"
 
 #include "utilities.h"
 
-void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThreads, ThreadCommonData& tcd){
+void DesFramework::coordinatorThread(std::vector<ComputeThread>& computeThreads, ThreadCommonData& tcd){
     int* globalListIndexPtr = &tcd.listIndex;
 
 	AssignedWork work;
@@ -11,10 +11,10 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
     RESULT_TYPE* localResults = nullptr;
 	int numOfRatioAdjustments = 0;
 	unsigned long maxCpuElements = getMaxCPUBytes();
-    if(m_parameters.resultSaveType == SAVE_TYPE_ALL)
+    if(m_config.resultSaveType == SAVE_TYPE_ALL)
 		maxCpuElements /= sizeof(RESULT_TYPE);
 	else
-        maxCpuElements /= m_parameters.model.D * sizeof(DATA_TYPE);
+        maxCpuElements /= m_config.model.D * sizeof(DATA_TYPE);
 
     std::map<ComputeThreadID, float> ratios;
     std::map<ComputeThreadID, float> ratioSums;
@@ -28,32 +28,32 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
 		float time_data, time_assign, time_start, time_wait, time_scores, time_results;
 	#endif
 
-    if(m_parameters.output.overrideMemoryRestrictions){
-        maxBatchSize = m_parameters.batchSize;
+    if(m_config.output.overrideMemoryRestrictions){
+        maxBatchSize = m_config.batchSize;
 	}else{
-        if(m_parameters.processingType == PROCESSING_TYPE_CPU)
+        if(m_config.processingType == PROCESSING_TYPE_CPU)
 			maxBatchSize = getMaxCPUBytes();
-        else if(m_parameters.processingType == PROCESSING_TYPE_GPU)
+        else if(m_config.processingType == PROCESSING_TYPE_GPU)
 			maxBatchSize = getMaxGPUBytes();
 		else
             maxBatchSize = std::min(getMaxCPUBytes(), getMaxGPUBytes());
 
 		// maxBatchSize contains the value in bytes, so divide it according to resultSaveType to convert it to actual batch size
-        if(m_parameters.resultSaveType == SAVE_TYPE_ALL)
+        if(m_config.resultSaveType == SAVE_TYPE_ALL)
             maxBatchSize /= sizeof(RESULT_TYPE);
         else
-            maxBatchSize /= m_parameters.model.D * sizeof(DATA_TYPE);
+            maxBatchSize /= m_config.model.D * sizeof(DATA_TYPE);
 
 		// Limit the batch size by the user-given value
-        maxBatchSize = std::min((unsigned long)m_parameters.batchSize, (unsigned long)maxBatchSize);
+        maxBatchSize = std::min((unsigned long)m_config.batchSize, (unsigned long)maxBatchSize);
 
 		// If we are saving a list, the max number of elements we might want to send is maxBatchSize * D, so limit the batch size
 		// so that the max number of elements is INT_MAX
-        if(m_parameters.resultSaveType == SAVE_TYPE_LIST && (unsigned long) (maxBatchSize*m_parameters.model.D) > (unsigned long) INT_MAX){
-            maxBatchSize = (INT_MAX - m_parameters.model.D) / m_parameters.model.D;
+        if(m_config.resultSaveType == SAVE_TYPE_LIST && (unsigned long) (maxBatchSize*m_config.model.D) > (unsigned long) INT_MAX){
+            maxBatchSize = (INT_MAX - m_config.model.D) / m_config.model.D;
 		}
 		// If we are saving all of the results, the max number of elements is maxBatchSize itself, so limit it to INT_MAX
-        else if(m_parameters.resultSaveType == SAVE_TYPE_ALL && (unsigned long) maxBatchSize > (unsigned long) INT_MAX){
+        else if(m_config.resultSaveType == SAVE_TYPE_ALL && (unsigned long) maxBatchSize > (unsigned long) INT_MAX){
 			maxBatchSize = INT_MAX;
 		}
 	}
@@ -121,9 +121,9 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
         std::map<ComputeThreadID, size_t> batchSizes;
         unsigned long total = 0;
         for(auto& ct : computeThreads){
-            if(m_parameters.slaveDynamicScheduling)
+            if(m_config.slaveDynamicScheduling)
                 batchSizes[ct.getId()] = std::max((unsigned long) 1, (unsigned long) (ratios[ct.getId()] * std::min(
-                    m_parameters.slaveBatchSize, work.numOfElements)));
+                    m_config.slaveBatchSize, work.numOfElements)));
             else{
                 batchSizes[ct.getId()] = std::max((unsigned long) 1, (unsigned long) (ratios[ct.getId()] * work.numOfElements));
                 total += batchSizes[ct.getId()];
@@ -134,7 +134,7 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
          * If we are NOT using dynamic scheduling, make sure that exactly
          * work.numOfElements elements have been assigned
          */
-        if(!m_parameters.slaveDynamicScheduling){
+        if(!m_config.slaveDynamicScheduling){
             if(total < work.numOfElements){
                 // Something was left out, assign it to first thread
                 batchSizes.begin()->second += work.numOfElements - total;
@@ -220,12 +220,12 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
 		}
 
         #ifdef DBG_RESULTS
-            if(m_parameters.resultSaveType == SAVE_TYPE_LIST){
-                printf("[%d] Coordinator: Found %u results\n", m_rank, *globalListIndexPtr / m_parameters.model.D);
+            if(m_config.resultSaveType == SAVE_TYPE_LIST){
+                printf("[%d] Coordinator: Found %u results\n", m_rank, *globalListIndexPtr / m_config.model.D);
             }
         #endif
         #ifdef DBG_RESULTS_RAW
-            if(m_parameters.resultSaveType == SAVE_TYPE_ALL){
+            if(m_config.resultSaveType == SAVE_TYPE_ALL){
                 printf("[%d] Coordinator: Results: [", m_rank);
                 for(unsigned long i=0; i<work.numOfElements; i++){
 					printf("%f ", localResults[i]);
@@ -233,9 +233,9 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
 				printf("]\n");
             }else{
                 printf("[%d] Coordinator: Results (*globalListIndexPtr = %d):", m_rank, *globalListIndexPtr);
-                for(int i=0; i<*globalListIndexPtr; i+=m_parameters.model.D){
+                for(int i=0; i<*globalListIndexPtr; i+=m_config.model.D){
                     printf("[ ");
-                    for(unsigned int j=0; j<m_parameters.model.D; j++){
+                    for(unsigned int j=0; j<m_config.model.D; j++){
                         printf("%f ", ((DATA_TYPE *)localResults)[i + j]);
                     }
                     printf("]");
@@ -247,7 +247,7 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
         #ifdef DBG_TIME
             sw.start();
         #endif
-        if(m_parameters.threadBalancing){
+        if(m_config.threadBalancing){
 
 			bool failed = false;
 			float totalScore = 0;
@@ -262,7 +262,7 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
 					break;
 				}
 
-                if(runTime < m_parameters.minMsForRatioAdjustment){
+                if(runTime < m_config.minMsForRatioAdjustment){
 					#ifdef DBG_RATIO
                         printf("[%d] Coordinator: Skipping ratio correction due to fast execution\n", m_rank);
 					#endif
@@ -271,7 +271,7 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
 					break;
 				}
 
-                if(m_parameters.benchmark){
+                if(m_config.benchmark){
                     printf("[%d] Coordinator: Thread %d time: %f ms\n", m_rank, cti.getId(), runTime);
 				}
 
@@ -286,7 +286,7 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
                     newRatio = scores[ct.getId()] / totalScore;
                     ratioSums[ct.getId()] += newRatio;
 
-                    if(m_parameters.threadBalancingAverage){
+                    if(m_config.threadBalancingAverage){
                         ratios[ct.getId()] = ratioSums[ct.getId()] / numOfRatioAdjustments;
 					}else{
                         ratios[ct.getId()] = newRatio;
@@ -315,10 +315,10 @@ void ParallelFramework::coordinatorThread(std::vector<ComputeThread>& computeThr
 			sw.start();
 		#endif
 
-        if(m_parameters.resultSaveType == SAVE_TYPE_ALL){
+        if(m_config.resultSaveType == SAVE_TYPE_ALL){
             sendResults(localResults, work.numOfElements);
 		}else{
-            sendListResults((DATA_TYPE*) localResults, (*globalListIndexPtr) / m_parameters.model.D);
+            sendListResults((DATA_TYPE*) localResults, (*globalListIndexPtr) / m_config.model.D);
 		}
 
 		#ifdef DBG_TIME

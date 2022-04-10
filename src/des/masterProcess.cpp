@@ -1,9 +1,9 @@
-#include "framework.h"
+#include "desf.h"
 #include "utilities.h"
 
 #include <cstring>
 
-void ParallelFramework::masterProcess() {
+void DesFramework::masterProcess() {
     int finished = 0;
     int numOfSlaves = getNumOfProcesses() - 1;
 
@@ -17,7 +17,7 @@ void ParallelFramework::masterProcess() {
 
     for(int i=0; i<numOfSlaves; i++){
         slaveProcessInfo[i].id = i + 1;
-        slaveProcessInfo[i].currentBatchSize = m_parameters.batchSize;
+        slaveProcessInfo[i].currentBatchSize = m_config.batchSize;
         slaveProcessInfo[i].jobsCompleted = 0;
         slaveProcessInfo[i].elementsCalculated = 0;
         slaveProcessInfo[i].finished = false;
@@ -52,8 +52,8 @@ void ParallelFramework::masterProcess() {
                 pinfo.maxBatchSize = receiveMaxBatchSize(mpiSource);
 
                 // For the first batches, use low batch size so the process can optimize its computeThread scores early
-                if((int) pinfo.jobsCompleted < m_parameters.slowStartLimit){
-                    pinfo.maxBatchSize = std::min(pinfo.maxBatchSize, (unsigned long) (m_parameters.slowStartBase * pow(2, pinfo.jobsCompleted)));
+                if((int) pinfo.jobsCompleted < m_config.slowStartLimit){
+                    pinfo.maxBatchSize = std::min(pinfo.maxBatchSize, (unsigned long) (m_config.slowStartBase * pow(2, pinfo.jobsCompleted)));
                     #ifdef DBG_RATIO
                         printf("[%d] Master: Setting temporary maxBatchSize=%lu for slave %d\n", m_rank, pinfo.maxBatchSize, mpiSource);
                     #endif
@@ -65,10 +65,10 @@ void ParallelFramework::masterProcess() {
                     pinfo.work.numOfElements = 0;
                 }else{
                     pinfo.work.startPoint = m_totalSent;
-                    pinfo.work.numOfElements = std::min(std::min((unsigned long) (pinfo.ratio * m_parameters.batchSize), (unsigned long) pinfo.maxBatchSize), m_totalElements-m_totalSent);
+                    pinfo.work.numOfElements = std::min(std::min((unsigned long) (pinfo.ratio * m_config.batchSize), (unsigned long) pinfo.maxBatchSize), m_totalElements-m_totalSent);
 
                     // printf("pinfo.ratio = %f, paramters->batchSize = %lu, pinfo.maxBatchSize = %lu, m_totalElements = %lu, m_totalSent = %lu, product = %lu\n",
-                    // 		pinfo.ratio, m_parameters.batchSize, pinfo.maxBatchSize, m_totalElements, m_totalSent, (unsigned long) (pinfo.ratio * m_parameters.batchSize));
+                    // 		pinfo.ratio, m_config.batchSize, pinfo.maxBatchSize, m_totalElements, m_totalSent, (unsigned long) (pinfo.ratio * m_config.batchSize));
 
                     m_totalSent += pinfo.work.numOfElements;
                 }
@@ -99,7 +99,7 @@ void ParallelFramework::masterProcess() {
                 #endif
 
                 // Receive the results
-                if(m_parameters.resultSaveType == SAVE_TYPE_ALL){
+                if(m_config.resultSaveType == SAVE_TYPE_ALL){
                     receiveAllResults(&m_finalResults[pinfo.work.startPoint], pinfo.work.numOfElements, mpiSource);
                     #ifdef DBG_RESULTS
                         printf("[%d] Master: Received results from %d starting at %lu\n", m_rank, pinfo.id, pinfo.work.startPoint);
@@ -118,8 +118,8 @@ void ParallelFramework::masterProcess() {
                     #endif
                     for(int i=0; i<count; i++){
                         std::vector<DATA_TYPE> point;
-                        for(unsigned int j=0; j<m_parameters.model.D; j++){
-                            point.push_back(tmpList[i*m_parameters.model.D + j]);
+                        for(unsigned int j=0; j<m_config.model.D; j++){
+                            point.push_back(tmpList[i*m_config.model.D + j]);
                         }
                         m_listResults.push_back(point);
                         #ifdef DBG_RESULTS_RAW
@@ -142,7 +142,7 @@ void ParallelFramework::masterProcess() {
                 int t = masterStopwatch.getMsec()/1000;
                 int eta = t * ((float)m_totalElements/m_totalReceived) - t;
 
-                if(m_parameters.printProgress){
+                if(m_config.printProgress){
                     printf("Progress: %lu/%lu, %.2f %%", this->m_totalReceived, this->m_totalElements, ((float)this->m_totalReceived / this->m_totalElements)*100);
 
                     if(t < 3600)	printf(", Elapsed time: %02d:%02d", t/60, t%60);
@@ -153,7 +153,7 @@ void ParallelFramework::masterProcess() {
                 }
 
                 #ifdef DBG_MPI_STEPS
-                    if(m_parameters.resultSaveType == SAVE_TYPE_ALL)
+                    if(m_config.resultSaveType == SAVE_TYPE_ALL)
                         printf("[%d] Master: Received results from slave %d\n", m_rank, mpiSource);
                     else
                         printf("[%d] Master: Received list results from slave %d\n", m_rank, mpiSource);
@@ -167,11 +167,11 @@ void ParallelFramework::masterProcess() {
                 pinfo.lastAssignedElements = pinfo.work.numOfElements;
 
                 // Print benchmark results
-                if (m_parameters.benchmark && m_parameters.printProgress) {
+                if (m_config.benchmark && m_config.printProgress) {
                     printf("[%d] Master: Slave %d benchmark: %lu elements, %f ms\n\n", m_rank, mpiSource, pinfo.work.numOfElements, pinfo.stopwatch.getMsec());
                 }
 
-                if(m_parameters.slaveBalancing && numOfSlaves > 1){
+                if(m_config.slaveBalancing && numOfSlaves > 1){
                     // Check other scores and calculate the sum
                     float totalScore = 0;
                     for(int i=0; i<numOfSlaves; i++){

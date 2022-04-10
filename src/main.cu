@@ -5,7 +5,7 @@
 #include <cuda_runtime.h>
 #include <cstring>
 
-#include "des/framework.h"
+#include "des/desf.h"
 
 /*
  * Each one of these contain a __host__ __device__ doValidate[MO][123] function
@@ -244,12 +244,12 @@ int main(int argc, char** argv){
     toBool_t gpuObjective = nullptr;
     if(!isMaster){
         gpuForwardModels = {
-            ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuM1>(0),
-            ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuM2>(0),
-            ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuO1>(0),
-            ParallelFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuO2>(0)
+            DesFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuM1>(0),
+            DesFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuM2>(0),
+            DesFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuO1>(0),
+            DesFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuO2>(0)
         };
-        gpuObjective = ParallelFramework::getGpuPointerFromSymbol<toBool_t, toBool_gpu>(0);
+        gpuObjective = DesFramework::getGpuPointerFromSymbol<toBool_t, toBool_gpu>(0);
     } // else do not attempt to retrieve addresses
 
     // For each model...
@@ -347,41 +347,41 @@ int main(int argc, char** argv){
             gridfile.close();
 
             // Create the framework's parameters struct
-            ParallelFrameworkParameters parameters;
-            parameters.model.D = limits.size();
-            parameters.resultSaveType = SAVE_TYPE_LIST;
-            parameters.processingType = processingType;
-            parameters.output.overrideMemoryRestrictions = true;
-            parameters.finalizeAfterExecution = false;
-            parameters.printProgress = false;
-            parameters.benchmark = false;
+            DesConfig config;
+            config.model.D = limits.size();
+            config.resultSaveType = SAVE_TYPE_LIST;
+            config.processingType = processingType;
+            config.output.overrideMemoryRestrictions = true;
+            config.finalizeAfterExecution = false;
+            config.printProgress = false;
+            config.benchmark = false;
 
-            parameters.model.dataPtr = (void*) modelDataPtr;
-            parameters.model.dataSize = (1 + stations*(9 - (m<2 ? 0 : 1))) * sizeof(float);
+            config.model.dataPtr = (void*) modelDataPtr;
+            config.model.dataSize = (1 + stations*(9 - (m<2 ? 0 : 1))) * sizeof(float);
 
-            parameters.threadBalancing          = threadBalancing;
-            parameters.slaveBalancing           = slaveBalancing;
-            parameters.slaveDynamicScheduling   = slaveDynamicScheduling;
-            parameters.cpu.dynamicScheduling = cpuDynamicScheduling;
-            parameters.threadBalancingAverage   = threadBalancingAverage;
+            config.threadBalancing          = threadBalancing;
+            config.slaveBalancing           = slaveBalancing;
+            config.slaveDynamicScheduling   = slaveDynamicScheduling;
+            config.cpu.dynamicScheduling    = cpuDynamicScheduling;
+            config.threadBalancingAverage   = threadBalancingAverage;
 
-            parameters.batchSize                = batchSizeFactor > 0 ? totalElements * batchSizeFactor : batchSize;
-            parameters.slaveBatchSize           = slaveBatchSizeFactor > 0 ? totalElements * slaveBatchSizeFactor : slaveBatchSize;
-            parameters.gpu.computeBatchSize     = computeBatchSize;
-            parameters.cpu.computeBatchSize     = cpuComputeBatchSize;
+            config.batchSize                = batchSizeFactor > 0 ? totalElements * batchSizeFactor : batchSize;
+            config.slaveBatchSize           = slaveBatchSizeFactor > 0 ? totalElements * slaveBatchSizeFactor : slaveBatchSize;
+            config.gpu.computeBatchSize     = computeBatchSize;
+            config.cpu.computeBatchSize     = cpuComputeBatchSize;
 
-            parameters.gpu.blockSize            = blockSize;
-            parameters.gpu.streams              = gpuStreams;
+            config.gpu.blockSize            = blockSize;
+            config.gpu.streams              = gpuStreams;
 
-            parameters.slowStartLimit           = slowStartLimit;
-            parameters.slowStartBase            = slowStartBase;
-            parameters.minMsForRatioAdjustment  = minMsForRatioAdjustment;
+            config.slowStartLimit           = slowStartLimit;
+            config.slowStartBase            = slowStartBase;
+            config.minMsForRatioAdjustment  = minMsForRatioAdjustment;
 
-            parameters.cpu.forwardModel = isMaster ? nullptr : cpuForwardModels[m];
-            parameters.cpu.objective = isMaster ? nullptr : cpuObjective;
+            config.cpu.forwardModel = isMaster ? nullptr : cpuForwardModels[m];
+            config.cpu.objective = isMaster ? nullptr : cpuObjective;
 
-            parameters.gpu.forwardModel = isMaster ? nullptr : gpuForwardModels[m];
-            parameters.gpu.objective = isMaster ? nullptr : gpuObjective;
+            config.gpu.forwardModel = isMaster ? nullptr : gpuForwardModels[m];
+            config.gpu.objective = isMaster ? nullptr : gpuObjective;
 
             float totalTime = 0;        //msec
             int numOfRuns = 0;
@@ -389,8 +389,8 @@ int main(int argc, char** argv){
             // Run at least 10 seconds, and stop after 10 runs or 2 minutes
             while(true){
                 // Initialize the framework object
-                ParallelFramework framework(false);
-                framework.init(limits, parameters);
+                DesFramework framework(false);
+                framework.init(limits, config);
 
                 // Start the computation
                 Stopwatch sw;

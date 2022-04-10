@@ -5,7 +5,7 @@
 #include <semaphore.h>
 #include <string>
 
-#include "defs.h"
+#include "definitions.h"
 #include "stopwatch.h"
 
 typedef RESULT_TYPE (*validationFunc_t)(DATA_TYPE*, void*);
@@ -34,7 +34,7 @@ enum ResultSaveType {
     SAVE_TYPE_LIST
 };
 
-struct ParallelFrameworkParameters {
+struct DesConfig {
     ProcessingType processingType = PROCESSING_TYPE_BOTH;
     ResultSaveType resultSaveType = SAVE_TYPE_LIST;
     bool finalizeAfterExecution = true;

@@ -4,9 +4,9 @@
 #include <errno.h>
 #include <mpi.h>
 
-#include "framework.h"
+#include "desf.h"
 
-ParallelFramework::ParallelFramework(bool initMPI)
+DesFramework::DesFramework(bool initMPI)
     : m_saveFile(-1),
       m_finalResults(nullptr),
       m_valid(false),
@@ -22,11 +22,11 @@ ParallelFramework::ParallelFramework(bool initMPI)
     MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
 }
 
-void ParallelFramework::init(const std::vector<Limit>& limits, const ParallelFrameworkParameters& parameters){
-    if(limits.size() != parameters.model.D)
-        throw std::invalid_argument("The limits vector must have a size equal to parameters.D");
+void DesFramework::init(const std::vector<Limit>& limits, const DesConfig& config){
+    if(limits.size() != config.model.D)
+        throw std::invalid_argument("The limits vector must have a size equal to config.D");
 
-    for (unsigned int i = 0; i < parameters.model.D; i++) {
+    for (unsigned int i = 0; i < config.model.D; i++) {
         if (limits[i].lowerLimit > limits[i].upperLimit)
             throw std::invalid_argument("Lower limit for dimension " + std::to_string(i) + " can't be higher than upper limit");
 
@@ -34,61 +34,61 @@ void ParallelFramework::init(const std::vector<Limit>& limits, const ParallelFra
             throw std::invalid_argument("N for dimension " + std::to_string(i) + " must be > 0");
     }
 
-    if(parameters.model.dataPtr == nullptr && parameters.model.dataSize > 0)
+    if(config.model.dataPtr == nullptr && config.model.dataSize > 0)
         throw std::invalid_argument("dataPtr is null but dataSize is > 0");
 
-    if(parameters.output.overrideMemoryRestrictions && parameters.resultSaveType != SAVE_TYPE_LIST)
+    if(config.output.overrideMemoryRestrictions && config.resultSaveType != SAVE_TYPE_LIST)
         throw std::invalid_argument("Can't override memory restrictions when saving as SAVE_TYPE_ALL");
 
     if(m_rank != 0){
-        if(parameters.cpu.forwardModel == nullptr)
+        if(config.cpu.forwardModel == nullptr)
             throw std::invalid_argument("CPU forward model function is nullptr");
 
-        if(parameters.cpu.objective == nullptr)
+        if(config.cpu.objective == nullptr)
             throw std::invalid_argument("CPU objective function is nullptr");
 
-        if(parameters.gpu.forwardModel == nullptr)
+        if(config.gpu.forwardModel == nullptr)
             throw std::invalid_argument("GPU forward model function is nullptr");
 
-        if(parameters.gpu.objective == nullptr)
+        if(config.gpu.objective == nullptr)
             throw std::invalid_argument("GPU objective function is nullptr");
     }
 
-    m_parameters = parameters;
+    m_config = config;
     m_limits = limits;
 
-    for (unsigned int i = 0; i < parameters.model.D; i++) {
+    for (unsigned int i = 0; i < m_config.model.D; i++) {
         m_limits[i].step = abs(m_limits[i].upperLimit - m_limits[i].lowerLimit) / m_limits[i].N;
 
         m_idxSteps.push_back(i==0 ? 1 : m_idxSteps[i - 1] * m_limits[i-1].N);
     }
 
     #ifdef DBG_DATA
-        for(unsigned int i=0; i < parameters.model.D; i++){
+        for(unsigned int i=0; i < m_config.model.D; i++){
             printf("Dimension %u: Low=%lf, High=%lf, Step=%lf, N=%u, m_idxSteps=%llu\n", i, m_limits[i].lowerLimit, m_limits[i].upperLimit, m_limits[i].step, m_limits[i].N, m_idxSteps[i]);
         }
     #endif
 
     #ifdef DBG_MEMORY
-        printf("CPU forward model function is @ %p\n", m_parameters.cpu.forwardModel);
-        printf("CPU objective function is @     %p\n", m_parameters.cpu.objective);
-        printf("GPU forward model function is @ %p\n", m_parameters.gpu.forwardModel);
-        printf("GPU objective function is @     %p\n", m_parameters.gpu.objective);
+        printf("CPU forward model function is @ %p\n", m_config.cpu.forwardModel);
+        printf("CPU objective function is @     %p\n", m_config.cpu.objective);
+        printf("GPU forward model function is @ %p\n", m_config.gpu.forwardModel);
+        printf("GPU objective function is @     %p\n", m_config.gpu.objective);
     #endif
 
     m_totalReceived = 0;
     m_totalSent = 0;
-    m_totalElements = (unsigned long long)(m_idxSteps[parameters.model.D - 1]) * (unsigned long long)(limits[parameters.model.D - 1].N);
+    m_totalElements = (unsigned long long)(m_idxSteps[m_config.model.D - 1]) * (unsigned long long)(limits[m_config.model.D - 1].N);
 
     if(m_rank == 0){
-        if(! (m_parameters.benchmark)){
-            if(m_parameters.resultSaveType == SAVE_TYPE_ALL){
-                if(m_parameters.output.saveFile.size()){
+        if(! (m_config.benchmark)){
+            if(m_config.resultSaveType == SAVE_TYPE_ALL){
+                if(m_config.output.saveFile.size()){
 					// No saveFile given, save everything in memory
                     m_finalResults = new RESULT_TYPE[m_totalElements];		// Uninitialized
 				}else{
 					// Open save file
-                    m_saveFile = open(m_parameters.output.saveFile.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+                    m_saveFile = open(m_config.output.saveFile.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
                     if(m_saveFile == -1){
                         fatal("open failed");
 					}
@@ -111,16 +111,16 @@ void ParallelFramework::init(const std::vector<Limit>& limits, const ParallelFra
             }// else listResults will be dynamically allocated when needed
         }
 
-        if (m_parameters.batchSize == 0)
-            m_parameters.batchSize = m_totalElements;
+        if (m_config.batchSize == 0)
+            m_config.batchSize = m_totalElements;
 	}
 
     m_valid = true;
 }
 
-ParallelFramework::~ParallelFramework() {
+DesFramework::~DesFramework() {
     if(m_rank == 0){
-        if(m_parameters.output.saveFile.size() == 0) {
+        if(m_config.output.saveFile.size() == 0) {
             delete [] m_finalResults;
         } else if(m_saveFile != -1) {
 			// Unmap the save file
@@ -133,56 +133,56 @@ ParallelFramework::~ParallelFramework() {
     m_valid = false;
 }
 
-int ParallelFramework::run() {
+int DesFramework::run() {
     if(!m_valid){
         std::string error = "[" + std::to_string(m_rank) + "] run() called for invalid framework";
         throw std::runtime_error(error);
     }
 
     if(m_rank == 0){
-        if(m_parameters.printProgress) printf("[%d] Master process starting\n", m_rank);
+        if(m_config.printProgress) printf("[%d] Master process starting\n", m_rank);
         masterProcess();
-        if(m_parameters.printProgress) printf("[%d] Master process finished\n", m_rank);
+        if(m_config.printProgress) printf("[%d] Master process finished\n", m_rank);
     }else{
-        if(m_parameters.printProgress) printf("[%d] Slave process starting\n", m_rank);
+        if(m_config.printProgress) printf("[%d] Slave process starting\n", m_rank);
         slaveProcess();
-        if(m_parameters.printProgress) printf("[%d] Slave process finished\n", m_rank);
+        if(m_config.printProgress) printf("[%d] Slave process finished\n", m_rank);
     }
 
-    if(m_parameters.finalizeAfterExecution)
+    if(m_config.finalizeAfterExecution)
         MPI_Finalize();
 
     return m_valid ? 0 : -1;
 }
 
-bool ParallelFramework::isValid() const {
+bool DesFramework::isValid() const {
     return m_valid;
 }
 
-const RESULT_TYPE* ParallelFramework::getResults() const {
+const RESULT_TYPE* DesFramework::getResults() const {
     if(m_rank != 0)
         throw std::runtime_error("Error: Results can only be fetched by the master process. Are you the master process?\n");
 
-    if(m_parameters.resultSaveType != SAVE_TYPE_ALL)
+    if(m_config.resultSaveType != SAVE_TYPE_ALL)
         throw std::runtime_error("Error: Can't get all results when resultSaveType is not SAVE_TYPE_ALL\n");
 
     return m_finalResults;
 }
 
-const std::vector<std::vector<DATA_TYPE>>& ParallelFramework::getList() const {
+const std::vector<std::vector<DATA_TYPE>>& DesFramework::getList() const {
     if(m_rank != 0)
         throw std::runtime_error("Error: Results can only be fetched by the master process. Are you the master process?\n");
 
-    if(m_parameters.resultSaveType != SAVE_TYPE_LIST)
+    if(m_config.resultSaveType != SAVE_TYPE_LIST)
         throw std::runtime_error("Error: Can't get list results when resultSaveType is not SAVE_TYPE_LIST\n");
 
     return m_listResults;
 }
 
-void ParallelFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst) const {
+void DesFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst) const {
 	unsigned int i;
 
-    for (i = 0; i < m_parameters.model.D; i++) {
+    for (i = 0; i < m_config.model.D; i++) {
         if (point[i] < m_limits[i].lowerLimit || point[i] >= m_limits[i].upperLimit)
             throw std::invalid_argument("Result query for out-of-bounds point\n");
 
@@ -191,11 +191,11 @@ void ParallelFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst
 	}
 }
 
-unsigned long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) const {
+unsigned long DesFramework::getIndexFromIndices(unsigned long* pointIdx) const {
 	unsigned int i;
 	unsigned long index = 0;
 
-    for (i = 0; i < m_parameters.model.D; i++) {
+    for (i = 0; i < m_config.model.D; i++) {
 		// Increase index by i*(index-steps for this dimension)
         index += pointIdx[i] * m_idxSteps[i];
 	}
@@ -203,8 +203,8 @@ unsigned long ParallelFramework::getIndexFromIndices(unsigned long* pointIdx) co
 	return index;
 }
 
-unsigned long ParallelFramework::getIndexFromPoint(DATA_TYPE* point) const {
-    unsigned long indices[m_parameters.model.D];
+unsigned long DesFramework::getIndexFromPoint(DATA_TYPE* point) const {
+    unsigned long indices[m_config.model.D];
 	unsigned long index;
 
 	getIndicesFromPoint(point, indices);
@@ -213,8 +213,8 @@ unsigned long ParallelFramework::getIndexFromPoint(DATA_TYPE* point) const {
 	return index;
 }
 
-void ParallelFramework::getPointFromIndex(unsigned long index, DATA_TYPE* result) const {
-    for(int i=m_parameters.model.D - 1; i>=0; i--){
+void DesFramework::getPointFromIndex(unsigned long index, DATA_TYPE* result) const {
+    for(int i=m_config.model.D - 1; i>=0; i--){
         int currentIndex = index / m_idxSteps[i];
         result[i] = m_limits[i].lowerLimit + currentIndex*m_limits[i].step;
 
@@ -222,6 +222,6 @@ void ParallelFramework::getPointFromIndex(unsigned long index, DATA_TYPE* result
 	}
 }
 
-int ParallelFramework::getRank() const {
+int DesFramework::getRank() const {
     return m_rank;
 }

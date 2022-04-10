@@ -28,13 +28,13 @@ target_link_libraries(ComputeThread nvidia-ml)
 
 set(MODULE_NAME DES)
 
-add_library(${MODULE_NAME} framework.cpp
-                           framework.h
+add_library(${MODULE_NAME} desf.cpp
+                           desf.h
                            coordinatorThread.cpp
                            masterProcess.cpp
                            slaveProcess.cpp
                            messaging.cpp
-                           defs.h
+                           definitions.h
                            types.h)
 
 file(GLOB DES_SRC CONFIGURE_DEPENDS "*.cpp")

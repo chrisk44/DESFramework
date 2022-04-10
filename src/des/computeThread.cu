@@ -1,5 +1,5 @@
 #include "computeThread.h"
-#include "framework.h"
+#include "desf.h"
 #include "utilities.h"
 #include "gpuKernel.h"
 
@@ -7,7 +7,7 @@
 #include <nvml.h>
 #include <stdarg.h>
 
-ComputeThread::ComputeThread(int id, std::string name, WorkerThreadType type, ParallelFramework& framework, ThreadCommonData& tcd)
+ComputeThread::ComputeThread(int id, std::string name, WorkerThreadType type, DesFramework& framework, ThreadCommonData& tcd)
     : m_id(id),
       m_name(std::move(name)),
       m_type(type),
@@ -72,7 +72,7 @@ void ComputeThread::log(const char *text, ...) {
 }
 
 void ComputeThread::init() {
-    const ParallelFrameworkParameters& parameters = m_framework.getParameters();
+    const DesConfig& config = m_framework.getConfig();
 
     if (m_type == WorkerThreadType::GPU) {
         // Initialize NVML to monitor the GPU
@@ -118,31 +118,31 @@ void ComputeThread::init() {
 
         // Calculate the max batch size for the device
         m_gpuRuntime.maxGpuBatchSize = getMaxGPUBytesForGpu(m_id);
-        if(parameters.resultSaveType == SAVE_TYPE_ALL)
+        if(config.resultSaveType == SAVE_TYPE_ALL)
             m_gpuRuntime.maxGpuBatchSize /= sizeof(RESULT_TYPE);
         else
-            m_gpuRuntime.maxGpuBatchSize /= parameters.model.D * sizeof(DATA_TYPE);
+            m_gpuRuntime.maxGpuBatchSize /= config.model.D * sizeof(DATA_TYPE);
 
         // Get device's properties for shared memory
         cudaGetDeviceProperties(&m_gpuRuntime.deviceProp, m_id);
 
         // Use constant memory for data if they fit
-        m_gpuRuntime.useConstantMemoryForData = parameters.model.dataSize > 0 &&
-            parameters.model.dataSize <= (MAX_CONSTANT_MEMORY - parameters.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
+        m_gpuRuntime.useConstantMemoryForData = config.model.dataSize > 0 &&
+            config.model.dataSize <= (MAX_CONSTANT_MEMORY - config.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
 
         // Max use 1/4 of the available shared memory for data, the rest will be used for each thread to store their point (x) and index vector (i)
         // This seems to be worse than both global and constant memory
-        m_gpuRuntime.useSharedMemoryForData = false && parameters.model.dataSize > 0 && !m_gpuRuntime.useConstantMemoryForData &&
-                                 parameters.model.dataSize <= m_gpuRuntime.deviceProp.sharedMemPerBlock / 4;
+        m_gpuRuntime.useSharedMemoryForData = false && config.model.dataSize > 0 && !m_gpuRuntime.useConstantMemoryForData &&
+                                 config.model.dataSize <= m_gpuRuntime.deviceProp.sharedMemPerBlock / 4;
 
         // How many bytes are left in shared memory after using it for the model's data
-        m_gpuRuntime.availableSharedMemory = m_gpuRuntime.deviceProp.sharedMemPerBlock - (m_gpuRuntime.useSharedMemoryForData ? parameters.model.dataSize : 0);
+        m_gpuRuntime.availableSharedMemory = m_gpuRuntime.deviceProp.sharedMemPerBlock - (m_gpuRuntime.useSharedMemoryForData ? config.model.dataSize : 0);
 
         // How many points can fit in shared memory (for each point we need D*DATA_TYPEs (for x) and D*u_int (for indices))
-        m_gpuRuntime.maxSharedPoints = m_gpuRuntime.availableSharedMemory / (parameters.model.D * (sizeof(DATA_TYPE) + sizeof(unsigned int)));
+        m_gpuRuntime.maxSharedPoints = m_gpuRuntime.availableSharedMemory / (config.model.D * (sizeof(DATA_TYPE) + sizeof(unsigned int)));
 
         #ifdef DBG_START_STOP
-            if(parameters.printProgress){
+            if(config.printProgress){
                 log("useSharedMemoryForData = %d\n", m_gpuRuntime.useSharedMemoryForData);
                 log("useConstantMemoryForData = %d\n", m_gpuRuntime.useConstantMemoryForData);
                 log("availableSharedMemory = %d bytes\n", m_gpuRuntime.availableSharedMemory);
@@ -151,8 +151,8 @@ void ComputeThread::init() {
         #endif
 
         // Create streams
-        m_gpuRuntime.streams.resize(parameters.gpu.streams);
-        for(int i=0; i<parameters.gpu.streams; i++){
+        m_gpuRuntime.streams.resize(config.gpu.streams);
+        for(int i=0; i<config.gpu.streams; i++){
             cudaStreamCreate(&m_gpuRuntime.streams[i]);
             cce();
         }
@@ -161,8 +161,8 @@ void ComputeThread::init() {
         cudaMalloc(&m_gpuRuntime.deviceResults, m_gpuRuntime.allocatedElements * sizeof(RESULT_TYPE));	cce();
         cudaMalloc(&m_gpuRuntime.deviceListIndexPtr, sizeof(int));							cce();
         // If we have static model data but won't use constant memory, allocate global memory for it
-        if(parameters.model.dataSize > 0 && !m_gpuRuntime.useConstantMemoryForData){
-            cudaMalloc(&m_gpuRuntime.deviceDataPtr, parameters.model.dataSize);					cce();
+        if(config.model.dataSize > 0 && !m_gpuRuntime.useConstantMemoryForData){
+            cudaMalloc(&m_gpuRuntime.deviceDataPtr, config.model.dataSize);					cce();
         }
 
         #ifdef DBG_MEMORY
@@ -174,32 +174,32 @@ void ComputeThread::init() {
         // Copy limits, idxSteps, and constant data to device
         #ifdef DBG_MEMORY
             log("Copying limits at constant memory with offset %d\n", 0);
-            log("Copying idxSteps at constant memory with offset %lu\n", parameters.model.D * sizeof(Limit));
+            log("Copying idxSteps at constant memory with offset %lu\n", config.model.D * sizeof(Limit));
         #endif
         cudaMemcpyToSymbolWrapper(
-            m_framework.getLimits().data(), parameters.model.D * sizeof(Limit), 0);
+            m_framework.getLimits().data(), config.model.D * sizeof(Limit), 0);
         cce();
 
         cudaMemcpyToSymbolWrapper(
-            m_framework.getIndexSteps().data(), parameters.model.D * sizeof(unsigned long long),
-            parameters.model.D * sizeof(Limit));
+            m_framework.getIndexSteps().data(), config.model.D * sizeof(unsigned long long),
+            config.model.D * sizeof(Limit));
         cce();
 
         // If we have data for the model...
-        if(parameters.model.dataSize > 0){
+        if(config.model.dataSize > 0){
             // If we can use constant memory, copy it there
             if(m_gpuRuntime.useConstantMemoryForData){
                 #ifdef DBG_MEMORY
-                    log("Copying data at constant memory with offset %lu\n", parameters.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
+                    log("Copying data at constant memory with offset %lu\n", config.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
                 #endif
                 cudaMemcpyToSymbolWrapper(
-                    parameters.model.dataPtr, parameters.model.dataSize,
-                    parameters.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
+                    config.model.dataPtr, config.model.dataSize,
+                    config.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
                 cce()
             }
             // else copy the data to the global memory, either to be read from there or to be copied to shared memory
             else{
-                cudaMemcpy(m_gpuRuntime.deviceDataPtr, parameters.model.dataPtr, parameters.model.dataSize, cudaMemcpyHostToDevice);
+                cudaMemcpy(m_gpuRuntime.deviceDataPtr, config.model.dataPtr, config.model.dataSize, cudaMemcpyHostToDevice);
                 cce();
             }
         }
@@ -265,19 +265,19 @@ AssignedWork ComputeThread::getBatch(size_t batchSize) {
 }
 
 void ComputeThread::doWorkCpu(const AssignedWork &work, RESULT_TYPE* results) {
-    const auto& parameters = m_framework.getParameters();
-    cpu_kernel(parameters.cpu.forwardModel, parameters.cpu.objective, results, m_framework.getLimits().data(), parameters.model.D, work.numOfElements, parameters.model.dataPtr, parameters.resultSaveType == SAVE_TYPE_ALL ? nullptr : &m_tcd.listIndex,
-                    m_framework.getIndexSteps().data(), work.startPoint, parameters.cpu.dynamicScheduling, parameters.cpu.computeBatchSize);
+    const auto& config= m_framework.getConfig();
+    cpu_kernel(config.cpu.forwardModel, config.cpu.objective, results, m_framework.getLimits().data(), config.model.D, work.numOfElements, config.model.dataPtr, config.resultSaveType == SAVE_TYPE_ALL ? nullptr : &m_tcd.listIndex,
+                    m_framework.getIndexSteps().data(), work.startPoint, config.cpu.dynamicScheduling, config.cpu.computeBatchSize);
 }
 
 void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
-    const auto& parameters = m_framework.getParameters();
+    const auto& config = m_framework.getConfig();
 
     // Initialize the list index counter
     cudaMemset(m_gpuRuntime.deviceListIndexPtr, 0, sizeof(int));
 
     // Divide the chunk to smaller chunks to scatter accross streams
-    unsigned long elementsPerStream = work.numOfElements / parameters.gpu.streams;
+    unsigned long elementsPerStream = work.numOfElements / config.gpu.streams;
     bool onlyOne = false;
     unsigned long skip = 0;
     if(elementsPerStream == 0){
@@ -286,19 +286,19 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
     }
 
     // Queue the chunks to the streams
-    for(int i=0; i<parameters.gpu.streams; i++){
+    for(int i=0; i<config.gpu.streams; i++){
         // Adjust elementsPerStream for last stream (= total-queued)
-        if(i == parameters.gpu.streams - 1){
+        if(i == config.gpu.streams - 1){
             elementsPerStream = work.numOfElements - skip;
         }else{
             elementsPerStream = std::min(elementsPerStream, work.numOfElements - skip);
         }
 
         // Queue the kernel in stream[i] (each GPU thread gets COMPUTE_BATCH_SIZE elements to calculate)
-        int gpuThreads = (elementsPerStream + parameters.gpu.computeBatchSize - 1) / parameters.gpu.computeBatchSize;
+        int gpuThreads = (elementsPerStream + config.gpu.computeBatchSize - 1) / config.gpu.computeBatchSize;
 
         // Minimum of (minimum of user-defined block size and number of threads to go to this stream) and number of points that can fit in shared memory
-        int blockSize = std::min(std::min(parameters.gpu.blockSize, gpuThreads), m_gpuRuntime.maxSharedPoints);
+        int blockSize = std::min(std::min(config.gpu.blockSize, gpuThreads), m_gpuRuntime.maxSharedPoints);
         int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
 
         #ifdef DBG_QUEUE
@@ -307,16 +307,16 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
 
         // Note: Point at the start of deviceResults, because the offset (because of computeBatchSize) is calculated in the kernel
         validate_kernel<<<numOfBlocks, blockSize, m_gpuRuntime.deviceProp.sharedMemPerBlock, m_gpuRuntime.streams[i]>>>(
-            parameters.gpu.forwardModel, parameters.gpu.objective,
+            config.gpu.forwardModel, config.gpu.objective,
             m_gpuRuntime.deviceResults, work.startPoint,
-            parameters.model.D, elementsPerStream, skip, m_gpuRuntime.deviceDataPtr,
-            parameters.model.dataSize, m_gpuRuntime.useSharedMemoryForData, m_gpuRuntime.useConstantMemoryForData,
-            parameters.resultSaveType == SAVE_TYPE_ALL ? nullptr : m_gpuRuntime.deviceListIndexPtr,
-            parameters.gpu.computeBatchSize
+            config.model.D, elementsPerStream, skip, m_gpuRuntime.deviceDataPtr,
+            config.model.dataSize, m_gpuRuntime.useSharedMemoryForData, m_gpuRuntime.useConstantMemoryForData,
+            config.resultSaveType == SAVE_TYPE_ALL ? nullptr : m_gpuRuntime.deviceListIndexPtr,
+            config.gpu.computeBatchSize
         );
 
         // Queue the memcpy in stream[i] only if we are saving as SAVE_TYPE_ALL (otherwise the results will be fetched at the end of the current computation)
-        if(parameters.resultSaveType == SAVE_TYPE_ALL){
+        if(config.resultSaveType == SAVE_TYPE_ALL){
             cudaMemcpyAsync(&results[skip], &m_gpuRuntime.deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, m_gpuRuntime.streams[i]);
         }
 
@@ -334,7 +334,7 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
     }
 
     // If we are saving as SAVE_TYPE_LIST, fetch the results
-    if(parameters.resultSaveType == SAVE_TYPE_LIST){
+    if(config.resultSaveType == SAVE_TYPE_LIST){
         int gpuListIndex, globalListIndexOld;
         // Get the current list index from the GPU
         cudaMemcpy(&gpuListIndex, m_gpuRuntime.deviceListIndexPtr, sizeof(int), cudaMemcpyDeviceToHost);
@@ -349,7 +349,7 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
 
 void ComputeThread::start(size_t batchSize){
 
-    const auto& parameters = m_framework.getParameters();
+    const auto& config = m_framework.getConfig();
 
     Stopwatch activeStopwatch;
     activeStopwatch.start();
@@ -382,7 +382,7 @@ void ComputeThread::start(size_t batchSize){
             break;
 
         RESULT_TYPE* localResults;
-        if(parameters.resultSaveType == SAVE_TYPE_LIST)
+        if(config.resultSaveType == SAVE_TYPE_LIST)
             localResults = m_tcd.results;
         else
             localResults = &m_tcd.results[work.startPoint - m_tcd.globalFirst];
@@ -431,7 +431,7 @@ void ComputeThread::start(size_t batchSize){
         #endif
 
         #ifdef DBG_RESULTS_RAW
-            if(parameters.resultSaveType == SAVE_TYPE_ALL){
+            if(config.resultSaveType == SAVE_TYPE_ALL){
                 log("Results are: ");
                 for (unsigned long i = 0; i < work.numOfElements; i++) {
                     printf("%f ", ((DATA_TYPE *)localResults)[i]);

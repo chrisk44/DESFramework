@@ -18,14 +18,15 @@
 #include "computeThread.h"
 #include "cpuKernel.h"
 #include "gpuKernel.h"
+#include "definitions.h"
 
 typedef std::function<void(ComputeThread&, ThreadCommonData&)> ComputeThreadStarter;
 
-class ParallelFramework {
+class DesFramework {
 private:
 	// Parameters
-    std::vector<Limit> m_limits;						// This must be an array of length = parameters.D
-    ParallelFrameworkParameters m_parameters;
+    std::vector<Limit> m_limits;                    // This must be an array of length = m_config.D
+    DesConfig m_config;
 
 	// Runtime variables
     std::vector<unsigned long long> m_idxSteps;   // Index steps for each dimension
@@ -41,13 +42,13 @@ private:
     int m_rank;
 
 public:
-    ParallelFramework(bool initMPI);
-    ~ParallelFramework();
-    void init(const std::vector<Limit>& limits, const ParallelFrameworkParameters& parameters);
+    DesFramework(bool initMPI);
+    ~DesFramework();
+    void init(const std::vector<Limit>& limits, const DesConfig& config);
 
     int run();
 
-    const decltype(m_parameters)& getParameters() const { return m_parameters; }
+    const decltype(m_config)& getConfig() const { return m_config; }
     const decltype(m_limits)& getLimits() const { return m_limits; }
     const decltype(m_idxSteps)& getIndexSteps() const { return m_idxSteps; }
 

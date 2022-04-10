@@ -11,7 +11,7 @@
 #include <cuda_runtime.h>
 #include <nvml.h>
 
-#include "defs.h"
+#include "definitions.h"
 #include "stopwatch.h"
 #include "types.h"
 
@@ -22,14 +22,14 @@ enum WorkerThreadType {
 
 typedef int ComputeThreadID;
 
-class ParallelFramework;
+class DesFramework;
 
 class ComputeThread {
 public:
     ComputeThread(ComputeThreadID id,
                   std::string name,
                   WorkerThreadType type,
-                  ParallelFramework& framework,
+                  DesFramework& framework,
                   ThreadCommonData& tcd);
 
     // Dummy copy constructor which does not actually copy the whole object, just recreates it in the new location
@@ -70,7 +70,7 @@ private:
     ComputeThreadID m_id;
     std::string m_name;
     WorkerThreadType m_type;
-    ParallelFramework& m_framework;
+    DesFramework& m_framework;
     ThreadCommonData& m_tcd;
     int m_rank;
 
