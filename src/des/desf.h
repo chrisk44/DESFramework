@@ -96,6 +96,19 @@ public:
         return result;
     }
 
+    template<typename T, T symbol>
+    static std::map<int, T> getGpuPointersFromSymbol() {
+        int numOfDevices;
+        cudaGetDeviceCount(&numOfDevices);
+
+        std::map<int, T> pointers;
+        for(int i=0; i<numOfDevices; i++){
+            pointers[i] = getGpuPointerFromSymbol<T, symbol>(i);
+        }
+
+        return pointers;
+    }
+
 private:
     void masterProcess();
     void coordinatorThread(std::vector<ComputeThread>& cti, ThreadCommonData& tcd);

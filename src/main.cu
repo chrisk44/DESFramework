@@ -240,16 +240,16 @@ int main(int argc, char** argv){
     };
     const toBool_t cpuObjective = toBool_cpu;
 
-    std::vector<validationFunc_t> gpuForwardModels;
-    toBool_t gpuObjective = nullptr;
+    std::vector<std::map<int, validationFunc_t>> gpuForwardModels;
+    std::map<int, toBool_t> gpuObjective;
     if(!isMaster){
         gpuForwardModels = {
-            DesFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuM1>(0),
-            DesFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuM2>(0),
-            DesFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuO1>(0),
-            DesFramework::getGpuPointerFromSymbol<validationFunc_t, validate_gpuO2>(0)
+            DesFramework::getGpuPointersFromSymbol<validationFunc_t, validate_gpuM1>(),
+            DesFramework::getGpuPointersFromSymbol<validationFunc_t, validate_gpuM2>(),
+            DesFramework::getGpuPointersFromSymbol<validationFunc_t, validate_gpuO1>(),
+            DesFramework::getGpuPointersFromSymbol<validationFunc_t, validate_gpuO2>()
         };
-        gpuObjective = DesFramework::getGpuPointerFromSymbol<toBool_t, toBool_gpu>(0);
+        gpuObjective = DesFramework::getGpuPointersFromSymbol<toBool_t, toBool_gpu>();
     } // else do not attempt to retrieve addresses
 
     // For each model...
@@ -377,11 +377,13 @@ int main(int argc, char** argv){
             config.slowStartBase            = slowStartBase;
             config.minMsForRatioAdjustment  = minMsForRatioAdjustment;
 
-            config.cpu.forwardModel = isMaster ? nullptr : cpuForwardModels[m];
-            config.cpu.objective = isMaster ? nullptr : cpuObjective;
+            if(!isMaster){
+                config.cpu.forwardModel = cpuForwardModels[m];
+                config.cpu.objective = cpuObjective;
 
-            config.gpu.forwardModel = isMaster ? nullptr : gpuForwardModels[m];
-            config.gpu.objective = isMaster ? nullptr : gpuObjective;
+                config.gpu.forwardModels = gpuForwardModels[m];
+                config.gpu.objectives = gpuObjective;
+            }
 
             float totalTime = 0;        //msec
             int numOfRuns = 0;

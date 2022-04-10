@@ -273,6 +273,14 @@ void ComputeThread::doWorkCpu(const AssignedWork &work, RESULT_TYPE* results) {
 void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
     const auto& config = m_framework.getConfig();
 
+    auto forwardModel = config.gpu.forwardModels.find(getId());
+    if(forwardModel == config.gpu.forwardModels.end())
+        throw std::invalid_argument("No forward model function available for GPU " + std::to_string(getId()));
+
+    auto objective = config.gpu.objectives.find(getId());
+    if(objective == config.gpu.objectives.end())
+        throw std::invalid_argument("No objective function available for GPU " + std::to_string(getId()));
+
     // Initialize the list index counter
     cudaMemset(m_gpuRuntime.deviceListIndexPtr, 0, sizeof(int));
 
@@ -307,7 +315,7 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
 
         // Note: Point at the start of deviceResults, because the offset (because of computeBatchSize) is calculated in the kernel
         validate_kernel<<<numOfBlocks, blockSize, m_gpuRuntime.deviceProp.sharedMemPerBlock, m_gpuRuntime.streams[i]>>>(
-            config.gpu.forwardModel, config.gpu.objective,
+            forwardModel->second, objective->second,
             m_gpuRuntime.deviceResults, work.startPoint,
             config.model.D, elementsPerStream, skip, m_gpuRuntime.deviceDataPtr,
             config.model.dataSize, m_gpuRuntime.useSharedMemoryForData, m_gpuRuntime.useConstantMemoryForData,

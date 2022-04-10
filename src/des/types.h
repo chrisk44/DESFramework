@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <map>
 #include <mutex>
 #include <semaphore.h>
 #include <string>
@@ -77,8 +78,8 @@ struct DesConfig {
         int blockSize = 256;
         int streams = 8;
 
-        validationFunc_t forwardModel = nullptr;
-        toBool_t objective = nullptr;
+        std::map<int, validationFunc_t> forwardModels;
+        std::map<int, toBool_t> objectives;
     } gpu;
 };
 

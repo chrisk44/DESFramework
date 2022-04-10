@@ -47,11 +47,21 @@ void DesFramework::init(const std::vector<Limit>& limits, const DesConfig& confi
         if(config.cpu.objective == nullptr)
             throw std::invalid_argument("CPU objective function is nullptr");
 
-        if(config.gpu.forwardModel == nullptr)
-            throw std::invalid_argument("GPU forward model function is nullptr");
+        if(config.gpu.forwardModels.size() == 0)
+            throw std::invalid_argument("GPU forward model functions not provided");
 
-        if(config.gpu.objective == nullptr)
-            throw std::invalid_argument("GPU objective function is nullptr");
+        for(const auto& pair : config.gpu.forwardModels) {
+            if(pair.second == nullptr)
+                throw std::invalid_argument("GPU forward model function for GPU " + std::to_string(pair.first) + " is nullptr");
+        }
+
+        if(config.gpu.objectives.size() == 0)
+            throw std::invalid_argument("GPU objective functions not provided");
+
+        for(const auto& pair : config.gpu.objectives) {
+            if(pair.second == nullptr)
+                throw std::invalid_argument("GPU objective function for GPU " + std::to_string(pair.first) + " is nullptr");
+        }
     }
 
     m_config = config;
@@ -72,8 +82,10 @@ void DesFramework::init(const std::vector<Limit>& limits, const DesConfig& confi
     #ifdef DBG_MEMORY
         printf("CPU forward model function is @ %p\n", m_config.cpu.forwardModel);
         printf("CPU objective function is @     %p\n", m_config.cpu.objective);
-        printf("GPU forward model function is @ %p\n", m_config.gpu.forwardModel);
-        printf("GPU objective function is @     %p\n", m_config.gpu.objective);
+        for(const auto& pair : m_config.gpu.forwardModels)
+            printf("GPU forward model function for GPU %d is @ %p\n", pair.first, pair.second);
+        for(const auto& pair : m_config.gpu.objectives)
+            printf("GPU objective function for GPU %d is @ %p\n", pair.first, pair.second);
     #endif
 
     m_totalReceived = 0;
