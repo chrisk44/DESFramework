@@ -9,6 +9,8 @@
 #include "definitions.h"
 #include "stopwatch.h"
 
+namespace desf {
+
 typedef RESULT_TYPE (*validationFunc_t)(DATA_TYPE*, void*);
 typedef bool (*toBool_t)(RESULT_TYPE);
 
@@ -111,3 +113,5 @@ public:
     unsigned long globalLast;
     std::atomic_size_t globalBatchStart;
 };
+
+}

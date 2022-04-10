@@ -15,6 +15,8 @@
 #include "stopwatch.h"
 #include "types.h"
 
+namespace desf {
+
 enum WorkerThreadType {
     CPU,
     GPU
@@ -118,3 +120,5 @@ private:
         float averageUtilization = 0.f;
     } m_cpuRuntime;
 };
+
+}

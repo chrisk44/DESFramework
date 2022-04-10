@@ -3,6 +3,8 @@
 
 #include <cstring>
 
+namespace desf {
+
 void DesFramework::masterProcess() {
     int finished = 0;
     int numOfSlaves = getNumOfProcesses() - 1;
@@ -238,3 +240,4 @@ void DesFramework::masterProcess() {
     #endif
 }
 
+}

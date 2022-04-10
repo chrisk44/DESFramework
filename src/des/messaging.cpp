@@ -5,6 +5,8 @@
 
 #include <mpi.h>
 
+namespace desf {
+
 int DesFramework::getNumOfProcesses() const {
     int num;
     MPI_Comm_size(MPI_COMM_WORLD, &num);
@@ -84,4 +86,6 @@ void DesFramework::syncWithSlaves() const {
     // MPI_Barrier(MPI_COMM_WORLD);
     int a = 0;
     MPI_Bcast(&a, 1, MPI_INT, 0, MPI_COMM_WORLD);
+}
+
 }

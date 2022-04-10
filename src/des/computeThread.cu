@@ -7,6 +7,8 @@
 #include <nvml.h>
 #include <stdarg.h>
 
+namespace desf {
+
 ComputeThread::ComputeThread(int id, std::string name, WorkerThreadType type, DesFramework& framework, ThreadCommonData& tcd)
     : m_id(id),
       m_name(std::move(name)),
@@ -528,3 +530,4 @@ void ComputeThread::finalize() {
     }
 }
 
+}

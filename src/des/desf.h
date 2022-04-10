@@ -20,6 +20,8 @@
 #include "gpuKernel.h"
 #include "definitions.h"
 
+namespace desf {
+
 typedef std::function<void(ComputeThread&, ThreadCommonData&)> ComputeThreadStarter;
 
 class DesFramework {
@@ -132,5 +134,4 @@ private:
     void sendExitSignal() const;
 };
 
-
-
+}

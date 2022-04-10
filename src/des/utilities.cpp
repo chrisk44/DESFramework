@@ -2,6 +2,8 @@
 
 #include "definitions.h"
 
+namespace desf {
+
 unsigned long getMaxCPUBytes(){
     long pages = sysconf(_SC_PHYS_PAGES);
     long page_size = sysconf(_SC_PAGE_SIZE);
@@ -66,4 +68,6 @@ void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
 		usleep(RECV_SLEEP_US);
 		MPI_Test(&request, &flag, status);
 	}
+}
+
 }

@@ -2,6 +2,8 @@
 
 #include <sys/time.h>
 
+namespace desf {
+
 class Stopwatch {
 private:
     timespec t1, t2;
@@ -12,3 +14,5 @@ public:
     float getNsec() const;
     float getMsec() const;
 };
+
+}

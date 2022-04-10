@@ -6,6 +6,8 @@
 
 #include "desf.h"
 
+namespace desf {
+
 DesFramework::DesFramework(bool initMPI)
     : m_saveFile(-1),
       m_finalResults(nullptr),
@@ -236,4 +238,6 @@ void DesFramework::getPointFromIndex(unsigned long index, DATA_TYPE* result) con
 
 int DesFramework::getRank() const {
     return m_rank;
+}
+
 }

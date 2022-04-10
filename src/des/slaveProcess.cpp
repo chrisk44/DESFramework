@@ -2,6 +2,8 @@
 
 #include <list>
 
+namespace desf {
+
 void DesFramework::slaveProcess() {
     /*******************************************************************
     ********** Calculate number of worker threads (#GPUs + 1CPU) *******
@@ -72,3 +74,4 @@ void DesFramework::slaveProcess() {
     }
 }
 
+}

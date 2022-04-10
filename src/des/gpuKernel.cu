@@ -5,6 +5,8 @@
 
 #include "gpuKernel.h"
 
+namespace desf {
+
 __device__ __constant__ char constantMemoryPtr[MAX_CONSTANT_MEMORY];
 
 void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offset){
@@ -116,6 +118,8 @@ __global__ void validate_kernel(validationFunc_t validationFunc, toBool_t toBool
 
         threadStart++;
     }
+}
+
 }
 
 #endif

@@ -2,6 +2,8 @@
 
 #include "utilities.h"
 
+namespace desf {
+
 void DesFramework::coordinatorThread(std::vector<ComputeThread>& computeThreads, ThreadCommonData& tcd){
     int* globalListIndexPtr = &tcd.listIndex;
 
@@ -346,3 +348,4 @@ void DesFramework::coordinatorThread(std::vector<ComputeThread>& computeThreads,
 	free(localResults);
 }
 
+}

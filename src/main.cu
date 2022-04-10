@@ -42,7 +42,7 @@ int endModel = 3;
 int startGrid = 1;
 int endGrid = 6;
 
-ProcessingType processingType = PROCESSING_TYPE_GPU;
+desf::ProcessingType processingType = desf::PROCESSING_TYPE_GPU;
 bool threadBalancing          = true;
 bool slaveBalancing           = true;
 bool slaveDynamicScheduling   = true;
@@ -183,9 +183,9 @@ void parseArgs(int argc, char** argv){
         slowStartBase = getOrDefault(argc, argv, &found, &i, "--slow-start-base",  "-ssb", true, slowStartBase);
         minMsForRatioAdjustment = getOrDefault(argc, argv, &found, &i, "--min-ms-ratio",  "-mmr", true, minMsForRatioAdjustment);
 
-        if (getOrDefault(argc, argv, &found, &i, "--cpu", "-cpu", false, false) == 1) processingType = PROCESSING_TYPE_CPU;
-        if (getOrDefault(argc, argv, &found, &i, "--gpu", "-gpu", false, false) == 1) processingType = PROCESSING_TYPE_GPU;
-        if (getOrDefault(argc, argv, &found, &i, "--both", "-both", false, false) == 1) processingType = PROCESSING_TYPE_BOTH;
+        if (getOrDefault(argc, argv, &found, &i, "--cpu", "-cpu", false, false) == 1) processingType = desf::PROCESSING_TYPE_CPU;
+        if (getOrDefault(argc, argv, &found, &i, "--gpu", "-gpu", false, false) == 1) processingType = desf::PROCESSING_TYPE_GPU;
+        if (getOrDefault(argc, argv, &found, &i, "--both", "-both", false, false) == 1) processingType = desf::PROCESSING_TYPE_BOTH;
 
         if (getOrDefault(argc, argv, &found, &i, "--help", "-help", false, 0) == 1){
             printHelp();
@@ -232,24 +232,24 @@ int main(int argc, char** argv){
 
     MPI_Comm_rank(MPI_COMM_WORLD, &commSize);
 
-    const std::vector<validationFunc_t> cpuForwardModels = {
+    const std::vector<desf::validationFunc_t> cpuForwardModels = {
         validate_cpuM1,
         validate_cpuM2,
         validate_cpuO1,
         validate_cpuO2
     };
-    const toBool_t cpuObjective = toBool_cpu;
+    const desf::toBool_t cpuObjective = toBool_cpu;
 
-    std::vector<std::map<int, validationFunc_t>> gpuForwardModels;
-    std::map<int, toBool_t> gpuObjective;
+    std::vector<std::map<int, desf::validationFunc_t>> gpuForwardModels;
+    std::map<int, desf::toBool_t> gpuObjective;
     if(!isMaster){
         gpuForwardModels = {
-            DesFramework::getGpuPointersFromSymbol<validationFunc_t, validate_gpuM1>(),
-            DesFramework::getGpuPointersFromSymbol<validationFunc_t, validate_gpuM2>(),
-            DesFramework::getGpuPointersFromSymbol<validationFunc_t, validate_gpuO1>(),
-            DesFramework::getGpuPointersFromSymbol<validationFunc_t, validate_gpuO2>()
+            desf::DesFramework::getGpuPointersFromSymbol<desf::validationFunc_t, validate_gpuM1>(),
+            desf::DesFramework::getGpuPointersFromSymbol<desf::validationFunc_t, validate_gpuM2>(),
+            desf::DesFramework::getGpuPointersFromSymbol<desf::validationFunc_t, validate_gpuO1>(),
+            desf::DesFramework::getGpuPointersFromSymbol<desf::validationFunc_t, validate_gpuO2>()
         };
-        gpuObjective = DesFramework::getGpuPointersFromSymbol<toBool_t, toBool_gpu>();
+        gpuObjective = desf::DesFramework::getGpuPointersFromSymbol<desf::toBool_t, toBool_gpu>();
     } // else do not attempt to retrieve addresses
 
     // For each model...
@@ -329,7 +329,7 @@ int main(int argc, char** argv){
             std::ifstream gridfile(gridFilename, std::ios::in);
 
             // Read each dimension's grid information
-            std::vector<Limit> limits;
+            std::vector<desf::Limit> limits;
             unsigned long totalElements = 1;
             {
                 int i = 0;
@@ -337,7 +337,7 @@ int main(int argc, char** argv){
                 while(gridfile >> low >> high >> step){
                     // Create the limit (lower is inclusive, upper is exclusive)
                     high += step;
-                    limits.push_back(Limit{ low, high, (unsigned int) ((high-low)/step), step });
+                    limits.push_back(desf::Limit{ low, high, (unsigned int) ((high-low)/step), step });
                     totalElements *= limits.back().N;
                     i++;
                 }
@@ -347,9 +347,9 @@ int main(int argc, char** argv){
             gridfile.close();
 
             // Create the framework's parameters struct
-            DesConfig config;
+            desf::DesConfig config;
             config.model.D = limits.size();
-            config.resultSaveType = SAVE_TYPE_LIST;
+            config.resultSaveType = desf::SAVE_TYPE_LIST;
             config.processingType = processingType;
             config.output.overrideMemoryRestrictions = true;
             config.finalizeAfterExecution = false;
@@ -391,11 +391,11 @@ int main(int argc, char** argv){
             // Run at least 10 seconds, and stop after 10 runs or 2 minutes
             while(true){
                 // Initialize the framework object
-                DesFramework framework(false);
+                desf::DesFramework framework(false);
                 framework.init(limits, config);
 
                 // Start the computation
-                Stopwatch sw;
+                desf::Stopwatch sw;
                 sw.start();
                 auto result = framework.run();
                 sw.stop();
@@ -419,7 +419,7 @@ int main(int argc, char** argv){
 
                 int moveToNext;
                 if(isMaster){
-                    if(commSize > 2 || processingType == PROCESSING_TYPE_BOTH) printf("\n");
+                    if(commSize > 2 || processingType == desf::PROCESSING_TYPE_BOTH) printf("\n");
                     if(onlyOne || (totalTime > 10 * 1000 && (numOfRuns >= 10 || totalTime >= 1 * 60 * 1000))){
                         finalResults[m][g] = totalTime/numOfRuns;
                         printf("[%s \\ %d] Time: %f ms in %d runs\n",

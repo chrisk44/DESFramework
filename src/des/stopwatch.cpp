@@ -2,6 +2,8 @@
 
 #include <time.h>
 
+namespace desf {
+
 void Stopwatch::start()
 {
     clock_gettime(CLOCK_MONOTONIC_RAW, &t1);
@@ -29,4 +31,6 @@ float Stopwatch::getNsec() const
 float Stopwatch::getMsec() const
 {
     return getNsec() / 1000000.0;
+}
+
 }
