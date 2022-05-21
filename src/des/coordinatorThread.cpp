@@ -320,7 +320,7 @@ void DesFramework::coordinatorThread(std::vector<ComputeThread>& computeThreads,
         if(m_config.resultSaveType == SAVE_TYPE_ALL){
             sendResults(localResults, work.numOfElements);
 		}else{
-            sendListResults((DATA_TYPE*) localResults, (*globalListIndexPtr) / m_config.model.D);
+            sendListResults((DATA_TYPE*) localResults, (*globalListIndexPtr) / m_config.model.D, m_config.model.D);
 		}
 
 		#ifdef DBG_TIME

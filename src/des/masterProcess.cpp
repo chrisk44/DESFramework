@@ -114,7 +114,7 @@ int DesFramework::masterProcess() {
                         printf("\n");
                     #endif
                 }else{
-                    auto count = receiveListResults(tmpList, pinfo.work.numOfElements, mpiSource);
+                    auto count = receiveListResults(tmpList, pinfo.work.numOfElements, m_config.model.D, mpiSource);
                     #ifdef DBG_RESULTS_RAW
                         printf("[%d] Master: Received %d list results from %d: ", m_rank, count, pinfo.id);
                     #endif

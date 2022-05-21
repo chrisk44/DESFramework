@@ -106,27 +106,27 @@ public:
         return pointers;
     }
 
+    static int getNumOfProcesses();
+    static int receiveRequest(int& source);
+    static unsigned long receiveMaxBatchSize(int mpiSource);
+    static void sendBatchSize(const AssignedWork& work, int mpiSource);
+
+    static void receiveAllResults(RESULT_TYPE* dst, size_t count, int mpiSource);
+    static int receiveListResults(std::vector<DATA_TYPE>& dst, size_t maxCount, unsigned int D,  int mpiSource);
+    static void syncWithSlaves();
+
+    static void sendReadyRequest(unsigned long maxBatchSize);
+    static AssignedWork receiveWorkFromMaster();
+    static void sendResults(RESULT_TYPE* data, size_t count);
+    static void sendListResults(DATA_TYPE* data, size_t numOfPoints, unsigned int D);
+    static void sendExitSignal();
+
 private:
     int masterProcess();
     void coordinatorThread(std::vector<ComputeThread>& cti, ThreadCommonData& tcd);
     void getPointFromIndex(unsigned long index, DATA_TYPE* result) const;
 
     int slaveProcess();
-
-    int getNumOfProcesses() const;
-    int receiveRequest(int& source) const;
-    unsigned long receiveMaxBatchSize(int mpiSource) const;
-    void sendBatchSize(const AssignedWork& work, int mpiSource) const;
-
-    void receiveAllResults(RESULT_TYPE* dst, size_t count, int mpiSource) const;
-    int receiveListResults(std::vector<DATA_TYPE>& dst, size_t maxCount, int mpiSource) const;
-    void syncWithSlaves() const;
-
-    void sendReadyRequest(unsigned long maxBatchSize) const;
-    AssignedWork receiveWorkFromMaster() const;
-    void sendResults(RESULT_TYPE* data, size_t count) const;
-    void sendListResults(DATA_TYPE* data, size_t numOfPoints) const;
-    void sendExitSignal() const;
 };
 
 }
