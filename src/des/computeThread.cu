@@ -22,6 +22,17 @@ ComputeThread::ComputeThread(int id, std::string name, WorkerThreadType type, De
       m_activeTime(0.f)
 {
     init();
+
+    if(type == CPU) {
+        m_cpuConfig = m_framework.getConfig().cpu;
+    } else {
+        auto it = m_framework.getConfig().gpu.find(m_id);
+        if(it == m_framework.getConfig().gpu.end())
+            throw std::invalid_argument("No GPU config found for gpu " +std::to_string(m_id));
+
+        m_gpuConfig = it->second;
+    }
+
     m_idleStopwatch.start();
 }
 
@@ -153,8 +164,8 @@ void ComputeThread::init() {
         #endif
 
         // Create streams
-        m_gpuRuntime.streams.resize(config.gpu.streams);
-        for(int i=0; i<config.gpu.streams; i++){
+        m_gpuRuntime.streams.resize(m_gpuConfig.streams);
+        for(int i=0; i<m_gpuConfig.streams; i++){
             cudaStreamCreate(&m_gpuRuntime.streams[i]);
             cce();
         }
@@ -274,20 +285,11 @@ void ComputeThread::doWorkCpu(const AssignedWork &work, RESULT_TYPE* results) {
 
 void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
     const auto& config = m_framework.getConfig();
-
-    auto forwardModel = config.gpu.forwardModels.find(getId());
-    if(forwardModel == config.gpu.forwardModels.end())
-        throw std::invalid_argument("No forward model function available for GPU " + std::to_string(getId()));
-
-    auto objective = config.gpu.objectives.find(getId());
-    if(objective == config.gpu.objectives.end())
-        throw std::invalid_argument("No objective function available for GPU " + std::to_string(getId()));
-
     // Initialize the list index counter
     cudaMemset(m_gpuRuntime.deviceListIndexPtr, 0, sizeof(int));
 
     // Divide the chunk to smaller chunks to scatter accross streams
-    unsigned long elementsPerStream = work.numOfElements / config.gpu.streams;
+    unsigned long elementsPerStream = work.numOfElements / m_gpuConfig.streams;
     bool onlyOne = false;
     unsigned long skip = 0;
     if(elementsPerStream == 0){
@@ -296,19 +298,19 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
     }
 
     // Queue the chunks to the streams
-    for(int i=0; i<config.gpu.streams; i++){
+    for(int i=0; i<m_gpuConfig.streams; i++){
         // Adjust elementsPerStream for last stream (= total-queued)
-        if(i == config.gpu.streams - 1){
+        if(i == m_gpuConfig.streams - 1){
             elementsPerStream = work.numOfElements - skip;
         }else{
             elementsPerStream = std::min(elementsPerStream, work.numOfElements - skip);
         }
 
         // Queue the kernel in stream[i] (each GPU thread gets COMPUTE_BATCH_SIZE elements to calculate)
-        int gpuThreads = (elementsPerStream + config.gpu.computeBatchSize - 1) / config.gpu.computeBatchSize;
+        int gpuThreads = (elementsPerStream + m_gpuConfig.computeBatchSize - 1) / m_gpuConfig.computeBatchSize;
 
         // Minimum of (minimum of user-defined block size and number of threads to go to this stream) and number of points that can fit in shared memory
-        int blockSize = std::min(std::min(config.gpu.blockSize, gpuThreads), m_gpuRuntime.maxSharedPoints);
+        int blockSize = std::min(std::min(m_gpuConfig.blockSize, gpuThreads), m_gpuRuntime.maxSharedPoints);
         int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
 
         #ifdef DBG_QUEUE
@@ -317,12 +319,12 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
 
         // Note: Point at the start of deviceResults, because the offset (because of computeBatchSize) is calculated in the kernel
         validate_kernel<<<numOfBlocks, blockSize, m_gpuRuntime.deviceProp.sharedMemPerBlock, m_gpuRuntime.streams[i]>>>(
-            forwardModel->second, objective->second,
+            m_gpuConfig.forwardModel, m_gpuConfig.objective,
             m_gpuRuntime.deviceResults, work.startPoint,
             config.model.D, elementsPerStream, skip, m_gpuRuntime.deviceDataPtr,
             config.model.dataSize, m_gpuRuntime.useSharedMemoryForData, m_gpuRuntime.useConstantMemoryForData,
             config.resultSaveType == SAVE_TYPE_ALL ? nullptr : m_gpuRuntime.deviceListIndexPtr,
-            config.gpu.computeBatchSize
+            m_gpuConfig.computeBatchSize
         );
 
         // Queue the memcpy in stream[i] only if we are saving as SAVE_TYPE_ALL (otherwise the results will be fetched at the end of the current computation)

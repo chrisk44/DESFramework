@@ -367,23 +367,26 @@ int main(int argc, char** argv){
 
             config.batchSize                = batchSizeFactor > 0 ? totalElements * batchSizeFactor : batchSize;
             config.slaveBatchSize           = slaveBatchSizeFactor > 0 ? totalElements * slaveBatchSizeFactor : slaveBatchSize;
-            config.gpu.computeBatchSize     = computeBatchSize;
             config.cpu.computeBatchSize     = cpuComputeBatchSize;
 
-            config.gpu.blockSize            = blockSize;
-            config.gpu.streams              = gpuStreams;
+            if(!isMaster) {
+                config.cpu.forwardModel = cpuForwardModels[m];
+                config.cpu.objective = cpuObjective;
+
+                for(const auto& pair : gpuObjective){
+                    desf::GpuConfig gpuConfig;
+                    gpuConfig.computeBatchSize = computeBatchSize;
+                    gpuConfig.blockSize        = blockSize;
+                    gpuConfig.streams          = gpuStreams;
+                    gpuConfig.forwardModel     = gpuForwardModels[m][pair.first];
+                    gpuConfig.objective        = pair.second;
+                    config.gpu.insert(std::make_pair(pair.first, gpuConfig));
+                }
+            }
 
             config.slowStartLimit           = slowStartLimit;
             config.slowStartBase            = slowStartBase;
             config.minMsForRatioAdjustment  = minMsForRatioAdjustment;
-
-            if(!isMaster){
-                config.cpu.forwardModel = cpuForwardModels[m];
-                config.cpu.objective = cpuObjective;
-
-                config.gpu.forwardModels = gpuForwardModels[m];
-                config.gpu.objectives = gpuObjective;
-            }
 
             float totalTime = 0;        //msec
             int numOfRuns = 0;

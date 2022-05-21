@@ -75,6 +75,8 @@ private:
     DesFramework& m_framework;
     ThreadCommonData& m_tcd;
     int m_rank;
+    CpuConfig m_cpuConfig;
+    GpuConfig m_gpuConfig;
 
     Stopwatch m_idleStopwatch;
     std::thread m_thread;

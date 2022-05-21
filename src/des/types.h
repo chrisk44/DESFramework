@@ -38,6 +38,23 @@ enum ResultSaveType {
     SAVE_TYPE_LIST
 };
 
+struct GpuConfig {
+    int computeBatchSize = 200;
+    int blockSize = 256;
+    int streams = 8;
+
+    validationFunc_t forwardModel = nullptr;
+    toBool_t objective = nullptr;
+};
+
+struct CpuConfig {
+    bool dynamicScheduling = true;
+    int computeBatchSize = 10000;
+
+    validationFunc_t forwardModel = nullptr;
+    toBool_t objective = nullptr;
+};
+
 struct DesConfig {
     ProcessingType processingType = PROCESSING_TYPE_BOTH;
     ResultSaveType resultSaveType = SAVE_TYPE_LIST;
@@ -70,22 +87,8 @@ struct DesConfig {
         unsigned long dataSize = 0;
     } model;
 
-    struct {
-        bool dynamicScheduling = true;
-        int computeBatchSize = 10000;
-
-        validationFunc_t forwardModel = nullptr;
-        toBool_t objective = nullptr;
-    } cpu;
-
-    struct {
-        int computeBatchSize = 200;
-        int blockSize = 256;
-        int streams = 8;
-
-        std::map<int, validationFunc_t> forwardModels;
-        std::map<int, toBool_t> objectives;
-    } gpu;
+    CpuConfig cpu;
+    std::map<int, GpuConfig> gpu;
 };
 
 struct SlaveProcessInfo {

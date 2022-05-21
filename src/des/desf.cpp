@@ -44,26 +44,25 @@ DesFramework::DesFramework(const DesConfig& config)
         throw std::invalid_argument("Can't override memory restrictions when saving as SAVE_TYPE_ALL");
 
     if(m_rank != 0){
-        if(config.cpu.forwardModel == nullptr)
-            throw std::invalid_argument("CPU forward model function is nullptr");
+        if(config.processingType != PROCESSING_TYPE_GPU){
+            if(config.cpu.forwardModel == nullptr)
+                throw std::invalid_argument("CPU forward model function is nullptr");
 
-        if(config.cpu.objective == nullptr)
-            throw std::invalid_argument("CPU objective function is nullptr");
-
-        if(config.gpu.forwardModels.size() == 0)
-            throw std::invalid_argument("GPU forward model functions not provided");
-
-        for(const auto& pair : config.gpu.forwardModels) {
-            if(pair.second == nullptr)
-                throw std::invalid_argument("GPU forward model function for GPU " + std::to_string(pair.first) + " is nullptr");
+            if(config.cpu.objective == nullptr)
+                throw std::invalid_argument("CPU objective function is nullptr");
         }
 
-        if(config.gpu.objectives.size() == 0)
-            throw std::invalid_argument("GPU objective functions not provided");
+        if(config.processingType != PROCESSING_TYPE_CPU){
+            if(config.gpu.size() == 0)
+                throw std::invalid_argument("GPU forward model functions not provided");
 
-        for(const auto& pair : config.gpu.objectives) {
-            if(pair.second == nullptr)
-                throw std::invalid_argument("GPU objective function for GPU " + std::to_string(pair.first) + " is nullptr");
+            for(const auto& pair : config.gpu) {
+                if(pair.second.forwardModel == nullptr)
+                    throw std::invalid_argument("GPU forward model function for GPU " + std::to_string(pair.first) + " is nullptr");
+
+                if(pair.second.objective == nullptr)
+                    throw std::invalid_argument("GPU objective function for GPU " + std::to_string(pair.first) + " is nullptr");
+            }
         }
     }
 
@@ -80,12 +79,9 @@ DesFramework::DesFramework(const DesConfig& config)
     #endif
 
     #ifdef DBG_MEMORY
-        printf("CPU forward model function is @ %p\n", m_config.cpu.forwardModel);
-        printf("CPU objective function is @     %p\n", m_config.cpu.objective);
-        for(const auto& pair : m_config.gpu.forwardModels)
-            printf("GPU forward model function for GPU %d is @ %p\n", pair.first, pair.second);
-        for(const auto& pair : m_config.gpu.objectives)
-            printf("GPU objective function for GPU %d is @ %p\n", pair.first, pair.second);
+        printf("CPU  : Forward model is @ %p, objective is @ %p\n", m_config.cpu.forwardModel, m_config.cpu.objective);
+        for(const auto& pair : m_config.gpu)
+            printf("GPU %d: Forward model is @ %p, objective is @ %p\n", pair.first, pair.second.forwardModel, pair.second.objective);
     #endif
 
     m_totalReceived = 0;
