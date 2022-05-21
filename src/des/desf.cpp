@@ -142,19 +142,16 @@ DesFramework::~DesFramework() {
         MPI_Finalize();
 }
 
-int DesFramework::run() {
-    int returnCode;
+void DesFramework::run() {
     if(m_rank == 0){
         if(m_config.printProgress) printf("[%d] Master process starting\n", m_rank);
-        returnCode = masterProcess();
+        masterProcess();
         if(m_config.printProgress) printf("[%d] Master process finished\n", m_rank);
     }else{
         if(m_config.printProgress) printf("[%d] Slave process starting\n", m_rank);
-        returnCode = slaveProcess();
+        slaveProcess();
         if(m_config.printProgress) printf("[%d] Slave process finished\n", m_rank);
     }
-
-    return returnCode;
 }
 
 const RESULT_TYPE* DesFramework::getResults() const {

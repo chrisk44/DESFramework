@@ -45,7 +45,7 @@ public:
     DesFramework(const DesConfig& config);
     ~DesFramework();
 
-    int run();
+    void run();
 
     const decltype(m_config)& getConfig() const { return m_config; }
     const decltype(m_idxSteps)& getIndexSteps() const { return m_idxSteps; }
@@ -122,11 +122,11 @@ public:
     static void sendExitSignal();
 
 private:
-    int masterProcess();
+    void masterProcess();
     void coordinatorThread(std::vector<ComputeThread>& cti, ThreadCommonData& tcd);
     void getPointFromIndex(unsigned long index, DATA_TYPE* result) const;
 
-    int slaveProcess();
+    void slaveProcess();
 };
 
 }

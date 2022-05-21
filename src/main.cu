@@ -396,12 +396,8 @@ int main(int argc, char** argv){
                 // Start the computation
                 desf::Stopwatch sw;
                 sw.start();
-                auto result = framework.run();
+                framework.run();
                 sw.stop();
-                if (result != 0) {
-                    printf("[%d] [%s \\ %d] Error running the computation: %d\n", rank, modelNames[m].c_str(), g, result);
-                    exit(-1);
-                }
 
                 if(isMaster){
                     int size = framework.getList().size();

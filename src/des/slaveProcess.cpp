@@ -4,7 +4,7 @@
 
 namespace desf {
 
-int DesFramework::slaveProcess() {
+void DesFramework::slaveProcess() {
     /*******************************************************************
     ********** Calculate number of worker threads (#GPUs + 1CPU) *******
     ********************************************************************/
@@ -23,7 +23,7 @@ int DesFramework::slaveProcess() {
                 printf("[%d] SlaveProcess: Warning: cudaGetDeviceCount returned 0. Will use only CPU(s).\n", m_rank);
             } else {
                 printf("[%d] SlaveProcess: Error: cudaGetDeviceCount returned 0. Exiting.", m_rank);
-                return 1;
+                return;
             }
         }
     }
@@ -71,8 +71,6 @@ int DesFramework::slaveProcess() {
             );
         // }
     }
-
-    return 0;
 }
 
 }
