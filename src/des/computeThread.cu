@@ -9,29 +9,31 @@
 
 namespace desf {
 
-ComputeThread::ComputeThread(int id, std::string name, WorkerThreadType type, DesFramework& framework, ThreadCommonData& tcd)
+ComputeThread::ComputeThread(int id, std::string name, WorkerThreadType type, ThreadCommonData& tcd, const DesConfig& config, const std::vector<unsigned long long>& indexSteps)
     : m_id(id),
       m_name(std::move(name)),
       m_type(type),
-      m_framework(framework),
+      m_config(config),
+      m_indexSteps(indexSteps),
       m_tcd(tcd),
-      m_rank(m_framework.getRank()),
       m_totalCalculatedElements(0),
       m_lastCalculatedElements(0),
       m_idleTime(0.f),
       m_activeTime(0.f)
 {
-    init();
+    MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
 
     if(type == CPU) {
-        m_cpuConfig = m_framework.getConfig().cpu;
+        m_cpuConfig = m_config.cpu;
     } else {
-        auto it = m_framework.getConfig().gpu.find(m_id);
-        if(it == m_framework.getConfig().gpu.end())
+        auto it = m_config.gpu.find(m_id);
+        if(it == m_config.gpu.end())
             throw std::invalid_argument("No GPU config found for gpu " +std::to_string(m_id));
 
         m_gpuConfig = it->second;
     }
+
+    initDevices();
 
     m_idleStopwatch.start();
 }
@@ -84,9 +86,7 @@ void ComputeThread::log(const char *text, ...) {
     printf("[%d] Compute thread %d: %s", m_rank, getId(), buf);
 }
 
-void ComputeThread::init() {
-    const DesConfig& config = m_framework.getConfig();
-
+void ComputeThread::initDevices() {
     if (m_type == WorkerThreadType::GPU) {
         // Initialize NVML to monitor the GPU
         m_nvml.available = false;
@@ -131,31 +131,31 @@ void ComputeThread::init() {
 
         // Calculate the max batch size for the device
         m_gpuRuntime.maxGpuBatchSize = getMaxGPUBytesForGpu(m_id);
-        if(config.resultSaveType == SAVE_TYPE_ALL)
+        if(m_config.resultSaveType == SAVE_TYPE_ALL)
             m_gpuRuntime.maxGpuBatchSize /= sizeof(RESULT_TYPE);
         else
-            m_gpuRuntime.maxGpuBatchSize /= config.model.D * sizeof(DATA_TYPE);
+            m_gpuRuntime.maxGpuBatchSize /= m_config.model.D * sizeof(DATA_TYPE);
 
         // Get device's properties for shared memory
         cudaGetDeviceProperties(&m_gpuRuntime.deviceProp, m_id);
 
         // Use constant memory for data if they fit
-        m_gpuRuntime.useConstantMemoryForData = config.model.dataSize > 0 &&
-            config.model.dataSize <= (MAX_CONSTANT_MEMORY - config.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
+        m_gpuRuntime.useConstantMemoryForData = m_config.model.dataSize > 0 &&
+            m_config.model.dataSize <= (MAX_CONSTANT_MEMORY - m_config.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
 
         // Max use 1/4 of the available shared memory for data, the rest will be used for each thread to store their point (x) and index vector (i)
         // This seems to be worse than both global and constant memory
-        m_gpuRuntime.useSharedMemoryForData = false && config.model.dataSize > 0 && !m_gpuRuntime.useConstantMemoryForData &&
-                                 config.model.dataSize <= m_gpuRuntime.deviceProp.sharedMemPerBlock / 4;
+        m_gpuRuntime.useSharedMemoryForData = false && m_config.model.dataSize > 0 && !m_gpuRuntime.useConstantMemoryForData &&
+                                 m_config.model.dataSize <= m_gpuRuntime.deviceProp.sharedMemPerBlock / 4;
 
         // How many bytes are left in shared memory after using it for the model's data
-        m_gpuRuntime.availableSharedMemory = m_gpuRuntime.deviceProp.sharedMemPerBlock - (m_gpuRuntime.useSharedMemoryForData ? config.model.dataSize : 0);
+        m_gpuRuntime.availableSharedMemory = m_gpuRuntime.deviceProp.sharedMemPerBlock - (m_gpuRuntime.useSharedMemoryForData ? m_config.model.dataSize : 0);
 
         // How many points can fit in shared memory (for each point we need D*DATA_TYPEs (for x) and D*u_int (for indices))
-        m_gpuRuntime.maxSharedPoints = m_gpuRuntime.availableSharedMemory / (config.model.D * (sizeof(DATA_TYPE) + sizeof(unsigned int)));
+        m_gpuRuntime.maxSharedPoints = m_gpuRuntime.availableSharedMemory / (m_config.model.D * (sizeof(DATA_TYPE) + sizeof(unsigned int)));
 
         #ifdef DBG_START_STOP
-            if(config.printProgress){
+            if(m_config.printProgress){
                 log("useSharedMemoryForData = %d\n", m_gpuRuntime.useSharedMemoryForData);
                 log("useConstantMemoryForData = %d\n", m_gpuRuntime.useConstantMemoryForData);
                 log("availableSharedMemory = %d bytes\n", m_gpuRuntime.availableSharedMemory);
@@ -174,8 +174,8 @@ void ComputeThread::init() {
         cudaMalloc(&m_gpuRuntime.deviceResults, m_gpuRuntime.allocatedElements * sizeof(RESULT_TYPE));	cce();
         cudaMalloc(&m_gpuRuntime.deviceListIndexPtr, sizeof(int));							cce();
         // If we have static model data but won't use constant memory, allocate global memory for it
-        if(config.model.dataSize > 0 && !m_gpuRuntime.useConstantMemoryForData){
-            cudaMalloc(&m_gpuRuntime.deviceDataPtr, config.model.dataSize);					cce();
+        if(m_config.model.dataSize > 0 && !m_gpuRuntime.useConstantMemoryForData){
+            cudaMalloc(&m_gpuRuntime.deviceDataPtr, m_config.model.dataSize);					cce();
         }
 
         #ifdef DBG_MEMORY
@@ -187,32 +187,32 @@ void ComputeThread::init() {
         // Copy limits, idxSteps, and constant data to device
         #ifdef DBG_MEMORY
             log("Copying limits at constant memory with offset %d\n", 0);
-            log("Copying idxSteps at constant memory with offset %lu\n", config.model.D * sizeof(Limit));
+            log("Copying idxSteps at constant memory with offset %lu\n", m_config.model.D * sizeof(Limit));
         #endif
         cudaMemcpyToSymbolWrapper(
-            m_framework.getConfig().limits.data(), config.model.D * sizeof(Limit), 0);
+            m_config.limits.data(), m_config.model.D * sizeof(Limit), 0);
         cce();
 
         cudaMemcpyToSymbolWrapper(
-            m_framework.getIndexSteps().data(), config.model.D * sizeof(unsigned long long),
-            config.model.D * sizeof(Limit));
+            m_indexSteps.data(), m_config.model.D * sizeof(unsigned long long),
+            m_config.model.D * sizeof(Limit));
         cce();
 
         // If we have data for the model...
-        if(config.model.dataSize > 0){
+        if(m_config.model.dataSize > 0){
             // If we can use constant memory, copy it there
             if(m_gpuRuntime.useConstantMemoryForData){
                 #ifdef DBG_MEMORY
-                    log("Copying data at constant memory with offset %lu\n", config.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
+                    log("Copying data at constant memory with offset %lu\n", m_config.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
                 #endif
                 cudaMemcpyToSymbolWrapper(
-                    config.model.dataPtr, config.model.dataSize,
-                    config.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
+                    m_config.model.dataPtr, m_config.model.dataSize,
+                    m_config.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
                 cce()
             }
             // else copy the data to the global memory, either to be read from there or to be copied to shared memory
             else{
-                cudaMemcpy(m_gpuRuntime.deviceDataPtr, config.model.dataPtr, config.model.dataSize, cudaMemcpyHostToDevice);
+                cudaMemcpy(m_gpuRuntime.deviceDataPtr, m_config.model.dataPtr, m_config.model.dataSize, cudaMemcpyHostToDevice);
                 cce();
             }
         }
@@ -278,13 +278,20 @@ AssignedWork ComputeThread::getBatch(size_t batchSize) {
 }
 
 void ComputeThread::doWorkCpu(const AssignedWork &work, RESULT_TYPE* results) {
-    const auto& config= m_framework.getConfig();
-    cpu_kernel(config.cpu.forwardModel, config.cpu.objective, results, m_framework.getConfig().limits.data(), config.model.D, work.numOfElements, config.model.dataPtr, config.resultSaveType == SAVE_TYPE_ALL ? nullptr : &m_tcd.listIndex,
-                    m_framework.getIndexSteps().data(), work.startPoint, config.cpu.dynamicScheduling, config.cpu.computeBatchSize);
+    cpu_kernel(m_config.cpu.forwardModel,
+               m_config.cpu.objective,
+               results,
+               m_config.limits.data(),
+               m_config.model.D,
+               work.numOfElements,
+               m_config.model.dataPtr,
+               &m_tcd.listIndex,
+               m_indexSteps.data(), work.startPoint,
+               m_config.cpu.dynamicScheduling,
+               m_config.cpu.computeBatchSize);
 }
 
 void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
-    const auto& config = m_framework.getConfig();
     // Initialize the list index counter
     cudaMemset(m_gpuRuntime.deviceListIndexPtr, 0, sizeof(int));
 
@@ -321,14 +328,14 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
         validate_kernel<<<numOfBlocks, blockSize, m_gpuRuntime.deviceProp.sharedMemPerBlock, m_gpuRuntime.streams[i]>>>(
             m_gpuConfig.forwardModel, m_gpuConfig.objective,
             m_gpuRuntime.deviceResults, work.startPoint,
-            config.model.D, elementsPerStream, skip, m_gpuRuntime.deviceDataPtr,
-            config.model.dataSize, m_gpuRuntime.useSharedMemoryForData, m_gpuRuntime.useConstantMemoryForData,
-            config.resultSaveType == SAVE_TYPE_ALL ? nullptr : m_gpuRuntime.deviceListIndexPtr,
+            m_config.model.D, elementsPerStream, skip, m_gpuRuntime.deviceDataPtr,
+            m_config.model.dataSize, m_gpuRuntime.useSharedMemoryForData, m_gpuRuntime.useConstantMemoryForData,
+            m_config.resultSaveType == SAVE_TYPE_ALL ? nullptr : m_gpuRuntime.deviceListIndexPtr,
             m_gpuConfig.computeBatchSize
         );
 
         // Queue the memcpy in stream[i] only if we are saving as SAVE_TYPE_ALL (otherwise the results will be fetched at the end of the current computation)
-        if(config.resultSaveType == SAVE_TYPE_ALL){
+        if(m_config.resultSaveType == SAVE_TYPE_ALL){
             cudaMemcpyAsync(&results[skip], &m_gpuRuntime.deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, m_gpuRuntime.streams[i]);
         }
 
@@ -346,7 +353,7 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
     }
 
     // If we are saving as SAVE_TYPE_LIST, fetch the results
-    if(config.resultSaveType == SAVE_TYPE_LIST){
+    if(m_config.resultSaveType == SAVE_TYPE_LIST){
         int gpuListIndex, globalListIndexOld;
         // Get the current list index from the GPU
         cudaMemcpy(&gpuListIndex, m_gpuRuntime.deviceListIndexPtr, sizeof(int), cudaMemcpyDeviceToHost);
@@ -360,9 +367,6 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
 }
 
 void ComputeThread::start(size_t batchSize){
-
-    const auto& config = m_framework.getConfig();
-
     Stopwatch activeStopwatch;
     activeStopwatch.start();
 
@@ -394,7 +398,7 @@ void ComputeThread::start(size_t batchSize){
             break;
 
         RESULT_TYPE* localResults;
-        if(config.resultSaveType == SAVE_TYPE_LIST)
+        if(m_config.resultSaveType == SAVE_TYPE_LIST)
             localResults = m_tcd.results;
         else
             localResults = &m_tcd.results[work.startPoint - m_tcd.globalFirst];
@@ -443,7 +447,7 @@ void ComputeThread::start(size_t batchSize){
         #endif
 
         #ifdef DBG_RESULTS_RAW
-            if(config.resultSaveType == SAVE_TYPE_ALL){
+            if(m_config.resultSaveType == SAVE_TYPE_ALL){
                 log("Results are: ");
                 for (unsigned long i = 0; i < work.numOfElements; i++) {
                     printf("%f ", ((DATA_TYPE *)localResults)[i]);

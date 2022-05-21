@@ -31,12 +31,13 @@ public:
     ComputeThread(ComputeThreadID id,
                   std::string name,
                   WorkerThreadType type,
-                  DesFramework& framework,
-                  ThreadCommonData& tcd);
+                  ThreadCommonData& tcd,
+                  const DesConfig& config,
+                  const std::vector<unsigned long long>& indexSteps);
 
     // Dummy copy constructor which does not actually copy the whole object, just recreates it in the new location
     ComputeThread(const ComputeThread& other)
-        : ComputeThread(other.m_id, other.m_name, other.m_type, other.m_framework, other.m_tcd)
+        : ComputeThread(other.m_id, other.m_name, other.m_type, other.m_tcd, other.m_config, other.m_indexSteps)
     {}
 
     ~ComputeThread();
@@ -58,7 +59,7 @@ public:
     size_t getLastCalculatedElements() const { return m_lastCalculatedElements; }
 
 private:
-    void init();
+    void initDevices();
     void prepareForElements(size_t numOfElements);
     AssignedWork getBatch(size_t batchSize);
     void doWorkCpu(const AssignedWork& work, RESULT_TYPE* results);
@@ -72,7 +73,8 @@ private:
     ComputeThreadID m_id;
     std::string m_name;
     WorkerThreadType m_type;
-    DesFramework& m_framework;
+    const DesConfig& m_config;
+    const std::vector<unsigned long long> m_indexSteps;
     ThreadCommonData& m_tcd;
     int m_rank;
     CpuConfig m_cpuConfig;

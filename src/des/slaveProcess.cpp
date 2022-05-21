@@ -34,8 +34,8 @@ void DesFramework::slaveProcess() {
     ThreadCommonData tcd;
 
     std::vector<ComputeThread> computeThreads;
-    for(int i=0; i<numOfCpus; i++) computeThreads.emplace_back(-i-1, "CPU" + std::to_string(i), WorkerThreadType::CPU, *this, tcd);
-    for(int i=0; i<numOfGpus; i++) computeThreads.emplace_back(i,  "GPU" + std::to_string(i), WorkerThreadType::GPU, *this, tcd);
+    for(int i=0; i<numOfCpus; i++) computeThreads.emplace_back(-i-1, "CPU" + std::to_string(i), WorkerThreadType::CPU, tcd, getConfig(), getIndexSteps());
+    for(int i=0; i<numOfGpus; i++) computeThreads.emplace_back(i,  "GPU" + std::to_string(i), WorkerThreadType::GPU, tcd, getConfig(), getIndexSteps());
 
     #ifdef DBG_START_STOP
         printf("[%d] SlaveProcess: Created %lu compute threads...\n", m_rank, computeThreads.size());
