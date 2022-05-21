@@ -8,31 +8,32 @@
 
 namespace desf {
 
-DesFramework::DesFramework(bool initMPI)
-    : m_saveFile(-1),
+DesFramework::DesFramework(const DesConfig& config)
+    : m_config(config),
+      m_saveFile(-1),
       m_finalResults(nullptr),
-      m_valid(false),
       m_totalSent(0),
       m_totalReceived(0),
       m_totalElements(0),
       m_rank(-1)
 {
-	if(initMPI){
+    if(config.handleMPI){
 		// Initialize MPI
 		MPI_Init(nullptr, nullptr);
 	}
     MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
-}
 
-void DesFramework::init(const std::vector<Limit>& limits, const DesConfig& config){
-    if(limits.size() != config.model.D)
+    if(config.limits.size() != config.model.D)
         throw std::invalid_argument("The limits vector must have a size equal to config.D");
 
+    if(config.batchSize <= 0)
+        throw std::invalid_argument("Batch size must be a positive value");
+
     for (unsigned int i = 0; i < config.model.D; i++) {
-        if (limits[i].lowerLimit > limits[i].upperLimit)
+        if (config.limits[i].lowerLimit > config.limits[i].upperLimit)
             throw std::invalid_argument("Lower limit for dimension " + std::to_string(i) + " can't be higher than upper limit");
 
-        if (limits[i].N == 0)
+        if (config.limits[i].N == 0)
             throw std::invalid_argument("N for dimension " + std::to_string(i) + " must be > 0");
     }
 
@@ -66,18 +67,15 @@ void DesFramework::init(const std::vector<Limit>& limits, const DesConfig& confi
         }
     }
 
-    m_config = config;
-    m_limits = limits;
-
     for (unsigned int i = 0; i < m_config.model.D; i++) {
-        m_limits[i].step = abs(m_limits[i].upperLimit - m_limits[i].lowerLimit) / m_limits[i].N;
+        m_config.limits[i].step = abs(m_config.limits[i].upperLimit - m_config.limits[i].lowerLimit) / m_config.limits[i].N;
 
-        m_idxSteps.push_back(i==0 ? 1 : m_idxSteps[i - 1] * m_limits[i-1].N);
+        m_idxSteps.push_back(i==0 ? 1 : m_idxSteps[i - 1] * m_config.limits[i-1].N);
     }
 
     #ifdef DBG_DATA
         for(unsigned int i=0; i < m_config.model.D; i++){
-            printf("Dimension %u: Low=%lf, High=%lf, Step=%lf, N=%u, m_idxSteps=%llu\n", i, m_limits[i].lowerLimit, m_limits[i].upperLimit, m_limits[i].step, m_limits[i].N, m_idxSteps[i]);
+            printf("Dimension %u: Low=%lf, High=%lf, Step=%lf, N=%u, m_idxSteps=%llu\n", i, m_config.limits[i].lowerLimit, m_config.limits[i].upperLimit, m_config.limits[i].step, m_config.limits[i].N, m_idxSteps[i]);
         }
     #endif
 
@@ -92,7 +90,7 @@ void DesFramework::init(const std::vector<Limit>& limits, const DesConfig& confi
 
     m_totalReceived = 0;
     m_totalSent = 0;
-    m_totalElements = (unsigned long long)(m_idxSteps[m_config.model.D - 1]) * (unsigned long long)(limits[m_config.model.D - 1].N);
+    m_totalElements = (unsigned long long)(m_idxSteps[m_config.model.D - 1]) * (unsigned long long)(m_config.limits[m_config.model.D - 1].N);
 
     if(m_rank == 0){
         if(! (m_config.benchmark)){
@@ -124,12 +122,7 @@ void DesFramework::init(const std::vector<Limit>& limits, const DesConfig& confi
 				}
             }// else listResults will be dynamically allocated when needed
         }
-
-        if (m_config.batchSize == 0)
-            m_config.batchSize = m_totalElements;
 	}
-
-    m_valid = true;
 }
 
 DesFramework::~DesFramework() {
@@ -144,33 +137,24 @@ DesFramework::~DesFramework() {
             close(m_saveFile);
 		}
 	}
-    m_valid = false;
+
+    if(m_config.handleMPI)
+        MPI_Finalize();
 }
 
 int DesFramework::run() {
-    if(!m_valid){
-        std::string error = "[" + std::to_string(m_rank) + "] run() called for invalid framework";
-        throw std::runtime_error(error);
-    }
-
+    int returnCode;
     if(m_rank == 0){
         if(m_config.printProgress) printf("[%d] Master process starting\n", m_rank);
-        masterProcess();
+        returnCode = masterProcess();
         if(m_config.printProgress) printf("[%d] Master process finished\n", m_rank);
     }else{
         if(m_config.printProgress) printf("[%d] Slave process starting\n", m_rank);
-        slaveProcess();
+        returnCode = slaveProcess();
         if(m_config.printProgress) printf("[%d] Slave process finished\n", m_rank);
     }
 
-    if(m_config.finalizeAfterExecution)
-        MPI_Finalize();
-
-    return m_valid ? 0 : -1;
-}
-
-bool DesFramework::isValid() const {
-    return m_valid;
+    return returnCode;
 }
 
 const RESULT_TYPE* DesFramework::getResults() const {
@@ -197,11 +181,11 @@ void DesFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst) con
 	unsigned int i;
 
     for (i = 0; i < m_config.model.D; i++) {
-        if (point[i] < m_limits[i].lowerLimit || point[i] >= m_limits[i].upperLimit)
+        if (point[i] < m_config.limits[i].lowerLimit || point[i] >= m_config.limits[i].upperLimit)
             throw std::invalid_argument("Result query for out-of-bounds point\n");
 
 		// Calculate the steps for dimension i
-        dst[i] = (int) round(abs(m_limits[i].lowerLimit - point[i]) / m_limits[i].step);		// TODO: 1.9999997 will round to 2, verify correctness
+        dst[i] = (int) round(abs(m_config.limits[i].lowerLimit - point[i]) / m_config.limits[i].step);		// TODO: 1.9999997 will round to 2, verify correctness
 	}
 }
 
@@ -230,7 +214,7 @@ unsigned long DesFramework::getIndexFromPoint(DATA_TYPE* point) const {
 void DesFramework::getPointFromIndex(unsigned long index, DATA_TYPE* result) const {
     for(int i=m_config.model.D - 1; i>=0; i--){
         int currentIndex = index / m_idxSteps[i];
-        result[i] = m_limits[i].lowerLimit + currentIndex*m_limits[i].step;
+        result[i] = m_config.limits[i].lowerLimit + currentIndex*m_config.limits[i].step;
 
         index = index % m_idxSteps[i];
 	}

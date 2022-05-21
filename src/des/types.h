@@ -5,6 +5,7 @@
 #include <mutex>
 #include <semaphore.h>
 #include <string>
+#include <vector>
 
 #include "definitions.h"
 #include "stopwatch.h"
@@ -40,9 +41,11 @@ enum ResultSaveType {
 struct DesConfig {
     ProcessingType processingType = PROCESSING_TYPE_BOTH;
     ResultSaveType resultSaveType = SAVE_TYPE_LIST;
-    bool finalizeAfterExecution = true;
+    bool handleMPI = true;
     bool printProgress = true;
     bool benchmark = false;
+
+    std::vector<Limit> limits;
 
     struct {
         bool overrideMemoryRestrictions = false;

@@ -5,7 +5,7 @@
 
 namespace desf {
 
-void DesFramework::masterProcess() {
+int DesFramework::masterProcess() {
     int finished = 0;
     int numOfSlaves = getNumOfProcesses() - 1;
 
@@ -238,6 +238,8 @@ void DesFramework::masterProcess() {
     #ifdef DBG_START_STOP
         printf("[%d] Passed the barrier...\n", m_rank);
     #endif
+
+    return 0;
 }
 
 }

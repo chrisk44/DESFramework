@@ -179,7 +179,7 @@ void ComputeThread::init() {
             log("Copying idxSteps at constant memory with offset %lu\n", config.model.D * sizeof(Limit));
         #endif
         cudaMemcpyToSymbolWrapper(
-            m_framework.getLimits().data(), config.model.D * sizeof(Limit), 0);
+            m_framework.getConfig().limits.data(), config.model.D * sizeof(Limit), 0);
         cce();
 
         cudaMemcpyToSymbolWrapper(
@@ -268,7 +268,7 @@ AssignedWork ComputeThread::getBatch(size_t batchSize) {
 
 void ComputeThread::doWorkCpu(const AssignedWork &work, RESULT_TYPE* results) {
     const auto& config= m_framework.getConfig();
-    cpu_kernel(config.cpu.forwardModel, config.cpu.objective, results, m_framework.getLimits().data(), config.model.D, work.numOfElements, config.model.dataPtr, config.resultSaveType == SAVE_TYPE_ALL ? nullptr : &m_tcd.listIndex,
+    cpu_kernel(config.cpu.forwardModel, config.cpu.objective, results, m_framework.getConfig().limits.data(), config.model.D, work.numOfElements, config.model.dataPtr, config.resultSaveType == SAVE_TYPE_ALL ? nullptr : &m_tcd.listIndex,
                     m_framework.getIndexSteps().data(), work.startPoint, config.cpu.dynamicScheduling, config.cpu.computeBatchSize);
 }
 

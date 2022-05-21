@@ -328,8 +328,9 @@ int main(int argc, char** argv){
             std::string gridFilename = dataPath + modelNames[m] + "/grid" + std::to_string(g) + ".txt";
             std::ifstream gridfile(gridFilename, std::ios::in);
 
+            desf::DesConfig config;
+
             // Read each dimension's grid information
-            std::vector<desf::Limit> limits;
             unsigned long totalElements = 1;
             {
                 int i = 0;
@@ -337,8 +338,8 @@ int main(int argc, char** argv){
                 while(gridfile >> low >> high >> step){
                     // Create the limit (lower is inclusive, upper is exclusive)
                     high += step;
-                    limits.push_back(desf::Limit{ low, high, (unsigned int) ((high-low)/step), step });
-                    totalElements *= limits.back().N;
+                    config.limits.push_back(desf::Limit{ low, high, (unsigned int) ((high-low)/step), step });
+                    totalElements *= config.limits.back().N;
                     i++;
                 }
             }
@@ -346,13 +347,12 @@ int main(int argc, char** argv){
             // Close the file
             gridfile.close();
 
-            // Create the framework's parameters struct
-            desf::DesConfig config;
-            config.model.D = limits.size();
+            // Set up the framework's parameters struct
+            config.model.D = config.limits.size();
             config.resultSaveType = desf::SAVE_TYPE_LIST;
             config.processingType = processingType;
             config.output.overrideMemoryRestrictions = true;
-            config.finalizeAfterExecution = false;
+            config.handleMPI = false;
             config.printProgress = false;
             config.benchmark = false;
 
@@ -391,8 +391,7 @@ int main(int argc, char** argv){
             // Run at least 10 seconds, and stop after 10 runs or 2 minutes
             while(true){
                 // Initialize the framework object
-                desf::DesFramework framework(false);
-                framework.init(limits, config);
+                desf::DesFramework framework(config);
 
                 // Start the computation
                 desf::Stopwatch sw;
