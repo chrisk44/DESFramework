@@ -22,8 +22,6 @@
 
 namespace desf {
 
-typedef std::function<void(ComputeThread&, ThreadCommonData&)> ComputeThreadStarter;
-
 class DesFramework {
 private:
     // Parameters
@@ -123,7 +121,6 @@ public:
 
 private:
     void masterProcess();
-    void coordinatorThread(std::vector<ComputeThread>& cti, ThreadCommonData& tcd);
     void getPointFromIndex(unsigned long index, DATA_TYPE* result) const;
 
     void slaveProcess();

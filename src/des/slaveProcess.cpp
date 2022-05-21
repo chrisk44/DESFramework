@@ -1,16 +1,15 @@
 #include "desf.h"
+#include "coordinatorThread.h"
 
 #include <list>
 
 namespace desf {
 
 void DesFramework::slaveProcess() {
-    /*******************************************************************
-    ********** Calculate number of worker threads (#GPUs + 1CPU) *******
-    ********************************************************************/
     Stopwatch masterStopwatch;
     masterStopwatch.start();
 
+    // Calculate number of worker threads (#GPUs + 1CPU)
     bool useCpu = m_config.processingType == PROCESSING_TYPE_CPU || m_config.processingType == PROCESSING_TYPE_BOTH;
     bool useGpu = m_config.processingType == PROCESSING_TYPE_GPU || m_config.processingType == PROCESSING_TYPE_BOTH;
     int numOfCpus = useCpu ? 1 : 0;
@@ -28,20 +27,16 @@ void DesFramework::slaveProcess() {
         }
     }
 
-    /*******************************************************************
-    ********************** Initialization ******************************
-    ********************************************************************/
-    ThreadCommonData tcd;
-
     std::vector<ComputeThread> computeThreads;
-    for(int i=0; i<numOfCpus; i++) computeThreads.emplace_back(-i-1, "CPU" + std::to_string(i), WorkerThreadType::CPU, tcd, getConfig(), getIndexSteps());
-    for(int i=0; i<numOfGpus; i++) computeThreads.emplace_back(i,  "GPU" + std::to_string(i), WorkerThreadType::GPU, tcd, getConfig(), getIndexSteps());
+    for(int i=0; i<numOfCpus; i++) computeThreads.emplace_back(-i-1, "CPU" + std::to_string(i), WorkerThreadType::CPU, getConfig(), getIndexSteps());
+    for(int i=0; i<numOfGpus; i++) computeThreads.emplace_back(i,  "GPU" + std::to_string(i), WorkerThreadType::GPU, getConfig(), getIndexSteps());
 
     #ifdef DBG_START_STOP
         printf("[%d] SlaveProcess: Created %lu compute threads...\n", m_rank, computeThreads.size());
     #endif
 
-    coordinatorThread(computeThreads, tcd);
+    CoordinatorThread coordinatorThread(getConfig());
+    coordinatorThread.run(computeThreads);
 
     // Notify master about exiting
     sendExitSignal();

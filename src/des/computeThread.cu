@@ -9,13 +9,12 @@
 
 namespace desf {
 
-ComputeThread::ComputeThread(int id, std::string name, WorkerThreadType type, ThreadCommonData& tcd, const DesConfig& config, const std::vector<unsigned long long>& indexSteps)
+ComputeThread::ComputeThread(int id, std::string name, WorkerThreadType type, const DesConfig& config, const std::vector<unsigned long long>& indexSteps)
     : m_id(id),
       m_name(std::move(name)),
       m_type(type),
       m_config(config),
       m_indexSteps(indexSteps),
-      m_tcd(tcd),
       m_totalCalculatedElements(0),
       m_lastCalculatedElements(0),
       m_idleTime(0.f),
@@ -45,14 +44,14 @@ ComputeThread::~ComputeThread() {
     finalize();
 }
 
-void ComputeThread::dispatch(size_t batchSize) {
+void ComputeThread::dispatch(WorkDispatcher workDispatcher, RESULT_TYPE* results, int* listIndex) {
     if(m_thread.joinable()) throw std::runtime_error("Compute thread is already running or was not joined");
 
     m_idleStopwatch.stop();
     m_lastIdleTime = m_idleStopwatch.getMsec();
     m_idleTime += m_lastIdleTime;
-    m_thread = std::thread([this, batchSize](){
-        start(batchSize);
+    m_thread = std::thread([this, workDispatcher, results, listIndex](){
+        start(workDispatcher, results, listIndex);
         m_idleStopwatch.start();
     });
 }
@@ -247,37 +246,7 @@ void ComputeThread::prepareForElements(size_t numOfElements) {
     }
 }
 
-AssignedWork ComputeThread::getBatch(size_t batchSize) {
-    AssignedWork work;
-    {
-        std::lock_guard<std::mutex> lock(m_tcd.syncMutex);
-
-        // Get the current global batch start point as our starting point
-        work.startPoint = m_tcd.globalBatchStart;
-        // Increment the global batch start point by our batch size
-        m_tcd.globalBatchStart += batchSize;
-
-        // Check for globalBatchStart overflow and limit it to globalLast+1 to avoid later overflows
-        // If the new globalBatchStart is smaller than our local start point, the increment caused an overflow
-        // If the localStart point in larger than the global last, then the elements have already been exhausted
-        if(m_tcd.globalBatchStart < work.startPoint || work.startPoint > m_tcd.globalLast){
-            // log("Fixing globalBatchStart from %lu to %lu\n", tcd.globalBatchStart, tcd.globalLast + 1);
-            m_tcd.globalBatchStart = m_tcd.globalLast + 1;
-        }
-    }
-
-    if(work.startPoint > m_tcd.globalLast){
-        work.startPoint = 0;
-        work.numOfElements = 0;
-    } else {
-        size_t last = std::min(work.startPoint + batchSize - 1 , m_tcd.globalLast);
-        work.numOfElements = last - work.startPoint + 1;
-    }
-
-    return work;
-}
-
-void ComputeThread::doWorkCpu(const AssignedWork &work, RESULT_TYPE* results) {
+void ComputeThread::doWorkCpu(const AssignedWork &work, RESULT_TYPE* results, int* listIndex) {
     cpu_kernel(m_config.cpu.forwardModel,
                m_config.cpu.objective,
                results,
@@ -285,13 +254,13 @@ void ComputeThread::doWorkCpu(const AssignedWork &work, RESULT_TYPE* results) {
                m_config.model.D,
                work.numOfElements,
                m_config.model.dataPtr,
-               &m_tcd.listIndex,
+               listIndex,
                m_indexSteps.data(), work.startPoint,
                m_config.cpu.dynamicScheduling,
                m_config.cpu.computeBatchSize);
 }
 
-void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
+void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results, int* listIndex) {
     // Initialize the list index counter
     cudaMemset(m_gpuRuntime.deviceListIndexPtr, 0, sizeof(int));
 
@@ -359,14 +328,15 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results) {
         cudaMemcpy(&gpuListIndex, m_gpuRuntime.deviceListIndexPtr, sizeof(int), cudaMemcpyDeviceToHost);
 
         // Increment the global list index counter
-        globalListIndexOld = __sync_fetch_and_add(&m_tcd.listIndex, gpuListIndex);
+        globalListIndexOld = __sync_fetch_and_add(listIndex, gpuListIndex);
 
         // Get the results from the GPU
         cudaMemcpy(&((DATA_TYPE*)results)[globalListIndexOld], m_gpuRuntime.deviceResults, gpuListIndex * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
     }
 }
 
-void ComputeThread::start(size_t batchSize){
+void ComputeThread::start(WorkDispatcher workDispatcher, RESULT_TYPE* localResults, int* listIndex)
+{
     Stopwatch activeStopwatch;
     activeStopwatch.start();
 
@@ -389,19 +359,13 @@ void ComputeThread::start(size_t batchSize){
         Stopwatch syncStopwatch;
         syncStopwatch.start();
 
-        AssignedWork work = getBatch(batchSize);
+        AssignedWork work = workDispatcher(getId());
 
         syncStopwatch.stop();
         m_idleTime += syncStopwatch.getMsec();
 
         if(work.numOfElements == 0)
             break;
-
-        RESULT_TYPE* localResults;
-        if(m_config.resultSaveType == SAVE_TYPE_LIST)
-            localResults = m_tcd.results;
-        else
-            localResults = &m_tcd.results[work.startPoint - m_tcd.globalFirst];
 
         #ifdef DBG_TIME
             sw.stop();
@@ -434,9 +398,9 @@ void ComputeThread::start(size_t batchSize){
         ******************** Calculate the results ***********************
         ******************************************************************/
         if (m_type == WorkerThreadType::GPU) {
-            doWorkGpu(work, localResults);
+            doWorkGpu(work, localResults, listIndex);
         } else {
-            doWorkCpu(work, localResults);
+            doWorkCpu(work, localResults, listIndex);
         }
 
         numOfCalculatedElements += work.numOfElements;

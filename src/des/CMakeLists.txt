@@ -26,11 +26,13 @@ target_link_libraries(ComputeThread OpenMP::OpenMP_CXX)
 target_link_libraries(ComputeThread ${CUDA_LIBRARIES})
 target_link_libraries(ComputeThread nvidia-ml)
 
+add_library(Coordinator coordinatorThread.h coordinatorThread.cpp)
+target_link_libraries(Coordinator ComputeThread)
+
 set(MODULE_NAME DES)
 
 add_library(${MODULE_NAME} desf.cpp
                            desf.h
-                           coordinatorThread.cpp
                            masterProcess.cpp
                            slaveProcess.cpp
                            messaging.cpp
@@ -40,7 +42,7 @@ add_library(${MODULE_NAME} desf.cpp
 file(GLOB DES_SRC CONFIGURE_DEPENDS "*.cpp")
 set_source_files_properties(${DES_SRC} PROPERTIES LANGUAGE CUDA)
 
-target_link_libraries(${MODULE_NAME} ComputeThread Stopwatch CpuKernel GpuKernel Utilities)
+target_link_libraries(${MODULE_NAME} Coordinator ComputeThread Stopwatch CpuKernel GpuKernel Utilities)
 
 target_compile_options(${MODULE_NAME} PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:
                        --generate-line-info

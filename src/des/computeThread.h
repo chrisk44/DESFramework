@@ -23,6 +23,7 @@ enum WorkerThreadType {
 };
 
 typedef int ComputeThreadID;
+typedef std::function<AssignedWork(ComputeThreadID)> WorkDispatcher;
 
 class DesFramework;
 
@@ -31,18 +32,17 @@ public:
     ComputeThread(ComputeThreadID id,
                   std::string name,
                   WorkerThreadType type,
-                  ThreadCommonData& tcd,
                   const DesConfig& config,
                   const std::vector<unsigned long long>& indexSteps);
 
     // Dummy copy constructor which does not actually copy the whole object, just recreates it in the new location
     ComputeThread(const ComputeThread& other)
-        : ComputeThread(other.m_id, other.m_name, other.m_type, other.m_tcd, other.m_config, other.m_indexSteps)
+        : ComputeThread(other.m_id, other.m_name, other.m_type, other.m_config, other.m_indexSteps)
     {}
 
     ~ComputeThread();
 
-    void dispatch(size_t batchSize);
+    void dispatch(WorkDispatcher workDispatcher, RESULT_TYPE* results, int* listIndex);
     RESULT_TYPE* waitForResults();
     std::vector<std::vector<DATA_TYPE>> waitForListResults();
     void wait();
@@ -61,12 +61,11 @@ public:
 private:
     void initDevices();
     void prepareForElements(size_t numOfElements);
-    AssignedWork getBatch(size_t batchSize);
-    void doWorkCpu(const AssignedWork& work, RESULT_TYPE* results);
-    void doWorkGpu(const AssignedWork& work, RESULT_TYPE* results);
+    void doWorkCpu(const AssignedWork& work, RESULT_TYPE* results, int* listIndex);
+    void doWorkGpu(const AssignedWork& work, RESULT_TYPE* results, int* listIndex);
     void finalize();
 
-    void start(size_t batchSize);
+    void start(WorkDispatcher workDispatcher, RESULT_TYPE* localResults, int* listIndex);
 
     void log(const char* text, ...);
 
@@ -75,7 +74,6 @@ private:
     WorkerThreadType m_type;
     const DesConfig& m_config;
     const std::vector<unsigned long long> m_indexSteps;
-    ThreadCommonData& m_tcd;
     int m_rank;
     CpuConfig m_cpuConfig;
     GpuConfig m_gpuConfig;

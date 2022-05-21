@@ -108,16 +108,4 @@ struct SlaveProcessInfo {
     float ratio;
 };
 
-class ThreadCommonData {
-public:
-    std::mutex syncMutex;
-
-    int listIndex;
-    unsigned long currentBatchStart;
-    RESULT_TYPE* results;
-    unsigned long globalFirst;
-    unsigned long globalLast;
-    std::atomic_size_t globalBatchStart;
-};
-
 }
