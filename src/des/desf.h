@@ -30,10 +30,10 @@ private:
 	// Runtime variables
     std::vector<unsigned long long> m_idxSteps;   // Index steps for each dimension
     int m_saveFile;							// File descriptor for save file
-    RESULT_TYPE* m_finalResults;			// An array of N0 * N1 * ... * N(D-1) (this can't be a vector because we may want to map it to a file
+    char* m_finalResults;                   // An array of totalElements * sizeof(RESULT_TYPE) (this can't be a vector because we may want to map it to a file
     std::vector<std::vector<DATA_TYPE>> m_listResults; // A list of points for which the validation function has returned non-zero value
-    unsigned long m_totalReceived;		// Total elements that have been calculated and returned
-    unsigned long m_totalElements;		// Total elements
+    unsigned long long m_totalReceived;		// Total elements that have been calculated and returned
+    unsigned long long m_totalElements;		// Total elements
 
 	// MPI
     int m_rank;
@@ -108,7 +108,7 @@ public:
     static void sendBatch(const AssignedWork& work, int mpiSource);
 
     static void receiveAllResults(RESULT_TYPE* dst, size_t count, int mpiSource);
-    static int receiveListResults(std::vector<DATA_TYPE>& dst, size_t maxCount, unsigned int D,  int mpiSource);
+    static int receiveListResults(std::vector<size_t>& dst, size_t maxCount, int mpiSource);
     static void sync();
 
     static std::map<int, unsigned long> receiveMaxBatchSizes();
@@ -117,7 +117,7 @@ public:
     static void sendReadyRequest();
     static AssignedWork receiveWorkFromMaster();
     static void sendResults(RESULT_TYPE* data, size_t count);
-    static void sendListResults(DATA_TYPE* data, size_t numOfPoints, unsigned int D);
+    static void sendListResults(size_t* data, size_t numOfPoints);
     static void sendExitSignal();
 
 private:

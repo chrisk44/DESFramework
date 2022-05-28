@@ -95,7 +95,7 @@ DesFramework::DesFramework(const DesConfig& config)
             if(m_config.resultSaveType == SAVE_TYPE_ALL){
                 if(m_config.output.saveFile.size()){
 					// No saveFile given, save everything in memory
-                    m_finalResults = new RESULT_TYPE[m_totalElements];		// Uninitialized
+                    m_finalResults = new char[m_totalElements * sizeof(RESULT_TYPE)];		// Uninitialized
 				}else{
 					// Open save file
                     m_saveFile = open(m_config.output.saveFile.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
@@ -109,7 +109,7 @@ DesFramework::DesFramework(const DesConfig& config)
                     }
 
 					// Map the save file in memory
-                    m_finalResults = (RESULT_TYPE*) mmap(nullptr, m_totalElements * sizeof(RESULT_TYPE), PROT_WRITE, MAP_SHARED, m_saveFile, 0);
+                    m_finalResults = (char*) mmap(nullptr, m_totalElements * sizeof(RESULT_TYPE), PROT_WRITE, MAP_SHARED, m_saveFile, 0);
                     if(m_finalResults == MAP_FAILED){
 						fatal("mmap failed");
 					}
@@ -167,7 +167,7 @@ const RESULT_TYPE* DesFramework::getResults() const {
     if(m_config.resultSaveType != SAVE_TYPE_ALL)
         throw std::runtime_error("Error: Can't get all results when resultSaveType is not SAVE_TYPE_ALL");
 
-    return m_finalResults;
+    return (RESULT_TYPE*) m_finalResults;
 }
 
 const std::vector<std::vector<DATA_TYPE>>& DesFramework::getList() const {

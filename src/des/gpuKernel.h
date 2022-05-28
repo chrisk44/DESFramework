@@ -21,7 +21,7 @@ static void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offs
 #endif
 
 // CUDA kernel to run the computation
-__global__ void validate_kernel(validationFunc_t validationFunc, toBool_t toBool, RESULT_TYPE* results, unsigned long startingPointLinearIndex,
+__global__ void validate_kernel(validationFunc_t validationFunc, toBool_t toBool, void* results, unsigned long startingPointLinearIndex,
     const unsigned int D, const unsigned long numOfElements, const unsigned long offset, void* dataPtr,
     int dataSize, bool useSharedMemoryForData, bool useConstantMemoryForData, int* listIndexPtr,
     const int computeBatchSize);

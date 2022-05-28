@@ -91,7 +91,7 @@ void CoordinatorThread::run(){
         if(m_config.resultSaveType == SAVE_TYPE_ALL) {
             neededBytes = work.numOfElements * sizeof(RESULT_TYPE);
         } else {
-            neededBytes = work.numOfElements * m_config.model.D * sizeof(DATA_TYPE);
+            neededBytes = work.numOfElements * sizeof(DATA_TYPE);
             if(m_config.output.overrideMemoryRestrictions) {
                 #ifdef DBG_MEMORY
                     log("Limiting needed memory from %lu bytes to %lu bytes", neededBytes, getMaxCPUBytes());
@@ -99,14 +99,13 @@ void CoordinatorThread::run(){
                 neededBytes = std::min(neededBytes, getMaxCPUBytes());
             }
         }
-        if(neededBytes > m_results.capacity() * sizeof(RESULT_TYPE)){
+        if(neededBytes > m_results.capacity()){
             #ifdef DBG_MEMORY
-                log("Allocating more memory for results: %lu -> %lu MB", (m_results.size() * sizeof(RESULT_TYPE))/(1024*1024), neededBytes/(1024*1024));
+                log("Allocating more memory for results: %lu -> %lu MB", m_results.size()/(1024*1024), neededBytes/(1024*1024));
             #endif
 
-            unsigned long newSize = neededBytes / sizeof(RESULT_TYPE);
-            m_results.resize(newSize);
-            if(m_results.size() < newSize){
+            m_results.resize(neededBytes);
+            if(m_results.size() < neededBytes){
                 fatal("Can't allocate memory for results");
 			}
 		}
@@ -182,29 +181,23 @@ void CoordinatorThread::run(){
             }
         #endif
         #ifdef DBG_RESULTS_RAW
-            if(m_config.resultSaveType == SAVE_TYPE_ALL){
-                std::string str;
-                str += "[ ";
-                for(unsigned long i=0; i<work.numOfElements; i++){
-                    char tmp[64];
-                    sprintf(tmp, "%f ", m_results[i]);
-                    str += tmp;
-				}
-                str += "]";
-                log("%s", str.c_str());
-            }else{
-                std::string str;
-                for(int i=0; i<m_listIndex; i+=m_config.model.D){
-                    str += "[ ";
-                    for(unsigned int j=0; j<m_config.model.D; j++){
-                        char tmp[64];
-                        sprintf(tmp, "%f ", ((DATA_TYPE *) m_results.data())[i + j]);
-                        str += tmp;
-                    }
-                    str += " ]";
+            std::string str;
+            str += "[ ";
+            for(unsigned long i=0; i<work.numOfElements; i++){
+                char tmp[64];
+                if(m_config.resultSaveType == SAVE_TYPE_ALL){
+                    sprintf(tmp, "%f ", ((RESULT_TYPE*) m_results.data())[i]);
+                }else{
+                    sprintf(tmp, "%lu ", ((size_t *) m_results.data())[i]);
                 }
+                str += tmp;
+            }
+            str += "]";
+            if(m_config.resultSaveType == SAVE_TYPE_ALL){
+                log("Results: %s", str.c_str());
+            } else {
                 log("Results (m_listIndex = %d): %s", m_listIndex, str.c_str());
-			}
+            }
 		#endif
 
         #ifdef DBG_TIME
@@ -235,9 +228,9 @@ void CoordinatorThread::run(){
 		#endif
 
         if(m_config.resultSaveType == SAVE_TYPE_ALL){
-            DesFramework::sendResults(m_results.data(), work.numOfElements);
+            DesFramework::sendResults((RESULT_TYPE*) m_results.data(), work.numOfElements);
         }else{
-            DesFramework::sendListResults((DATA_TYPE*) m_results.data(), m_listIndex / m_config.model.D, m_config.model.D);
+            DesFramework::sendListResults((size_t*) m_results.data(), m_listIndex);
 		}
 
 		#ifdef DBG_TIME
@@ -270,20 +263,9 @@ unsigned long CoordinatorThread::calculateMaxBatchSize(const DesConfig& config)
         maxBatchSize = std::min(getMaxCPUBytes(), getMaxGPUBytes());
 
     // maxBatchSize contains the value in bytes, so divide it according to resultSaveType to convert it to actual batch size
-    if(config.resultSaveType == SAVE_TYPE_ALL)
-        maxBatchSize /= sizeof(RESULT_TYPE);
-    else
-        maxBatchSize /= config.model.D * sizeof(DATA_TYPE);
+    maxBatchSize /= config.resultSaveType == SAVE_TYPE_ALL ? sizeof(RESULT_TYPE) : sizeof(size_t);
 
-    // If we are saving a list, the max number of elements we might want to send is maxBatchSize * D, so limit the batch size
-    // so that the max number of elements is INT_MAX
-    if(config.resultSaveType == SAVE_TYPE_LIST && (unsigned long) (maxBatchSize*config.model.D) > (unsigned long) INT_MAX){
-        maxBatchSize = (INT_MAX - config.model.D) / config.model.D;
-    }
-    // If we are saving all of the results, the max number of elements is maxBatchSize itself, so limit it to INT_MAX
-    else if(config.resultSaveType == SAVE_TYPE_ALL && (unsigned long) maxBatchSize > (unsigned long) INT_MAX){
-        maxBatchSize = INT_MAX;
-    }
+    maxBatchSize = std::min(maxBatchSize, (size_t) INT_MAX);
 
     return maxBatchSize;
 }
@@ -294,8 +276,8 @@ unsigned long CoordinatorThread::calculateMaxCpuBatchSize(const DesConfig& confi
         return std::numeric_limits<size_t>::max();
     } else if(config.resultSaveType == SAVE_TYPE_ALL) {
         return getMaxCPUBytes() / sizeof(RESULT_TYPE);
-    } else  {
-        return getMaxCPUBytes() / (config.model.D * sizeof(DATA_TYPE));
+    } else {
+        return getMaxCPUBytes() / sizeof(size_t);
     }
 }
 

@@ -19,7 +19,7 @@
 
 // Memory parameters
 #ifndef MEM_GPU_SPARE_BYTES
-    #define MEM_GPU_SPARE_BYTES 100*1024*1024
+    #define MEM_GPU_SPARE_BYTES 500*1024*1024
 #endif
 
 #ifndef LOG_BUFFER_SIZE

@@ -65,14 +65,14 @@ void DesFramework::receiveAllResults(RESULT_TYPE *dst, size_t count, int mpiSour
     MMPI_Recv(dst, count, RESULT_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
 }
 
-void DesFramework::sendListResults(DATA_TYPE *data, size_t numOfPoints, unsigned int D) {
+void DesFramework::sendListResults(size_t *data, size_t numOfPoints) {
     MPI_Send(nullptr, 0, MPI_INT, 0, TAG_RESULTS, MPI_COMM_WORLD);
 
     MPI_Send(&numOfPoints, 1, MPI_UNSIGNED_LONG, 0, TAG_RESULTS_COUNT, MPI_COMM_WORLD);
-    MPI_Send(data, numOfPoints * D, DATA_MPI_TYPE, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
+    MPI_Send(data, numOfPoints, MPI_UNSIGNED_LONG, 0, TAG_RESULTS_DATA, MPI_COMM_WORLD);
 }
 
-int DesFramework::receiveListResults(std::vector<DATA_TYPE>& dst, size_t maxCount, unsigned int D, int mpiSource) {
+int DesFramework::receiveListResults(std::vector<size_t>& dst, size_t maxCount, int mpiSource) {
     MPI_Status status;
 
     size_t count;
@@ -81,13 +81,13 @@ int DesFramework::receiveListResults(std::vector<DATA_TYPE>& dst, size_t maxCoun
     if(count > maxCount)
         throw std::runtime_error("Attempted to receive " + std::to_string(count) + " list points but max was " + std::to_string(maxCount));
 
-    if(count * D > dst.capacity())
-        dst.reserve(count * D);
+    if(count > dst.capacity())
+        dst.reserve(count);
 
     if(count > dst.capacity())
         throw std::runtime_error("Failed to allocate memory for " + std::to_string(count) + " list points");
 
-    MMPI_Recv(dst.data(), count * D, DATA_MPI_TYPE, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
+    MMPI_Recv(dst.data(), count, MPI_UNSIGNED_LONG, mpiSource, TAG_RESULTS_DATA, MPI_COMM_WORLD, &status);
     return count;
 }
 

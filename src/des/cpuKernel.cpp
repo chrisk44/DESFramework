@@ -3,7 +3,7 @@
 #include "cpuKernel.h"
 
 // CPU kernel to run the computation
-void cpu_kernel(desf::validationFunc_t validationFunc, desf::toBool_t toBool, RESULT_TYPE* results, const desf::Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
+void cpu_kernel(desf::validationFunc_t validationFunc, desf::toBool_t toBool, void* results, const desf::Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
     const unsigned long long* idxSteps, unsigned long startingPointLinearIndex, bool dynamicScheduling, int batchSize) {
 
     unsigned long currentBatchStart = startingPointLinearIndex;
@@ -60,16 +60,14 @@ void cpu_kernel(desf::validationFunc_t validationFunc, desf::toBool_t toBool, RE
                 if(listIndexPtr == nullptr){
                     // We are running as SAVE_TYPE_ALL
                     // Run the validation function and save the result to the global memory
-                    results[start + processed] = validationFunc(point, dataPtr);
+                    ((RESULT_TYPE*) results)[start + processed] = validationFunc(point, dataPtr);
                 }else{
                     // We are running as SAVE_TYPE_LIST
                     // Run the validation function and pass its result to toBool
                     if(toBool(validationFunc(point, dataPtr))){
                         // Append element to the list
-                        carry = __sync_fetch_and_add(listIndexPtr, D);
-                        for(d = 0; d < (int) D; d++){
-                            ((DATA_TYPE *)results)[carry + d] = point[d];
-                        }
+                        carry = __sync_fetch_and_add(listIndexPtr, 1);
+                        ((size_t *)results)[carry] = start + processed;
                     }
                 }
 

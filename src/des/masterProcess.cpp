@@ -16,7 +16,7 @@ void DesFramework::masterProcess() {
 
     SlaveProcessInfo slaveProcessInfo[numOfSlaves];
 
-    std::vector<DATA_TYPE> tmpList;
+    std::vector<size_t> tmpList;
 
     #ifdef DBG_TIME
         Stopwatch sw;
@@ -99,7 +99,7 @@ void DesFramework::masterProcess() {
 
                 // Receive the results
                 if(m_config.resultSaveType == SAVE_TYPE_ALL){
-                    receiveAllResults(&m_finalResults[pinfo.work.startPoint], pinfo.work.numOfElements, mpiSource);
+                    receiveAllResults(&((RESULT_TYPE*) m_finalResults)[pinfo.work.startPoint], pinfo.work.numOfElements, mpiSource);
                     #ifdef DBG_RESULTS
                         log("Received results from %d starting at %lu", pinfo.id, pinfo.work.startPoint);
                     #endif
@@ -107,21 +107,20 @@ void DesFramework::masterProcess() {
                         std::string str;
                         for (unsigned long i = 0; i < pinfo.work.numOfElements; i++) {
                             char tmp[64];
-                            sprintf(tmp, "%.2f ", m_finalResults[pinfo.work.startPoint + i]);
+                            sprintf(tmp, "%.2f ", ((RESULT_TYPE*) m_finalResults)[pinfo.work.startPoint + i]);
                             str += tmp;
                         }
                         log("Received results from %d starting at %lu: %s", m_rank, pinfo.id, pinfo.work.startPoint, str.c_str());
                     #endif
                 }else{
-                    auto count = receiveListResults(tmpList, pinfo.work.numOfElements, m_config.model.D, mpiSource);
+                    auto count = receiveListResults(tmpList, pinfo.work.numOfElements, mpiSource);
                     #ifdef DBG_RESULTS_RAW
                         log("Received %d list results from %d: ", m_rank, count, pinfo.id);
                     #endif
                     for(int i=0; i<count; i++){
-                        std::vector<DATA_TYPE> point;
-                        for(unsigned int j=0; j<m_config.model.D; j++){
-                            point.push_back(tmpList[i*m_config.model.D + j]);
-                        }
+                        size_t index = tmpList[i];
+                        std::vector<DATA_TYPE> point(m_config.model.D);
+                        getPointFromIndex(index, point.data());
                         m_listResults.push_back(point);
                         #ifdef DBG_RESULTS_RAW
                             std::string str = "[ ";

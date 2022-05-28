@@ -44,7 +44,7 @@ ComputeThread::~ComputeThread() {
     finalize();
 }
 
-void ComputeThread::dispatch(WorkDispatcher workDispatcher, RESULT_TYPE* results, size_t indexOffset, int* listIndex) {
+void ComputeThread::dispatch(WorkDispatcher workDispatcher, void* results, size_t indexOffset, int* listIndex) {
     if(m_thread.joinable()) throw std::runtime_error("Compute thread is already running or was not joined");
 
     m_idleStopwatch.stop();
@@ -141,7 +141,7 @@ void ComputeThread::initDevices() {
             if(m_config.resultSaveType == SAVE_TYPE_ALL)
                 m_gpuRuntime.maxGpuBatchSize /= sizeof(RESULT_TYPE);
             else
-                m_gpuRuntime.maxGpuBatchSize /= m_config.model.D * sizeof(DATA_TYPE);
+                m_gpuRuntime.maxGpuBatchSize /= sizeof(DATA_TYPE);
         }
 
         // Get device's properties for shared memory
@@ -239,7 +239,7 @@ void ComputeThread::prepareForElements(size_t numOfElements) {
     } else if(m_config.resultSaveType == SAVE_TYPE_ALL) {
         toAllocateBytes = numOfElements * sizeof(RESULT_TYPE);
     } else {
-        toAllocateBytes = numOfElements * m_config.model.D * sizeof(DATA_TYPE);
+        toAllocateBytes = numOfElements * sizeof(DATA_TYPE);
     }
 
     if (m_gpuRuntime.allocatedBytes < toAllocateBytes) {
@@ -262,7 +262,7 @@ void ComputeThread::prepareForElements(size_t numOfElements) {
     }
 }
 
-void ComputeThread::doWorkCpu(const AssignedWork &work, RESULT_TYPE* results, int* listIndex) {
+void ComputeThread::doWorkCpu(const AssignedWork &work, void* results, int* listIndex) {
     cpu_kernel(m_config.cpu.forwardModel,
                m_config.cpu.objective,
                results,
@@ -276,7 +276,7 @@ void ComputeThread::doWorkCpu(const AssignedWork &work, RESULT_TYPE* results, in
                m_config.cpu.computeBatchSize);
 }
 
-void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results, int* listIndex) {
+void ComputeThread::doWorkGpu(const AssignedWork &work, void* results, int* listIndex) {
     // Initialize the list index counter
     cudaMemset(m_gpuRuntime.deviceListIndexPtr, 0, sizeof(int));
 
@@ -321,7 +321,7 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results, in
 
         // Queue the memcpy in stream[i] only if we are saving as SAVE_TYPE_ALL (otherwise the results will be fetched at the end of the current computation)
         if(m_config.resultSaveType == SAVE_TYPE_ALL){
-            cudaMemcpyAsync(&results[skip], &m_gpuRuntime.deviceResults[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, m_gpuRuntime.streams[i]);
+            cudaMemcpyAsync(&((RESULT_TYPE*) results)[skip], &((RESULT_TYPE*) m_gpuRuntime.deviceResults)[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, m_gpuRuntime.streams[i]);
         }
 
         // Increase skip
@@ -339,19 +339,19 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results, in
 
     // If we are saving as SAVE_TYPE_LIST, fetch the results
     if(m_config.resultSaveType == SAVE_TYPE_LIST){
-        int gpuListIndex, globalListIndexOld;
+        int gpuListIndex;
         // Get the current list index from the GPU
         cudaMemcpy(&gpuListIndex, m_gpuRuntime.deviceListIndexPtr, sizeof(int), cudaMemcpyDeviceToHost);
 
         // Increment the global list index counter
-        globalListIndexOld = __sync_fetch_and_add(listIndex, gpuListIndex);
+        int globalListIndexOld = __sync_fetch_and_add(listIndex, gpuListIndex);
 
         // Get the results from the GPU
-        cudaMemcpy(&((DATA_TYPE*)results)[globalListIndexOld], m_gpuRuntime.deviceResults, gpuListIndex * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&((size_t*) results)[globalListIndexOld], m_gpuRuntime.deviceResults, gpuListIndex * sizeof(size_t), cudaMemcpyDeviceToHost);
     }
 }
 
-void ComputeThread::start(WorkDispatcher workDispatcher, RESULT_TYPE* localResults, size_t indexOffset, int* listIndex)
+void ComputeThread::start(WorkDispatcher workDispatcher, void* localResults, size_t indexOffset, int* listIndex)
 {
     Stopwatch activeStopwatch;
     activeStopwatch.start();
@@ -412,12 +412,12 @@ void ComputeThread::start(WorkDispatcher workDispatcher, RESULT_TYPE* localResul
 
         // Calculate the starting address of the results:
         // If we are saving a list, then we use the given address and use the listIndex pointer to coordinate
-        RESULT_TYPE* results = localResults;
+        void* results = localResults;
         // If we are saving all of the results, then the address is pointing to the first element of the work
         //     that has been assigned to the coordinator, so WE need to start writing at
         //     (work.startPoint - indexOffset)
         if(m_config.resultSaveType == SAVE_TYPE_ALL) {
-            results = &localResults[work.startPoint - indexOffset];
+            results = &((RESULT_TYPE*) localResults)[work.startPoint - indexOffset];
         }
         /*****************************************************************
         ******************** Calculate the results ***********************
@@ -436,14 +436,16 @@ void ComputeThread::start(WorkDispatcher workDispatcher, RESULT_TYPE* localResul
         #endif
 
         #ifdef DBG_RESULTS_RAW
-            if(m_config.resultSaveType == SAVE_TYPE_ALL){
-                std::string str;
-                for (unsigned long i = 0; i < work.numOfElements; i++) {
-                    char tmp[64];
-                    sprintf(tmp, "%f ", ((DATA_TYPE *)localResults)[i]);
+            std::string str;
+            for (unsigned long i = 0; i < work.numOfElements; i++) {
+                char tmp[64];
+                if(m_config.resultSaveType == SAVE_TYPE_ALL){
+                    sprintf(tmp, "%f ", ((RESULT_TYPE*) localResults)[i]);
+                } else {
+                    sprintf(tmp, "%lu ", ((size_t*) localResults)[i]);
                 }
-                log("Results are: %s", str.c_str());
             }
+            log("Results are: %s", str.c_str());
         #endif
 
         #ifdef DBG_START_STOP

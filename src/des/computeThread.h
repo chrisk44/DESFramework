@@ -41,9 +41,9 @@ public:
 
     ~ComputeThread();
 
-    void dispatch(WorkDispatcher workDispatcher, RESULT_TYPE* results, size_t indexOffset, int* listIndex);
+    void dispatch(WorkDispatcher workDispatcher, void* results, size_t indexOffset, int* listIndex);
     RESULT_TYPE* waitForResults();
-    std::vector<std::vector<DATA_TYPE>> waitForListResults();
+    std::vector<std::vector<size_t>> waitForListResults();
     void wait();
 
     float getUtilization() const;
@@ -67,11 +67,11 @@ public:
 private:
     void initDevices();
     void prepareForElements(size_t numOfElements);
-    void doWorkCpu(const AssignedWork& work, RESULT_TYPE* results, int* listIndex);
-    void doWorkGpu(const AssignedWork& work, RESULT_TYPE* results, int* listIndex);
+    void doWorkCpu(const AssignedWork& work, void* results, int* listIndex);
+    void doWorkGpu(const AssignedWork& work, void* results, int* listIndex);
     void finalize();
 
-    void start(WorkDispatcher workDispatcher, RESULT_TYPE* localResults, size_t indexOffset, int* listIndex);
+    void start(WorkDispatcher workDispatcher, void* localResults, size_t indexOffset, int* listIndex);
 
     void log(const char* text, ...);
 
@@ -107,7 +107,7 @@ private:
     } m_nvml;
 
     struct {
-        RESULT_TYPE* deviceResults = nullptr;   // GPU Memory for results
+        void* deviceResults = nullptr;   // GPU Memory for results
         int* deviceListIndexPtr = nullptr;      // GPU Memory for list index for synchronization when saving the results as a list of points
         void* deviceDataPtr = nullptr;          // GPU Memory to store the model's constant data
         std::vector<cudaStream_t> streams;

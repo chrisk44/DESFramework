@@ -13,7 +13,7 @@ void cudaMemcpyToSymbolWrapper(const void* src, size_t count, size_t offset){
 }
 #endif
 
-__global__ void validate_kernel(validationFunc_t validationFunc, toBool_t toBool, RESULT_TYPE* results, unsigned long startingPointLinearIndex,
+__global__ void validate_kernel(validationFunc_t validationFunc, toBool_t toBool, void* results, unsigned long startingPointLinearIndex,
     const unsigned int D, const unsigned long numOfElements, const unsigned long offset, void* dataPtr,
     int dataSize, bool useSharedMemoryForData, bool useConstantMemoryForData, int* listIndexPtr,
     const int computeBatchSize)  {
@@ -82,17 +82,15 @@ __global__ void validate_kernel(validationFunc_t validationFunc, toBool_t toBool
         if(listIndexPtr == nullptr){
             // We are running as SAVE_TYPE_ALL
             // Run the validation function and save the result to the global memory
-            results[threadStart] = validationFunc(point, dataPtr);
+            ((RESULT_TYPE*) results)[threadStart] = validationFunc(point, dataPtr);
         }else{
             // We are running as SAVE_TYPE_LIST
             // Run the validation function and pass its result to toBool
             if(toBool(validationFunc(point, dataPtr))){
                 // Append element to the list
                 // TODO: STABILITY: Handle overflow
-                tmp = atomicAdd(listIndexPtr, D);
-                for(d = 0; d < D; d++){
-                    ((DATA_TYPE *)results)[tmp + d] = point[d];
-                }
+                tmp = atomicAdd(listIndexPtr, 1);
+                ((size_t *) results)[tmp] = threadStart + startingPointLinearIndex;
             }
         }
 
