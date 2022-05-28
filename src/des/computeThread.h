@@ -114,7 +114,8 @@ private:
 
         cudaDeviceProp deviceProp;
 
-        unsigned long allocatedElements = 0;
+        unsigned long allocatedBytes = 0;
+        unsigned long maxBytes;
         unsigned long maxGpuBatchSize;
         bool useSharedMemoryForData;
         bool useConstantMemoryForData;

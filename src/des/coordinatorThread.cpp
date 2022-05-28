@@ -87,13 +87,24 @@ void CoordinatorThread::run(){
 			break;
 
 		// Make sure we have enough allocated memory for localResults
-        if(work.numOfElements > m_results.size() && m_results.size() < m_maxCpuBatchSize){
-            unsigned long newSize = std::min(work.numOfElements, m_maxCpuBatchSize);
-
+        size_t neededBytes;
+        if(m_config.resultSaveType == SAVE_TYPE_ALL) {
+            neededBytes = work.numOfElements * sizeof(RESULT_TYPE);
+        } else {
+            neededBytes = work.numOfElements * m_config.model.D * sizeof(DATA_TYPE);
+            if(m_config.output.overrideMemoryRestrictions) {
+                #ifdef DBG_MEMORY
+                    log("Limiting needed memory from %lu bytes to %lu bytes", neededBytes, getMaxCPUBytes());
+                #endif
+                neededBytes = std::min(neededBytes, getMaxCPUBytes());
+            }
+        }
+        if(neededBytes > m_results.capacity() * sizeof(RESULT_TYPE)){
             #ifdef DBG_MEMORY
-                log("Allocating more memory for results: %lu -> %lu", m_results.size(), newSize);
+                log("Allocating more memory for results: %lu -> %lu MB", (m_results.size() * sizeof(RESULT_TYPE))/(1024*1024), neededBytes/(1024*1024));
             #endif
 
+            unsigned long newSize = neededBytes / sizeof(RESULT_TYPE);
             m_results.resize(newSize);
             if(m_results.size() < newSize){
                 fatal("Can't allocate memory for results");
@@ -246,12 +257,8 @@ void CoordinatorThread::run(){
 
 unsigned long CoordinatorThread::calculateMaxBatchSize(const DesConfig& config)
 {
-    unsigned long totalElements = 1;
-    for(const auto& limit : config.limits) {
-        totalElements *= limit.N;
-    }
     if(config.output.overrideMemoryRestrictions){
-        return totalElements;
+        return std::numeric_limits<size_t>::max();
     }
 
     unsigned long maxBatchSize;
@@ -268,9 +275,6 @@ unsigned long CoordinatorThread::calculateMaxBatchSize(const DesConfig& config)
     else
         maxBatchSize /= config.model.D * sizeof(DATA_TYPE);
 
-    // Limit the batch size by the total elements
-    maxBatchSize = std::min((unsigned long) totalElements, (unsigned long)maxBatchSize);
-
     // If we are saving a list, the max number of elements we might want to send is maxBatchSize * D, so limit the batch size
     // so that the max number of elements is INT_MAX
     if(config.resultSaveType == SAVE_TYPE_LIST && (unsigned long) (maxBatchSize*config.model.D) > (unsigned long) INT_MAX){
@@ -286,14 +290,13 @@ unsigned long CoordinatorThread::calculateMaxBatchSize(const DesConfig& config)
 
 unsigned long CoordinatorThread::calculateMaxCpuBatchSize(const DesConfig& config)
 {
-    unsigned long maxCpuElements = getMaxCPUBytes();
-    if(config.resultSaveType == SAVE_TYPE_ALL) {
-        maxCpuElements /= sizeof(RESULT_TYPE);
-    } else {
-        maxCpuElements /= config.model.D * sizeof(DATA_TYPE);
+    if(config.output.overrideMemoryRestrictions) {
+        return std::numeric_limits<size_t>::max();
+    } else if(config.resultSaveType == SAVE_TYPE_ALL) {
+        return getMaxCPUBytes() / sizeof(RESULT_TYPE);
+    } else  {
+        return getMaxCPUBytes() / (config.model.D * sizeof(DATA_TYPE));
     }
-
-    return maxCpuElements;
 }
 
 }

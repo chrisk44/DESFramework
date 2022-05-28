@@ -128,12 +128,21 @@ void ComputeThread::initDevices() {
         // Select gpu[id]
         cudaSetDevice(m_id);
 
+        m_gpuRuntime.maxBytes = getMaxGPUBytesForGpu(m_id);
+        #ifdef DBG_MEMORY
+            log("Max memory is %lu bytes", m_gpuRuntime.maxBytes);
+        #endif
+
         // Calculate the max batch size for the device
-        m_gpuRuntime.maxGpuBatchSize = getMaxGPUBytesForGpu(m_id);
-        if(m_config.resultSaveType == SAVE_TYPE_ALL)
-            m_gpuRuntime.maxGpuBatchSize /= sizeof(RESULT_TYPE);
-        else
-            m_gpuRuntime.maxGpuBatchSize /= m_config.model.D * sizeof(DATA_TYPE);
+        if(m_config.output.overrideMemoryRestrictions) {
+            m_gpuRuntime.maxGpuBatchSize = std::numeric_limits<size_t>::max();
+        } else {
+            m_gpuRuntime.maxGpuBatchSize = m_gpuRuntime.maxBytes;
+            if(m_config.resultSaveType == SAVE_TYPE_ALL)
+                m_gpuRuntime.maxGpuBatchSize /= sizeof(RESULT_TYPE);
+            else
+                m_gpuRuntime.maxGpuBatchSize /= m_config.model.D * sizeof(DATA_TYPE);
+        }
 
         // Get device's properties for shared memory
         cudaGetDeviceProperties(&m_gpuRuntime.deviceProp, m_id);
@@ -170,7 +179,7 @@ void ComputeThread::initDevices() {
         }
 
         // Allocate memory on device
-        cudaMalloc(&m_gpuRuntime.deviceResults, m_gpuRuntime.allocatedElements * sizeof(RESULT_TYPE));	cce();
+        cudaMalloc(&m_gpuRuntime.deviceResults, m_gpuRuntime.allocatedBytes); cce();
         cudaMalloc(&m_gpuRuntime.deviceListIndexPtr, sizeof(int));							cce();
         // If we have static model data but won't use constant memory, allocate global memory for it
         if(m_config.model.dataSize > 0 && !m_gpuRuntime.useConstantMemoryForData){
@@ -221,27 +230,34 @@ void ComputeThread::initDevices() {
 }
 
 void ComputeThread::prepareForElements(size_t numOfElements) {
-    // TODO: Move this to initialization and allocate as much memory as possible
-    if (m_type == WorkerThreadType::GPU && m_gpuRuntime.allocatedElements < numOfElements && m_gpuRuntime.allocatedElements < m_gpuRuntime.maxGpuBatchSize) {
-        #ifdef DBG_MEMORY
-            size_t prevAllocatedElements = m_gpuRuntime.allocatedElements;
-        #endif
+    if(m_type != WorkerThreadType::GPU)
+        return;
 
-        m_gpuRuntime.allocatedElements = std::min(numOfElements, m_gpuRuntime.maxGpuBatchSize);
+    size_t toAllocateBytes;
+    if(m_config.output.overrideMemoryRestrictions) {
+        toAllocateBytes = m_gpuRuntime.maxBytes;
+    } else if(m_config.resultSaveType == SAVE_TYPE_ALL) {
+        toAllocateBytes = numOfElements * sizeof(RESULT_TYPE);
+    } else {
+        toAllocateBytes = numOfElements * m_config.model.D * sizeof(DATA_TYPE);
+    }
 
+    if (m_gpuRuntime.allocatedBytes < toAllocateBytes) {
         #ifdef DBG_MEMORY
-            log("Allocating more GPU memory (%lu -> %lu elements, %lu MB)\n", prevAllocatedElements, m_gpuRuntime.allocatedElements, (m_gpuRuntime.allocatedElements*sizeof(RESULT_TYPE)) / (1024 * 1024));
+            log("Allocating more GPU memory (%lu -> %lu MB)", m_gpuRuntime.allocatedBytes/(1024*1024), toAllocateBytes/(1024*1024));
             fflush(stdout);
         #endif
 
         // Reallocate memory on device
         cudaFree(m_gpuRuntime.deviceResults);
         cce();
-        cudaMalloc(&m_gpuRuntime.deviceResults, m_gpuRuntime.allocatedElements * sizeof(RESULT_TYPE));
+        cudaMalloc(&m_gpuRuntime.deviceResults, toAllocateBytes);
         cce();
 
+        m_gpuRuntime.allocatedBytes = toAllocateBytes;
+
         #ifdef DBG_MEMORY
-            log("deviceResults = %p\n", m_gpuRuntime.deviceResults);
+            log("deviceResults = %p", m_gpuRuntime.deviceResults);
         #endif
     }
 }
