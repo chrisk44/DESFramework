@@ -44,14 +44,14 @@ ComputeThread::~ComputeThread() {
     finalize();
 }
 
-void ComputeThread::dispatch(WorkDispatcher workDispatcher, RESULT_TYPE* results, int* listIndex) {
+void ComputeThread::dispatch(WorkDispatcher workDispatcher, RESULT_TYPE* results, size_t indexOffset, int* listIndex) {
     if(m_thread.joinable()) throw std::runtime_error("Compute thread is already running or was not joined");
 
     m_idleStopwatch.stop();
     m_lastIdleTime = m_idleStopwatch.getMsec();
     m_idleTime += m_lastIdleTime;
-    m_thread = std::thread([this, workDispatcher, results, listIndex](){
-        start(workDispatcher, results, listIndex);
+    m_thread = std::thread([this, workDispatcher, results, indexOffset, listIndex](){
+        start(workDispatcher, results, indexOffset, listIndex);
         m_idleStopwatch.start();
     });
 }
@@ -335,7 +335,7 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results, in
     }
 }
 
-void ComputeThread::start(WorkDispatcher workDispatcher, RESULT_TYPE* localResults, int* listIndex)
+void ComputeThread::start(WorkDispatcher workDispatcher, RESULT_TYPE* localResults, size_t indexOffset, int* listIndex)
 {
     Stopwatch activeStopwatch;
     activeStopwatch.start();
@@ -394,13 +394,22 @@ void ComputeThread::start(WorkDispatcher workDispatcher, RESULT_TYPE* localResul
             sw.start();
         #endif
 
+        // Calculate the starting address of the results:
+        // If we are saving a list, then we use the given address and use the listIndex pointer to coordinate
+        RESULT_TYPE* results = localResults;
+        // If we are saving all of the results, then the address is pointing to the first element of the work
+        //     that has been assigned to the coordinator, so WE need to start writing at
+        //     (work.startPoint - indexOffset)
+        if(m_config.resultSaveType == SAVE_TYPE_ALL) {
+            results = &localResults[work.startPoint - indexOffset];
+        }
         /*****************************************************************
         ******************** Calculate the results ***********************
         ******************************************************************/
         if (m_type == WorkerThreadType::GPU) {
-            doWorkGpu(work, localResults, listIndex);
+            doWorkGpu(work, results, listIndex);
         } else {
-            doWorkCpu(work, localResults, listIndex);
+            doWorkCpu(work, results, listIndex);
         }
 
         numOfCalculatedElements += work.numOfElements;

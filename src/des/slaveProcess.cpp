@@ -35,8 +35,8 @@ void DesFramework::slaveProcess() {
         log("Created %lu compute threads", computeThreads.size());
     #endif
 
-    CoordinatorThread coordinatorThread(getConfig());
-    coordinatorThread.run(computeThreads);
+    CoordinatorThread coordinatorThread(getConfig(), computeThreads);
+    coordinatorThread.run();
 
     // Notify master about exiting
     sendExitSignal();

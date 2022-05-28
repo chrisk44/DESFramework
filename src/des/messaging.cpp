@@ -13,12 +13,11 @@ int DesFramework::getNumOfProcesses() {
     return num;
 }
 
-void DesFramework::sendReadyRequest(unsigned long maxBatchSize) {
+void DesFramework::sendReadyRequest() {
     MPI_Send(nullptr, 0, MPI_INT, 0, TAG_READY, MPI_COMM_WORLD);
-    MPI_Send(&maxBatchSize, 1, MPI_UNSIGNED_LONG, 0, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD);
 }
 
-void DesFramework::sendBatchSize(const AssignedWork& work, int mpiSource) {
+void DesFramework::sendBatch(const AssignedWork& work, int mpiSource) {
     MPI_Send(&work, 2, MPI_UNSIGNED_LONG, mpiSource, TAG_DATA, MPI_COMM_WORLD);
 }
 
@@ -29,11 +28,21 @@ int DesFramework::receiveRequest(int& source) {
     return status.MPI_TAG;
 }
 
-unsigned long DesFramework::receiveMaxBatchSize(int mpiSource) {
-    MPI_Status status;
-    unsigned long maxBatchSize;
-    MMPI_Recv(&maxBatchSize, 1, MPI_UNSIGNED_LONG, mpiSource, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD, &status);
-    return maxBatchSize;
+std::map<int, unsigned long> DesFramework::receiveMaxBatchSizes() {
+    int commSize;
+    MPI_Comm_size(MPI_COMM_WORLD, &commSize);
+
+    std::map<int, unsigned long> map;
+    for(int i=1; i<commSize; i++) {
+        size_t tmp;
+        MMPI_Recv(&tmp, 1, MPI_UNSIGNED_LONG, i, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD, nullptr);
+        map[i] = tmp;
+    }
+    return map;
+}
+
+void DesFramework::sendMaxBatchSize(size_t maxBatchSize) {
+    MPI_Send(&maxBatchSize, 1, MPI_UNSIGNED_LONG, 0, TAG_MAX_DATA_COUNT, MPI_COMM_WORLD);
 }
 
 void DesFramework::sendExitSignal() {

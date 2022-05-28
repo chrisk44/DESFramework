@@ -1,4 +1,5 @@
 #include "desf.h"
+#include "scheduler/scheduler.h"
 #include "utilities.h"
 
 #include <cstring>
@@ -9,6 +10,10 @@ void DesFramework::masterProcess() {
     int finished = 0;
     int numOfSlaves = getNumOfProcesses() - 1;
 
+    if(numOfSlaves <= 0) {
+        throw std::runtime_error("Only 1 process in MPI communicator, need at least 2");
+    }
+
     SlaveProcessInfo slaveProcessInfo[numOfSlaves];
 
     std::vector<DATA_TYPE> tmpList;
@@ -17,19 +22,31 @@ void DesFramework::masterProcess() {
         Stopwatch sw;
     #endif
 
+    std::vector<int> slaveProcessIds;
     for(int i=0; i<numOfSlaves; i++){
         slaveProcessInfo[i].id = i + 1;
-        slaveProcessInfo[i].currentBatchSize = m_config.batchSize;
         slaveProcessInfo[i].jobsCompleted = 0;
         slaveProcessInfo[i].elementsCalculated = 0;
         slaveProcessInfo[i].finished = false;
-        slaveProcessInfo[i].lastScore = -1;
-        slaveProcessInfo[i].ratio = (float)1/numOfSlaves;
+
+        slaveProcessIds.push_back(slaveProcessInfo[i].id);
     }
+
+    auto maxBatchSizes = receiveMaxBatchSizes();
+
+#ifdef DBG_DATA
+    log("Received %lu max batch sizes:\n", maxBatchSizes.size());
+    for(const auto& pair : maxBatchSizes) {
+        log("Max batch size for %d is %lu", pair.first, pair.second);
+    }
+#endif
+
+    m_config.interNodeScheduler->init(m_config, slaveProcessIds, maxBatchSizes);
+    m_config.interNodeScheduler->setWork(AssignedWork(0, m_totalElements));
 
     Stopwatch masterStopwatch;
     masterStopwatch.start();
-    while (m_totalReceived < m_totalElements || finished < numOfSlaves) {
+    while (finished < numOfSlaves) {
         // Receive request from any worker thread
         #ifdef DBG_MPI_STEPS
             log("Waiting for signal...");
@@ -50,30 +67,8 @@ void DesFramework::masterProcess() {
                 #ifdef DBG_TIME
                     sw.start();
                 #endif
-                // Receive the maximum batch size reported by the slave process
-                pinfo.maxBatchSize = receiveMaxBatchSize(mpiSource);
 
-                // For the first batches, use low batch size so the process can optimize its computeThread scores early
-                if((int) pinfo.jobsCompleted < m_config.slowStartLimit){
-                    pinfo.maxBatchSize = std::min(pinfo.maxBatchSize, (unsigned long) (m_config.slowStartBase * pow(2, pinfo.jobsCompleted)));
-                    #ifdef DBG_RATIO
-                        log("Setting temporary maxBatchSize=%lu for slave %d", pinfo.maxBatchSize, mpiSource);
-                    #endif
-                }
-
-                // Get next data batch to calculate
-                if(m_totalSent == m_totalElements){
-                    pinfo.work.startPoint = 0;
-                    pinfo.work.numOfElements = 0;
-                }else{
-                    pinfo.work.startPoint = m_totalSent;
-                    pinfo.work.numOfElements = std::min(std::min((unsigned long) (pinfo.ratio * m_config.batchSize), (unsigned long) pinfo.maxBatchSize), m_totalElements-m_totalSent);
-
-                    // printf("pinfo.ratio = %f, paramters->batchSize = %lu, pinfo.maxBatchSize = %lu, m_totalElements = %lu, m_totalSent = %lu, product = %lu\n",
-                    // 		pinfo.ratio, m_config.batchSize, pinfo.maxBatchSize, m_totalElements, m_totalSent, (unsigned long) (pinfo.ratio * m_config.batchSize));
-
-                    m_totalSent += pinfo.work.numOfElements;
-                }
+                pinfo.work = m_config.interNodeScheduler->getNextBatch(pinfo.id);
 
                 #ifdef DBG_MPI_STEPS
                     log("Sending %lu elements to %d with index %lu", pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
@@ -83,7 +78,9 @@ void DesFramework::masterProcess() {
                 #endif
 
                 // Send the batch to the slave process
-                sendBatchSize(pinfo.work, mpiSource);
+                sendBatch(pinfo.work, mpiSource);
+
+                m_config.interNodeScheduler->onNodeStarted(pinfo.id);
 
                 // Start stopwatch for process
                 pinfo.stopwatch.start();
@@ -173,40 +170,12 @@ void DesFramework::masterProcess() {
                 pinfo.jobsCompleted++;
                 pinfo.elementsCalculated += pinfo.work.numOfElements;
                 pinfo.stopwatch.stop();
-                pinfo.lastScore = pinfo.work.numOfElements / pinfo.stopwatch.getMsec();
-                pinfo.lastAssignedElements = pinfo.work.numOfElements;
+
+                m_config.interNodeScheduler->onNodeFinished(pinfo.id, pinfo.work.numOfElements, pinfo.stopwatch.getMsec());
 
                 // Print benchmark results
                 if (m_config.benchmark && m_config.printProgress) {
                     log("Slave %d benchmark: %lu elements, %f ms", mpiSource, pinfo.work.numOfElements, pinfo.stopwatch.getMsec());
-                }
-
-                if(m_config.slaveBalancing && numOfSlaves > 1){
-                    // Check other scores and calculate the sum
-                    float totalScore = 0;
-                    for(int i=0; i<numOfSlaves; i++){
-                        totalScore += slaveProcessInfo[i].lastScore;
-
-                        if(slaveProcessInfo[i].lastScore <= 0){
-                            // Either score has not been set, or got negative time
-                            totalScore = -1;
-                            break;
-                        }
-                    }
-
-                    // If all the processes have a real score (has been set and not negative)
-                    if(totalScore > 0){
-                        for(int i=0; i<numOfSlaves; i++){
-                            slaveProcessInfo[i].ratio = slaveProcessInfo[i].lastScore / totalScore;
-                            #ifdef DBG_RATIO
-                                log("Adjusting slave %d ratio = %f", slaveProcessInfo[i].id, slaveProcessInfo[i].ratio);
-                            #endif
-                        }
-                    }else{
-                        #ifdef DBG_RATIO
-                            log("Skipping ratio adjustment");
-                        #endif
-                    }
                 }
 
                 // Reset pinfo
@@ -229,7 +198,6 @@ void DesFramework::masterProcess() {
                     log("Error: Slave %d exited with %lu assigned elements!!", mpiSource, pinfo.work.numOfElements);
                 }
 
-                pinfo.work.startPoint = m_totalElements;
                 pinfo.finished = true;
 
                 finished++;
@@ -238,6 +206,11 @@ void DesFramework::masterProcess() {
         }
     }
 
+    if(m_totalReceived != m_totalElements)
+        throw std::runtime_error("Slave processes finished but not all elements have been calculated (received " +
+                                 std::to_string(m_totalReceived) + "/" + std::to_string(m_totalElements) + ")");
+
+    m_config.interNodeScheduler->finalize();
 }
 
 }

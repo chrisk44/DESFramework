@@ -10,10 +10,10 @@ namespace desf {
 
 class CoordinatorThread {
 public:
-    CoordinatorThread(const DesConfig& config);
+    CoordinatorThread(const DesConfig& config, std::vector<ComputeThread>& computeThreads);
     ~CoordinatorThread();
 
-    void run(std::vector<ComputeThread>& computeThreads);
+    void run();
 
 private:
     static unsigned long calculateMaxBatchSize(const DesConfig& config);
@@ -21,11 +21,9 @@ private:
 
     void log(const char* text, ...);
 
-    std::map<ComputeThreadID, size_t> m_batchSizes;
-    AssignedWork getWork(ComputeThreadID threadID);
-
     std::mutex m_syncMutex;
     const DesConfig& m_config;
+    std::vector<ComputeThread>& m_threads;
     int m_rank;
 
     unsigned long m_maxBatchSize;

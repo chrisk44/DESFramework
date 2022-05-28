@@ -12,6 +12,11 @@
 
 namespace desf {
 
+template<typename node_id_t>
+class Scheduler;
+
+typedef int ComputeThreadID;
+
 typedef RESULT_TYPE (*validationFunc_t)(DATA_TYPE*, void*);
 typedef bool (*toBool_t)(RESULT_TYPE);
 
@@ -25,6 +30,15 @@ struct Limit {
 struct AssignedWork {
     unsigned long startPoint;
     unsigned long numOfElements;
+
+    AssignedWork(size_t startPoint, size_t count)
+        : startPoint(startPoint),
+          numOfElements(count)
+    {}
+
+    AssignedWork()
+        : AssignedWork(0, 0)
+    {}
 };
 
 enum ProcessingType {
@@ -55,7 +69,10 @@ struct CpuConfig {
     toBool_t objective = nullptr;
 };
 
-struct DesConfig {
+class DesConfig {
+public:
+    DesConfig(bool deleteSchedulersWhenDestructed);
+    ~DesConfig();
     ProcessingType processingType = PROCESSING_TYPE_BOTH;
     ResultSaveType resultSaveType = SAVE_TYPE_LIST;
     bool handleMPI = true;
@@ -69,18 +86,6 @@ struct DesConfig {
         std::string saveFile;
     } output;
 
-    bool threadBalancing = true;
-    bool slaveBalancing = true;
-    bool slaveDynamicScheduling = false;
-    bool threadBalancingAverage = false;
-
-    unsigned long batchSize;
-    unsigned long slaveBatchSize;
-
-    unsigned long slowStartBase = 5000000;
-    int slowStartLimit = 3;
-    int minMsForRatioAdjustment = 0;
-
     struct {
         unsigned int D;
         void* dataPtr = nullptr;
@@ -89,23 +94,23 @@ struct DesConfig {
 
     CpuConfig cpu;
     std::map<int, GpuConfig> gpu;
+
+    Scheduler<int> *interNodeScheduler;
+    Scheduler<int> *intraNodeScheduler;
+
+private:
+    bool m_deleteSchedulers;
 };
 
 struct SlaveProcessInfo {
-    // These are allocated with malloc so they are not initialized
-    // Initialization should be done by masterProcess()
     int id;
     unsigned long maxBatchSize;
-    unsigned long currentBatchSize;
     AssignedWork work;
     unsigned int jobsCompleted;
     unsigned elementsCalculated;
     bool finished;
 
     Stopwatch stopwatch;
-    float lastScore;
-    float lastAssignedElements;
-    float ratio;
 };
 
 }

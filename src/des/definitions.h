@@ -46,6 +46,7 @@
 // #define DBG_RESULTS_RAW     // Messages with the exact results being passed around
 // #define DBG_RESULTS         // Messages about the results
 // #define DBG_TIME            // Print time measuraments for various parts of the code
+// #define DBG_SCHEDULE        // Messages by schedulers
 #define DBG_SNH             // Should not happen
 
 // MPI

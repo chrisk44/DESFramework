@@ -13,7 +13,6 @@ DesFramework::DesFramework(const DesConfig& config)
     : m_config(config),
       m_saveFile(-1),
       m_finalResults(nullptr),
-      m_totalSent(0),
       m_totalReceived(0),
       m_totalElements(0),
       m_rank(-1)
@@ -27,8 +26,11 @@ DesFramework::DesFramework(const DesConfig& config)
     if(config.limits.size() != config.model.D)
         throw std::invalid_argument("The limits vector must have a size equal to config.D");
 
-    if(config.batchSize <= 0)
-        throw std::invalid_argument("Batch size must be a positive value");
+    if(config.interNodeScheduler == nullptr)
+        throw std::invalid_argument("No Inter-node scheduler has been defined");
+
+    if(config.intraNodeScheduler == nullptr)
+        throw std::invalid_argument("No Intra-node scheduler has been defined");
 
     for (unsigned int i = 0; i < config.model.D; i++) {
         if (config.limits[i].lowerLimit > config.limits[i].upperLimit)
@@ -86,7 +88,6 @@ DesFramework::DesFramework(const DesConfig& config)
     #endif
 
     m_totalReceived = 0;
-    m_totalSent = 0;
     m_totalElements = (unsigned long long)(m_idxSteps[m_config.model.D - 1]) * (unsigned long long)(m_config.limits[m_config.model.D - 1].N);
 
     if(m_rank == 0){

@@ -6,6 +6,10 @@
 #include <cstring>
 
 #include "des/desf.h"
+#include "des/scheduler/constantScheduler.h"
+#include "des/scheduler/hrdlsScheduler.h"
+#include "des/scheduler/hrslsScheduler.h"
+#include "des/scheduler/uniformScheduler.h"
 
 /*
  * Each one of these contain a __host__ __device__ doValidate[MO][123] function
@@ -43,25 +47,22 @@ int startGrid = 1;
 int endGrid = 6;
 
 desf::ProcessingType processingType = desf::PROCESSING_TYPE_GPU;
-bool threadBalancing          = true;
-bool slaveBalancing           = true;
-bool slaveDynamicScheduling   = true;
-bool cpuDynamicScheduling     = true;
-bool threadBalancingAverage   = false;
 
-unsigned long batchSize           = UINT_MAX;
-float batchSizeFactor             = -1;
-unsigned long slaveBatchSize      = UINT_MAX;  // 1e+07
-float slaveBatchSizeFactor        = -1;
-unsigned long computeBatchSize    = 20;
+std::string interNodeScheduler = "HRDLS,bs=1000000,minTime=10,ss=6,ssb=50000,latest";
+std::string intraNodeScheduler = "HRDLS,bs=100000,minTime=10,ss=3,ssb=50000,latest";
+// Uniform
+// Constant,k=<constant batch size>
+// HRSLS,minTime=<>,minElements=<>,average,latest
+// HRDLS,bs=<>,ss=<>,ssbase=<>,minTime=<>,minElements=<>,average,latest
+
 unsigned long cpuComputeBatchSize = 1e+04;
+bool cpuDynamicScheduling         = true;
 
-int blockSize  = 1024;
-int gpuStreams = 8;
+unsigned long computeBatchSize = 20;
+int blockSize                  = 1024;
+int gpuStreams                 = 8;
 
-int slowStartLimit          = 6;
-unsigned long slowStartBase = 5e+05;
-int minMsForRatioAdjustment = 10;
+bool debug = false;
 
 template<typename T> T fromString(char* str);
 template<> float fromString<float>(char* str){ return atof(str); }
@@ -98,6 +99,90 @@ T getOrDefault(int argc, char** argv, bool* found, int* i, const char* argName, 
     return defaultValue;
 }
 
+std::vector<std::string> splitString(std::string str, std::string delimiter) {
+    std::vector<std::string> result;
+
+    size_t pos = 0;
+    std::string token;
+    while ((pos = str.find(delimiter)) != std::string::npos) {
+        result.push_back(str.substr(0, pos));
+        str.erase(0, pos + delimiter.length());
+    }
+    result.push_back(str);
+
+    return result;
+}
+
+size_t getNumberOrProduct(std::string str, size_t multiplier) {
+    if(str[0] == '*') {
+        return multiplier * atof(str.substr(1).c_str());
+    }
+
+    return atoll(str.c_str());
+}
+
+template<typename node_id_t>
+desf::Scheduler<node_id_t>* getSchedulerFromString(std::string str, size_t totalElements) {
+    auto parts = splitString(str, ",");
+    if(parts.size() == 0)
+        throw std::invalid_argument("Malformed scheduler string: " + str);
+
+    if(parts[0] == "Uniform") {
+        if(parts.size() > 1)
+            throw std::invalid_argument("Uniform scheduler doesn't take any arguments");
+
+        return new desf::UniformScheduler<node_id_t>();
+    } else if(parts[0] == "Constant") {
+        if(parts.size() != 2)
+            throw std::invalid_argument("Constant scheduler requires one argument. Try \"Constant,10000\".");
+
+        return new desf::ConstantScheduler<node_id_t>(getNumberOrProduct(parts[1].c_str(), totalElements));
+    } else if(parts[0] == "HRSLS" || parts[0] == "HRDLS") {
+        if(parts[0] == "HRDLS" && parts.size() < 2)
+            throw std::invalid_argument("HRDLS requires at least a constant batch size");
+
+        size_t batchSize = 0;
+        float minTime = 0.f;
+        size_t minElements = 0;
+        int ss = 0;
+        size_t ssb = 0;
+        bool average = false;
+
+        for(size_t i=1; i<parts.size(); i++) {
+            auto pair = splitString(parts[i], "=");
+            if(!(pair.size() == 2 || (pair.size() == 1 && (pair[0] == "average" || pair[0] == "latest"))))
+                throw std::invalid_argument("Malformed pair: " + parts[i]);
+
+            if(pair[0] == "average") average = true;
+            else if(pair[0] == "latest") average = false;
+            else if(pair[0] == "bs") batchSize = getNumberOrProduct(pair[1].c_str(), totalElements);
+            else if(pair[0] == "minTime") minTime = atof(pair[1].c_str());
+            else if(pair[0] == "minElements") minElements = getNumberOrProduct(pair[1].c_str(), totalElements);
+            else if(pair[0] == "ss") ss = atoi(pair[1].c_str());
+            else if(pair[0] == "ssb") ssb = getNumberOrProduct(pair[1].c_str(), totalElements);
+            else throw std::invalid_argument("Unknown argument: " + pair[0]);
+        }
+
+        desf::HRSLSScheduler<node_id_t> *scheduler;
+        if(parts[0] == "HRDLS") {
+            auto hrdls = new desf::HRDLSScheduler<node_id_t>(batchSize, totalElements);
+            hrdls->setSlowStart(ss, ssb);
+            scheduler = hrdls;
+        } else {
+            scheduler = new desf::HRSLSScheduler<node_id_t>(totalElements);
+        }
+
+        scheduler->setMinTimeToAdjustRatios(minTime);
+        scheduler->setMinElementsToAdjustRatios(minElements);
+        if(average) scheduler->setUseAverageRatio();
+        else scheduler->setUseLatestRatio();
+
+        return scheduler;
+    } else {
+        throw std::invalid_argument("Unknown scheduler: " + parts[0]);
+    }
+}
+
 void printHelp(){
     printf(
         "DES Framework Usage:\n"
@@ -113,42 +198,33 @@ void printHelp(){
         "--only-one                 -oo             Do only one run for each grid regardless of the time it takes.\n"
         "\n"
         "Load balancing (--thread-balancing must be the same for every system, the rest can be freely adjusted per system):\n"
-        "--thread-balancing         -tb             Enables the use of HPLS in the slave level for each compute thread.\n"
-        "                                           This means that for each assignment, the slave will use HPLS to calculate a ratio which will\n"
-        "                                           be multiplied by the slave batch size to determine the number of elements that will be assigned to each compute thread.\n"
-        "--slave-balancing          -sb             Enables the use of HPLS in the master level for each slave.\n"
-        "                                           This means that for each assignment request, the master will use HPLS to calculate a ratio\n"
-        "                                           which will be multiplied by the global batch size to determine the number of elements that\n"
-        "                                           should be assigned to that slave.\n"
-        "--slave-dynamic-balancing  -sdb            Enables dynamic scheduling in the slave level. When enabled, the slave will assign the elements dynamically to the available\n"
-        "                                           resources using the slave batch size, as opposed to assigning them all at once\n"
+        "--internode-scheduler      -inter          The scheduler that will be used in the Inter-node scheduler\n"
+        "--intranode-scheduler      -intra          The scheduler that will be used in the Intra-node scheduler\n"
+        "A scheduler can be defined as:\n"
+        " Uniform\n"
+        " Constant,k=<constant batch size>\n"
+        " HRSLS,minTime=<>,minElements=<>,average,latest\n"
+        " HRDLS,bs=<>,ss=<>,ssbase=<>,minTime=<>,minElements=<>,average,latest\n"
+        "\n"
+        " ** Any number referencing a count of elements can also be defined as \"*0.2\" where the given number will be multiplied by the total elements of the grid\n"
+        "\n"
+        "CPU parameters (can be defined separately for each slave):\n"
+        "--cpu-compute-batch-size   -ccbs           The batch size for CPU dynamic scheduling.\n"
         "--cpu-dynamic-balancing    -cdb            Enables dynamic scheduling in the compute thread level for the CPU worker thread. When enabled, the elements\n"
         "                                           that have been assigned to the CPU worker thread will be assigned dynamically to each CPU core using a CPU batch size,\n"
         "                                           as opposed to statically assigning the elements equally to the available cores.\n"
-        "--thread-balancing-avg     -tba            Causes the slave-level HPLS to use the average ratio for each compute thread instead of the latest one\n. Useful when\n"
-        "                                           the elements are heavily imbalanced compute-wise.\n"
-        "\n"
-        "Element assignment (can be defined separately for each slave, except for --batch-size which is used only by the master process):\n"
-        "--batch-size               -bs             The maximum number of elements for each assignment from the master node to a slave, and the multiplier of HPLS ratios.\n"
-        "--batch-size-factor        -bsf            The maximum number of elements for each assignment from the master node to a slave, and the multiplier of HPLS ratios (multiplier for total elements of grid).\n"
-        "--slave-batch-size         -sbs            The maximum number of elements that a slave can assign to a compute thread at a time, and the multiplier of HPLS ratios.\n"
-        "--slave-batch-size-factor  -sbsf           The maximum number of elements that a slave can assign to a compute thread at a time, and the multiplier of HPLS ratios (multiplier for total elements of grid).\n"
-        "--compute-batch-size       -cbs            The number of elements that each GPU thread will compute.\n"
-        "--cpu-compute-batch-size   -ccbs           The batch size for CPU dynamic scheduling.\n"
         "\n"
         "GPU parameters (can be defined separately for each slave):\n"
+        "--compute-batch-size       -cbs            The number of elements that each GPU thread will compute.\n"
         "--block-size               -bls            The number of threads in each GPU block.\n"
         "--gpu-streams              -gs             The number of GPU streams to be used to dispatch work to the GPU.\n"
-        "\n"
-        "Slow-Start technique (used only by the master system, except for minimum time for ratio adjustment which is also used by the slaves and can be freely adjusted per system):\n"
-        "--slow-start-limit         -ssl            The number of assignments that should be limited by the slow-start technique, where after each step the limit is doubled.\n"
-        "--slow-start-base          -ssb            The initial number of elements for the slow-start technique which will be doubled after each step.\n"
-        "--min-ms-ratio             -mmr            The minimum time in milliseconds that will be considered as valid to be used to adjust HPLS ratios.\n"
         "\n"
         "Resource selection (can be defined separately for each slave) (these don't require arguments, obviously use only one of them):\n"
         "--cpu                      -cpu            Use only the CPUs of the system\n"
         "--gpu                      -gpu            Use only the GPUs of the system\n"
         "--both                     -both           Use all CPUs and GPUs of the system\n"
+        "\n"
+        "--debug                    -dbg            Wait for debugger to attach\n"
     );
 }
 
@@ -164,28 +240,21 @@ void parseArgs(int argc, char** argv){
         endGrid    = getOrDefault(argc, argv, &found, &i, "--grid-end",    "-ge", true, endGrid);
         onlyOne    = getOrDefault(argc, argv, &found, &i, "--only-one",    "-oo", false, onlyOne ? 1 : 0) == 1 ? true : false;
 
-        batchSize            = getOrDefault(argc, argv, &found, &i, "--batch-size",  "-bs", true, batchSize);
-        batchSizeFactor      = getOrDefault(argc, argv, &found, &i, "--batch-size-factor", "-bsf", true, batchSizeFactor);
-        slaveBatchSize       = getOrDefault(argc, argv, &found, &i, "--slave-batch-size",  "-sbs", true, slaveBatchSize);
-        slaveBatchSizeFactor = getOrDefault(argc, argv, &found, &i, "--slave-batch-size-factor",  "-sbsf", true, slaveBatchSizeFactor);
-        computeBatchSize     = getOrDefault(argc, argv, &found, &i, "--compute-batch-size",  "-cbs", true, computeBatchSize);
+        interNodeScheduler = getOrDefault(argc, argv, &found, &i, "--internode-scheduler", "-inter", true, interNodeScheduler);
+        intraNodeScheduler = getOrDefault(argc, argv, &found, &i, "--intranode-scheduler", "-intra", true, intraNodeScheduler);
+
         cpuComputeBatchSize  = getOrDefault(argc, argv, &found, &i, "--cpu-compute-batch-size",  "-ccbs", true, cpuComputeBatchSize);
-
-        threadBalancing        = getOrDefault(argc, argv, &found, &i, "--thread-balancing", "-tb", true, threadBalancing ? 1 : 0) == 1 ? true : false;
-        slaveBalancing         = getOrDefault(argc, argv, &found, &i, "--slave-balancing", "-sb", true, slaveBalancing ? 1 : 0) == 1 ? true : false;
-        slaveDynamicScheduling = getOrDefault(argc, argv, &found, &i, "--slave-dynamic-balancing", "-sdb", true, slaveDynamicScheduling ? 1 : 0) == 1 ? true : false;
         cpuDynamicScheduling   = getOrDefault(argc, argv, &found, &i, "--cpu-dynamic-balancing", "-cdb", true, cpuDynamicScheduling ? 1 : 0) == 1 ? true : false;
-        threadBalancingAverage = getOrDefault(argc, argv, &found, &i, "--thread-balancing-avg", "-tba", true, threadBalancingAverage ? 1 : 0) == 1 ? true : false;
 
+        computeBatchSize     = getOrDefault(argc, argv, &found, &i, "--compute-batch-size",  "-cbs", true, computeBatchSize);
         blockSize  = getOrDefault(argc, argv, &found, &i, "--block-size",  "-bls", true, blockSize);
         gpuStreams = getOrDefault(argc, argv, &found, &i, "--gpu-streams", "-gstr", true, gpuStreams);
-        slowStartLimit = getOrDefault(argc, argv, &found, &i, "--slow-start-limit",  "-ssl", true, slowStartLimit);
-        slowStartBase = getOrDefault(argc, argv, &found, &i, "--slow-start-base",  "-ssb", true, slowStartBase);
-        minMsForRatioAdjustment = getOrDefault(argc, argv, &found, &i, "--min-ms-ratio",  "-mmr", true, minMsForRatioAdjustment);
 
         if (getOrDefault(argc, argv, &found, &i, "--cpu", "-cpu", false, false) == 1) processingType = desf::PROCESSING_TYPE_CPU;
         if (getOrDefault(argc, argv, &found, &i, "--gpu", "-gpu", false, false) == 1) processingType = desf::PROCESSING_TYPE_GPU;
         if (getOrDefault(argc, argv, &found, &i, "--both", "-both", false, false) == 1) processingType = desf::PROCESSING_TYPE_BOTH;
+
+        debug = getOrDefault(argc, argv, &found, &i, "--debug", "-dbg", false, false);
 
         if (getOrDefault(argc, argv, &found, &i, "--help", "-help", false, 0) == 1){
             printHelp();
@@ -230,7 +299,16 @@ int main(int argc, char** argv){
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     bool isMaster = rank == 0;
 
-    MPI_Comm_rank(MPI_COMM_WORLD, &commSize);
+    MPI_Comm_size(MPI_COMM_WORLD, &commSize);
+
+    if(debug) {
+        volatile int i = 0;
+        char hostname[256];
+        gethostname(hostname, sizeof(hostname));
+        printf("[%d] PID %d on %s ready to attach\n", rank, getpid(), hostname);
+        fflush(stdout);
+        sleep(20);
+    }
 
     const std::vector<desf::validationFunc_t> cpuForwardModels = {
         validate_cpuM1,
@@ -328,7 +406,7 @@ int main(int argc, char** argv){
             std::string gridFilename = dataPath + modelNames[m] + "/grid" + std::to_string(g) + ".txt";
             std::ifstream gridfile(gridFilename, std::ios::in);
 
-            desf::DesConfig config;
+            desf::DesConfig config(false);
 
             // Read each dimension's grid information
             unsigned long totalElements = 1;
@@ -359,17 +437,12 @@ int main(int argc, char** argv){
             config.model.dataPtr = (void*) modelDataPtr;
             config.model.dataSize = (1 + stations*(9 - (m<2 ? 0 : 1))) * sizeof(float);
 
-            config.threadBalancing          = threadBalancing;
-            config.slaveBalancing           = slaveBalancing;
-            config.slaveDynamicScheduling   = slaveDynamicScheduling;
-            config.cpu.dynamicScheduling    = cpuDynamicScheduling;
-            config.threadBalancingAverage   = threadBalancingAverage;
-
-            config.batchSize                = batchSizeFactor > 0 ? totalElements * batchSizeFactor : batchSize;
-            config.slaveBatchSize           = slaveBatchSizeFactor > 0 ? totalElements * slaveBatchSizeFactor : slaveBatchSize;
-            config.cpu.computeBatchSize     = cpuComputeBatchSize;
+            config.interNodeScheduler = getSchedulerFromString<int>(interNodeScheduler, totalElements);
+            config.intraNodeScheduler = getSchedulerFromString<desf::ComputeThreadID>(intraNodeScheduler, totalElements);
 
             if(!isMaster) {
+                config.cpu.dynamicScheduling    = cpuDynamicScheduling;
+                config.cpu.computeBatchSize     = cpuComputeBatchSize;
                 config.cpu.forwardModel = cpuForwardModels[m];
                 config.cpu.objective = cpuObjective;
 
@@ -383,10 +456,6 @@ int main(int argc, char** argv){
                     config.gpu.insert(std::make_pair(pair.first, gpuConfig));
                 }
             }
-
-            config.slowStartLimit           = slowStartLimit;
-            config.slowStartBase            = slowStartBase;
-            config.minMsForRatioAdjustment  = minMsForRatioAdjustment;
 
             float totalTime = 0;        //msec
             int numOfRuns = 0;
@@ -462,6 +531,9 @@ int main(int argc, char** argv){
                 if(moveToNext)
                     break;
             } // end while time too short
+
+            delete config.interNodeScheduler;
+            delete config.intraNodeScheduler;
 
             if(onlyOne)
                 break;

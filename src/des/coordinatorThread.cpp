@@ -1,22 +1,34 @@
 #include "desf.h"
 
 #include "coordinatorThread.h"
+#include "scheduler/scheduler.h"
 #include "utilities.h"
 
 #include <stdarg.h>
 
 namespace desf {
 
-CoordinatorThread::CoordinatorThread(const DesConfig& config)
+CoordinatorThread::CoordinatorThread(const DesConfig& config, std::vector<ComputeThread>& threads)
     : m_config(config),
+      m_threads(threads),
       m_maxBatchSize(calculateMaxBatchSize(config)),
       m_maxCpuBatchSize(calculateMaxCpuBatchSize(config))
 {
     MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
+
+    std::vector<ComputeThreadID> threadIds;
+    std::map<ComputeThreadID, size_t> maxBatchSizes;
+    for(const auto& thread : m_threads){
+        threadIds.push_back(thread.getId());
+        maxBatchSizes[thread.getId()] = thread.getType() == CPU ? m_maxCpuBatchSize : thread.getGpuMaxBatchSize();
+    }
+    m_config.intraNodeScheduler->init(m_config, threadIds, maxBatchSizes);
 }
 
 CoordinatorThread::~CoordinatorThread()
-{}
+{
+    m_config.intraNodeScheduler->finalize();
+}
 
 void CoordinatorThread::log(const char *text, ...) {
     static thread_local char buf[LOG_BUFFER_SIZE];
@@ -29,47 +41,14 @@ void CoordinatorThread::log(const char *text, ...) {
     printf("[%d]     Coordinator: %s\n", m_rank, buf);
 }
 
-AssignedWork CoordinatorThread::getWork(ComputeThreadID threadID)
-{
-    unsigned long batchSize = m_batchSizes[threadID];
-    AssignedWork work;
-    {
-        std::lock_guard<std::mutex> lock(m_syncMutex);  // TODO: Mutex is not needed since we are using an atomic, but we need to solve the overflow problem to discard the mutex
-
-        // Fetch and increment the global batch start point by our batch size
-        work.startPoint = m_globalBatchStart.fetch_add(batchSize);
-
-        // Check for globalBatchStart overflow and limit it to globalLast+1 to avoid later overflows
-        // If the new globalBatchStart is smaller than our local start point, the increment caused an overflow
-        // If the localStart point in larger than the global last, then the elements have already been exhausted
-        if(m_globalBatchStart < work.startPoint || work.startPoint > m_globalLast){
-            // log("Fixing globalBatchStart from %lu to %lu", globalBatchStart, globalLast + 1);
-            m_globalBatchStart = m_globalLast + 1;
-        }
-    }
-
-    if(work.startPoint > m_globalLast){
-        work.startPoint = 0;
-        work.numOfElements = 0;
-    } else {
-        size_t last = std::min(work.startPoint + batchSize - 1 , m_globalLast);
-        work.numOfElements = last - work.startPoint + 1;
-    }
-
-    return work;
-}
-
-void CoordinatorThread::run(std::vector<ComputeThread>& threads){
-    WorkDispatcher workDispatcher = [&](ComputeThreadID id){ return getWork(id); };
-
-    int numOfRatioAdjustments = 0;
-
-    std::map<ComputeThreadID, float> ratios;
-    std::map<ComputeThreadID, float> ratioSums;
-    for(const auto& ct : threads){
-        ratios[ct.getId()] = 1.f / (float) threads.size();
-        ratioSums[ct.getId()] = 0.f;
-    }
+void CoordinatorThread::run(){
+    WorkDispatcher workDispatcher = [&](ComputeThreadID id){
+        auto work = m_config.intraNodeScheduler->getNextBatch(id);
+        #ifdef DBG_DATA
+            log("Assigning batch with %lu elements starting from %lu to %d", work.numOfElements, work.startPoint, id);
+        #endif
+        return work;
+    };
 
 	#ifdef DBG_TIME
 		Stopwatch sw;
@@ -78,7 +57,10 @@ void CoordinatorThread::run(std::vector<ComputeThread>& threads){
 
     #ifdef DBG_DATA
         log("Max batch size: %lu", m_maxBatchSize);
+    #elif defined(DBG_MPI_STEPS)
+        log("Sending max batch size = %lu", m_maxBatchSize);
     #endif
+    DesFramework::sendMaxBatchSize(m_maxBatchSize);
 
 	while(true){
 		// Send READY signal to master
@@ -90,7 +72,7 @@ void CoordinatorThread::run(std::vector<ComputeThread>& threads){
 		#endif
 
         // Get a batch of data from master
-        DesFramework::sendReadyRequest(m_maxBatchSize);
+        DesFramework::sendReadyRequest();
         AssignedWork work = DesFramework::receiveWorkFromMaster();
 
 		#ifdef DBG_DATA
@@ -122,64 +104,7 @@ void CoordinatorThread::run(std::vector<ComputeThread>& threads){
 			sw.stop();
 			time_data = sw.getMsec();
 			sw.start();
-		#endif
-
-		/*
-		 * Split the data into pieces for each thread
-		 * If we are using dynamic scheduling, each batch size will be
-		 * ratio * min(slaveBatchSize, numOfElements).
-		 * Otherwise it will be ratio * work.numOfElements and we will make sure
-		 * later that exactly work.numOfElements elements have been assigned.
-         */
-        m_batchSizes.clear();
-        std::map<ComputeThreadID, RESULT_TYPE*> resultPtrs;
-        unsigned long total = 0;
-        for(auto& ct : threads){
-            if(m_config.slaveDynamicScheduling)
-                m_batchSizes[ct.getId()] = std::max((unsigned long) 1, (unsigned long) (ratios[ct.getId()] * std::min(
-                    m_config.slaveBatchSize, work.numOfElements)));
-            else{
-                m_batchSizes[ct.getId()] = std::max((unsigned long) 1, (unsigned long) (ratios[ct.getId()] * work.numOfElements));
-                total += m_batchSizes[ct.getId()];
-            }
-
-            if(m_config.resultSaveType == SAVE_TYPE_LIST) {
-                resultPtrs[ct.getId()] = m_results.data();
-            } else {
-                resultPtrs[ct.getId()] = &m_results[work.startPoint - m_globalFirst];
-            }
-        }
-
-        /*
-         * If we are NOT using dynamic scheduling, make sure that exactly
-         * work.numOfElements elements have been assigned
-         */
-        if(!m_config.slaveDynamicScheduling){
-            if(total < work.numOfElements){
-                // Something was left out, assign it to first thread
-                m_batchSizes.begin()->second += work.numOfElements - total;
-            }else if(total > work.numOfElements){
-                // More elements were given, remove from the first threads
-                for(auto& ct : threads){
-                    // If thread i has enough elements, remove all the extra from it
-                    if(m_batchSizes[ct.getId()] > total - work.numOfElements){
-                        m_batchSizes[ct.getId()] -= total - work.numOfElements;
-                        total = work.numOfElements;
-                        break;
-                    }
-
-                    // else assign 0 elements to it and move to the next thread
-                    total -= m_batchSizes[ct.getId()];
-                    m_batchSizes[ct.getId()] = 0;
-                }
-            }
-        }
-
-		#ifdef DBG_RATIO
-            for(const auto& pair : m_batchSizes){
-                log("Thread %d -> Assigning batch size = %lu elements", pair.first, pair.second);
-            }
-		#endif
+        #endif
 
         m_globalFirst      = work.startPoint;
         m_globalLast       = work.startPoint + work.numOfElements - 1;
@@ -188,6 +113,8 @@ void CoordinatorThread::run(std::vector<ComputeThread>& threads){
 		#ifdef DBG_DATA
             log("Got job with globalFirst = %lu, globalLast = %lu", m_globalFirst, m_globalLast);
 		#endif
+
+        m_config.intraNodeScheduler->setWork(work);
 
 		#ifdef DBG_TIME
 			sw.stop();
@@ -199,8 +126,9 @@ void CoordinatorThread::run(std::vector<ComputeThread>& threads){
         m_listIndex = 0;
 
 		// Start all the worker threads
-        for(auto& cti : threads){
-            cti.dispatch(workDispatcher, resultPtrs[cti.getId()], &m_listIndex);
+        for(auto& cti : m_threads){
+            m_config.intraNodeScheduler->onNodeStarted(cti.getId());
+            cti.dispatch(workDispatcher, m_results.data(), work.startPoint, &m_listIndex);
 		}
 
 		#ifdef DBG_TIME
@@ -210,10 +138,10 @@ void CoordinatorThread::run(std::vector<ComputeThread>& threads){
 		#endif
 
 		#ifdef DBG_MPI_STEPS
-            log("Waiting for results from %lu threads...", threads.size());
+            log("Waiting for results from %lu threads...", m_threads.size());
 		#endif
 		// Wait for all worker threads to finish their work
-        for(auto& ct : threads){
+        for(auto& ct : m_threads){
             ct.wait();
 		}
 
@@ -224,13 +152,13 @@ void CoordinatorThread::run(std::vector<ComputeThread>& threads){
 
 		// Sanity check
         size_t totalCalculated = 0;
-        for(const auto& ct : threads)
+        for(const auto& ct : m_threads)
             totalCalculated += ct.getLastCalculatedElements();
 
 		if(totalCalculated != work.numOfElements){
             log("Shit happened: Total calculated elements are %lu but %lu were assigned to this slave", totalCalculated, work.numOfElements);
 
-            for(const auto& ct : threads){
+            for(const auto& ct : m_threads){
                 log("Thread %d calculated %lu elements", ct.getId(), ct.getLastCalculatedElements());
             }
 
@@ -271,59 +199,15 @@ void CoordinatorThread::run(std::vector<ComputeThread>& threads){
         #ifdef DBG_TIME
             sw.start();
         #endif
-        if(m_config.threadBalancing){
 
-			bool failed = false;
-			float totalScore = 0;
-			float newRatio;
-            std::map<ComputeThreadID, float> scores;
+        for(const auto& ct : m_threads) {
+            m_config.intraNodeScheduler->onNodeFinished(ct.getId(), ct.getLastCalculatedElements(), ct.getLastRunTime());
 
-            for(const auto& cti : threads){
-                float runTime = cti.getLastRunTime();
-                if(runTime < 0){
-                    log("Error: Skipping ratio correction due to negative time");
-					failed = true;
-					break;
-				}
-
-                if(runTime < m_config.minMsForRatioAdjustment){
-					#ifdef DBG_RATIO
-                        log("Skipping ratio correction due to fast execution");
-					#endif
-
-					failed = true;
-					break;
-				}
-
-                if(m_config.benchmark){
-                    log("Thread %d time: %f ms", cti.getId(), runTime);
-				}
-
-                scores[cti.getId()] = cti.getLastCalculatedElements() / runTime;
-                totalScore += scores[cti.getId()];
-			}
-
-			if(!failed){
-				// Adjust the ratio for each thread
-				numOfRatioAdjustments++;
-                for(auto& ct : threads){
-                    newRatio = scores[ct.getId()] / totalScore;
-                    ratioSums[ct.getId()] += newRatio;
-
-                    if(m_config.threadBalancingAverage){
-                        ratios[ct.getId()] = ratioSums[ct.getId()] / numOfRatioAdjustments;
-					}else{
-                        ratios[ct.getId()] = newRatio;
-					}
-
-					#ifdef DBG_RATIO
-                        log("Adjusting thread %d ratio to %f (elements = %lu, time = %f ms, score = %f)",
-                                ct.getId(), ratios[ct.getId()], ct.getLastCalculatedElements(),
-                                ct.getLastRunTime(), ct.getLastCalculatedElements()/ct.getLastRunTime());
-					#endif
-				}
+            if(m_config.benchmark){
+                log("Thread %d time: %f ms", ct.getId(), ct.getLastRunTime());
             }
-		}
+        }
+
         #ifdef DBG_TIME
             sw.stop();
             time_scores = sw.getMsec();
@@ -362,35 +246,39 @@ void CoordinatorThread::run(std::vector<ComputeThread>& threads){
 
 unsigned long CoordinatorThread::calculateMaxBatchSize(const DesConfig& config)
 {
-    unsigned long maxBatchSize;
+    unsigned long totalElements = 1;
+    for(const auto& limit : config.limits) {
+        totalElements *= limit.N;
+    }
     if(config.output.overrideMemoryRestrictions){
-        maxBatchSize = config.batchSize;
-    }else{
-        if(config.processingType == PROCESSING_TYPE_CPU)
-            maxBatchSize = getMaxCPUBytes();
-        else if(config.processingType == PROCESSING_TYPE_GPU)
-            maxBatchSize = getMaxGPUBytes();
-        else
-            maxBatchSize = std::min(getMaxCPUBytes(), getMaxGPUBytes());
+        return totalElements;
+    }
 
-        // maxBatchSize contains the value in bytes, so divide it according to resultSaveType to convert it to actual batch size
-        if(config.resultSaveType == SAVE_TYPE_ALL)
-            maxBatchSize /= sizeof(RESULT_TYPE);
-        else
-            maxBatchSize /= config.model.D * sizeof(DATA_TYPE);
+    unsigned long maxBatchSize;
+    if(config.processingType == PROCESSING_TYPE_CPU)
+        maxBatchSize = getMaxCPUBytes();
+    else if(config.processingType == PROCESSING_TYPE_GPU)
+        maxBatchSize = getMaxGPUBytes();
+    else
+        maxBatchSize = std::min(getMaxCPUBytes(), getMaxGPUBytes());
 
-        // Limit the batch size by the user-given value
-        maxBatchSize = std::min((unsigned long)config.batchSize, (unsigned long)maxBatchSize);
+    // maxBatchSize contains the value in bytes, so divide it according to resultSaveType to convert it to actual batch size
+    if(config.resultSaveType == SAVE_TYPE_ALL)
+        maxBatchSize /= sizeof(RESULT_TYPE);
+    else
+        maxBatchSize /= config.model.D * sizeof(DATA_TYPE);
 
-        // If we are saving a list, the max number of elements we might want to send is maxBatchSize * D, so limit the batch size
-        // so that the max number of elements is INT_MAX
-        if(config.resultSaveType == SAVE_TYPE_LIST && (unsigned long) (maxBatchSize*config.model.D) > (unsigned long) INT_MAX){
-            maxBatchSize = (INT_MAX - config.model.D) / config.model.D;
-        }
-        // If we are saving all of the results, the max number of elements is maxBatchSize itself, so limit it to INT_MAX
-        else if(config.resultSaveType == SAVE_TYPE_ALL && (unsigned long) maxBatchSize > (unsigned long) INT_MAX){
-            maxBatchSize = INT_MAX;
-        }
+    // Limit the batch size by the total elements
+    maxBatchSize = std::min((unsigned long) totalElements, (unsigned long)maxBatchSize);
+
+    // If we are saving a list, the max number of elements we might want to send is maxBatchSize * D, so limit the batch size
+    // so that the max number of elements is INT_MAX
+    if(config.resultSaveType == SAVE_TYPE_LIST && (unsigned long) (maxBatchSize*config.model.D) > (unsigned long) INT_MAX){
+        maxBatchSize = (INT_MAX - config.model.D) / config.model.D;
+    }
+    // If we are saving all of the results, the max number of elements is maxBatchSize itself, so limit it to INT_MAX
+    else if(config.resultSaveType == SAVE_TYPE_ALL && (unsigned long) maxBatchSize > (unsigned long) INT_MAX){
+        maxBatchSize = INT_MAX;
     }
 
     return maxBatchSize;

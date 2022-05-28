@@ -22,7 +22,6 @@ enum WorkerThreadType {
     GPU
 };
 
-typedef int ComputeThreadID;
 typedef std::function<AssignedWork(ComputeThreadID)> WorkDispatcher;
 
 class DesFramework;
@@ -42,7 +41,7 @@ public:
 
     ~ComputeThread();
 
-    void dispatch(WorkDispatcher workDispatcher, RESULT_TYPE* results, int* listIndex);
+    void dispatch(WorkDispatcher workDispatcher, RESULT_TYPE* results, size_t indexOffset, int* listIndex);
     RESULT_TYPE* waitForResults();
     std::vector<std::vector<DATA_TYPE>> waitForListResults();
     void wait();
@@ -57,6 +56,13 @@ public:
     const std::string& getName() const { return m_name; }
     size_t getTotalCalculatedElements() const { return m_totalCalculatedElements; }
     size_t getLastCalculatedElements() const { return m_lastCalculatedElements; }
+    WorkerThreadType getType() const { return m_type; }
+    size_t getGpuMaxBatchSize() const {
+        if(m_type != GPU)
+            throw std::runtime_error("GpuMaxBatchSize can only be retrieved for GPU-type compute threads");
+
+        return m_gpuRuntime.maxGpuBatchSize;
+    }
 
 private:
     void initDevices();
@@ -65,7 +71,7 @@ private:
     void doWorkGpu(const AssignedWork& work, RESULT_TYPE* results, int* listIndex);
     void finalize();
 
-    void start(WorkDispatcher workDispatcher, RESULT_TYPE* localResults, int* listIndex);
+    void start(WorkDispatcher workDispatcher, RESULT_TYPE* localResults, size_t indexOffset, int* listIndex);
 
     void log(const char* text, ...);
 

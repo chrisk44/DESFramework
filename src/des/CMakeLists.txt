@@ -37,6 +37,12 @@ add_library(${MODULE_NAME} desf.cpp
                            slaveProcess.cpp
                            messaging.cpp
                            definitions.h
+                           scheduler/scheduler.h
+                           scheduler/constantScheduler.h
+                           scheduler/uniformScheduler.h
+                           scheduler/hrdlsScheduler.h
+                           scheduler/hrslsScheduler.h
+                           types.cpp
                            types.h)
 
 file(GLOB DES_SRC CONFIGURE_DEPENDS "*.cpp")

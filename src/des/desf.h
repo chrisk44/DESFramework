@@ -32,7 +32,6 @@ private:
     int m_saveFile;							// File descriptor for save file
     RESULT_TYPE* m_finalResults;			// An array of N0 * N1 * ... * N(D-1) (this can't be a vector because we may want to map it to a file
     std::vector<std::vector<DATA_TYPE>> m_listResults; // A list of points for which the validation function has returned non-zero value
-    unsigned long m_totalSent;			// Total elements that have been sent for processing, also the index from which the next assigned batch will start
     unsigned long m_totalReceived;		// Total elements that have been calculated and returned
     unsigned long m_totalElements;		// Total elements
 
@@ -106,14 +105,16 @@ public:
 
     static int getNumOfProcesses();
     static int receiveRequest(int& source);
-    static unsigned long receiveMaxBatchSize(int mpiSource);
-    static void sendBatchSize(const AssignedWork& work, int mpiSource);
+    static void sendBatch(const AssignedWork& work, int mpiSource);
 
     static void receiveAllResults(RESULT_TYPE* dst, size_t count, int mpiSource);
     static int receiveListResults(std::vector<DATA_TYPE>& dst, size_t maxCount, unsigned int D,  int mpiSource);
     static void sync();
 
-    static void sendReadyRequest(unsigned long maxBatchSize);
+    static std::map<int, unsigned long> receiveMaxBatchSizes();
+    static void sendMaxBatchSize(size_t maxBatchSize);
+
+    static void sendReadyRequest();
     static AssignedWork receiveWorkFromMaster();
     static void sendResults(RESULT_TYPE* data, size_t count);
     static void sendListResults(DATA_TYPE* data, size_t numOfPoints, unsigned int D);
