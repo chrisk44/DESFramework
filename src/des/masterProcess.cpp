@@ -32,7 +32,7 @@ void DesFramework::masterProcess() {
     while (m_totalReceived < m_totalElements || finished < numOfSlaves) {
         // Receive request from any worker thread
         #ifdef DBG_MPI_STEPS
-            printf("[%d] Master: Waiting for signal...\n", m_rank);
+            log("Waiting for signal...");
         #endif
         fflush(stdout);
 
@@ -42,7 +42,7 @@ void DesFramework::masterProcess() {
         SlaveProcessInfo& pinfo = slaveProcessInfo[mpiSource-1];
 
         #ifdef DBG_MPI_STEPS
-            printf("[%d] Master: Received %d from %d\n", m_rank, request, mpiSource);
+            log("Received tag '%s' from %d", TAG_NAMES.at(request).c_str(), mpiSource);
         #endif
 
         switch(request){
@@ -57,7 +57,7 @@ void DesFramework::masterProcess() {
                 if((int) pinfo.jobsCompleted < m_config.slowStartLimit){
                     pinfo.maxBatchSize = std::min(pinfo.maxBatchSize, (unsigned long) (m_config.slowStartBase * pow(2, pinfo.jobsCompleted)));
                     #ifdef DBG_RATIO
-                        printf("[%d] Master: Setting temporary maxBatchSize=%lu for slave %d\n", m_rank, pinfo.maxBatchSize, mpiSource);
+                        log("Setting temporary maxBatchSize=%lu for slave %d", pinfo.maxBatchSize, mpiSource);
                     #endif
                 }
 
@@ -76,10 +76,10 @@ void DesFramework::masterProcess() {
                 }
 
                 #ifdef DBG_MPI_STEPS
-                    printf("[%d] Master: Sending %lu elements to %d with index %lu\n", m_rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
+                    log("Sending %lu elements to %d with index %lu", pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
                 #endif
                 #ifdef DBG_DATA
-                    printf("[%d] Master: Sending %lu elements to %d with index %lu\n", m_rank, pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
+                    log("Sending %lu elements to %d with index %lu", pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
                 #endif
 
                 // Send the batch to the slave process
@@ -90,7 +90,7 @@ void DesFramework::masterProcess() {
 
                 #ifdef DBG_TIME
                     sw.stop();
-                    printf("[%d] Master: Benchmark: Time for TAG_READY: %f ms\n", m_rank, sw.getMsec());
+                    log("Benchmark: Time for TAG_READY: %f ms", sw.getMsec());
                 #endif
 
                 break;
@@ -104,19 +104,21 @@ void DesFramework::masterProcess() {
                 if(m_config.resultSaveType == SAVE_TYPE_ALL){
                     receiveAllResults(&m_finalResults[pinfo.work.startPoint], pinfo.work.numOfElements, mpiSource);
                     #ifdef DBG_RESULTS
-                        printf("[%d] Master: Received results from %d starting at %lu\n", m_rank, pinfo.id, pinfo.work.startPoint);
+                        log("Received results from %d starting at %lu", pinfo.id, pinfo.work.startPoint);
                     #endif
                     #ifdef DBG_RESULTS_RAW
-                        printf("[%d] Master: Received results from %d starting at %lu: ", m_rank, pinfo.id, pinfo.work.startPoint);
+                        std::string str;
                         for (unsigned long i = 0; i < pinfo.work.numOfElements; i++) {
-                            printf("%.2f ", m_finalResults[pinfo.work.startPoint + i]);
+                            char tmp[64];
+                            sprintf(tmp, "%.2f ", m_finalResults[pinfo.work.startPoint + i]);
+                            str += tmp;
                         }
-                        printf("\n");
+                        log("Received results from %d starting at %lu: %s", m_rank, pinfo.id, pinfo.work.startPoint, str.c_str());
                     #endif
                 }else{
                     auto count = receiveListResults(tmpList, pinfo.work.numOfElements, m_config.model.D, mpiSource);
                     #ifdef DBG_RESULTS_RAW
-                        printf("[%d] Master: Received %d list results from %d: ", m_rank, count, pinfo.id);
+                        log("Received %d list results from %d: ", m_rank, count, pinfo.id);
                     #endif
                     for(int i=0; i<count; i++){
                         std::vector<DATA_TYPE> point;
@@ -125,16 +127,18 @@ void DesFramework::masterProcess() {
                         }
                         m_listResults.push_back(point);
                         #ifdef DBG_RESULTS_RAW
-                            printf("[ ");
-                            for(const auto& v : point) printf("%.2f ", v);
-                            printf("]");
+                            std::string str = "[ ";
+                            for(const auto& v : point){
+                                char tmp[64];
+                                sprintf(tmp, "%.2f ", v);
+                                str += tmp;
+                            }
+                            str += "]";
+                            log("Raw results: %s", str.c_str());
                         #endif
                     }
-                    #ifdef DBG_RESULTS_RAW
-                        printf("\n");
-                    #endif
                     #ifdef DBG_RESULTS
-                        printf("[%d] Master: Received %u elements from %d, new total is %lu\n", m_rank, count, pinfo.id, m_listResults.size());
+                        log("Received %u elements from %d, new total is %lu", count, pinfo.id, m_listResults.size());
                     #endif
                 }
 
@@ -145,20 +149,24 @@ void DesFramework::masterProcess() {
                 int eta = t * ((float)m_totalElements/m_totalReceived) - t;
 
                 if(m_config.printProgress){
-                    printf("Progress: %lu/%lu, %.2f %%", this->m_totalReceived, this->m_totalElements, ((float)this->m_totalReceived / this->m_totalElements)*100);
+                    char elapsedTimeStr[1024];
+                    char etaStr[1024];
 
-                    if(t < 3600)	printf(", Elapsed time: %02d:%02d", t/60, t%60);
-                    else			printf(", Elapsed time: %02d:%02d:%02d", t/3600, (t%3600)/60, t%60);
+                    if(t < 3600)	sprintf(elapsedTimeStr, "%02d:%02d", t/60, t%60);
+                    else			sprintf(elapsedTimeStr, "%02d:%02d:%02d", t/3600, (t%3600)/60, t%60);
 
-                    if(eta < 3600)	printf(", ETA: %02d:%02d\n", eta/60, eta%60);
-                    else			printf(", ETA: %02d:%02d:%02d\n", eta/3600, (eta%3600)/60, eta%60);
+                    if(eta < 3600)	sprintf(etaStr, "%02d:%02d\n", eta/60, eta%60);
+                    else			sprintf(etaStr, "%02d:%02d:%02d\n", eta/3600, (eta%3600)/60, eta%60);
+
+                    log("Progress: %lu/%lu, %.2f %%, Elapsed time: %s, ETA: %s", m_totalReceived, m_totalElements, ((float) m_totalReceived / m_totalElements)*100, elapsedTimeStr, etaStr);
+
                 }
 
                 #ifdef DBG_MPI_STEPS
                     if(m_config.resultSaveType == SAVE_TYPE_ALL)
-                        printf("[%d] Master: Received results from slave %d\n", m_rank, mpiSource);
+                        log("Received results from slave %d", mpiSource);
                     else
-                        printf("[%d] Master: Received list results from slave %d\n", m_rank, mpiSource);
+                        log("Received list results from slave %d", mpiSource);
                 #endif
 
                 // Update pinfo
@@ -170,7 +178,7 @@ void DesFramework::masterProcess() {
 
                 // Print benchmark results
                 if (m_config.benchmark && m_config.printProgress) {
-                    printf("[%d] Master: Slave %d benchmark: %lu elements, %f ms\n\n", m_rank, mpiSource, pinfo.work.numOfElements, pinfo.stopwatch.getMsec());
+                    log("Slave %d benchmark: %lu elements, %f ms", mpiSource, pinfo.work.numOfElements, pinfo.stopwatch.getMsec());
                 }
 
                 if(m_config.slaveBalancing && numOfSlaves > 1){
@@ -191,12 +199,12 @@ void DesFramework::masterProcess() {
                         for(int i=0; i<numOfSlaves; i++){
                             slaveProcessInfo[i].ratio = slaveProcessInfo[i].lastScore / totalScore;
                             #ifdef DBG_RATIO
-                                printf("[%d] Master: Adjusting slave %d ratio = %f\n", m_rank, slaveProcessInfo[i].id, slaveProcessInfo[i].ratio);
+                                log("Adjusting slave %d ratio = %f", slaveProcessInfo[i].id, slaveProcessInfo[i].ratio);
                             #endif
                         }
                     }else{
                         #ifdef DBG_RATIO
-                            printf("[%d] Master: Skipping ratio adjustment\n", m_rank);
+                            log("Skipping ratio adjustment");
                         #endif
                     }
                 }
@@ -206,7 +214,7 @@ void DesFramework::masterProcess() {
 
                 #ifdef DBG_TIME
                     sw.stop();
-                    printf("[%d] Master: Benchmark: Time for TAG_RESULTS: %f ms\n", m_rank, sw.getMsec());
+                    log("Benchmark: Time for TAG_RESULTS: %f ms", sw.getMsec());
                 #endif
 
                 break;
@@ -214,11 +222,11 @@ void DesFramework::masterProcess() {
 
             case TAG_EXITING:
                 #ifdef DBG_MPI_STEPS
-                    printf("[%d] Master: Slave %d exiting\n", m_rank, mpiSource);
+                    log("Slave %d exiting", mpiSource);
                 #endif
 
                 if(pinfo.work.numOfElements != 0){
-                    printf("[%d] Master: Error: Slave %d exited with %lu assigned elements!!\n", m_rank, mpiSource, pinfo.work.numOfElements);
+                    log("Error: Slave %d exited with %lu assigned elements!!", mpiSource, pinfo.work.numOfElements);
                 }
 
                 pinfo.work.startPoint = m_totalElements;
@@ -230,14 +238,6 @@ void DesFramework::masterProcess() {
         }
     }
 
-    // Synchronize with the rest of the processes
-    #ifdef DBG_START_STOP
-        printf("[%d] Waiting in barrier...\n", m_rank);
-    #endif
-    syncWithSlaves();
-    #ifdef DBG_START_STOP
-        printf("[%d] Passed the barrier...\n", m_rank);
-    #endif
 }
 
 }

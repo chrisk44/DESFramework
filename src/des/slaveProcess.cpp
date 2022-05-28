@@ -19,9 +19,9 @@ void DesFramework::slaveProcess() {
         cudaGetDeviceCount(&numOfGpus);
         if(numOfGpus == 0){
             if(useCpu){
-                printf("[%d] SlaveProcess: Warning: cudaGetDeviceCount returned 0. Will use only CPU(s).\n", m_rank);
+                log("Warning: cudaGetDeviceCount returned 0. Will use only CPU(s).");
             } else {
-                printf("[%d] SlaveProcess: Error: cudaGetDeviceCount returned 0. Exiting.", m_rank);
+                log("Error: cudaGetDeviceCount returned 0. Exiting.");
                 return;
             }
         }
@@ -32,7 +32,7 @@ void DesFramework::slaveProcess() {
     for(int i=0; i<numOfGpus; i++) computeThreads.emplace_back(i,  "GPU" + std::to_string(i), WorkerThreadType::GPU, getConfig(), getIndexSteps());
 
     #ifdef DBG_START_STOP
-        printf("[%d] SlaveProcess: Created %lu compute threads...\n", m_rank, computeThreads.size());
+        log("Created %lu compute threads", computeThreads.size());
     #endif
 
     CoordinatorThread coordinatorThread(getConfig());
@@ -41,15 +41,6 @@ void DesFramework::slaveProcess() {
     // Notify master about exiting
     sendExitSignal();
 
-    // Synchronize with the rest of the processes
-    #ifdef DBG_START_STOP
-        printf("[%d] Syncing with other slave processes...\n", m_rank);
-    #endif
-    syncWithSlaves();
-    #ifdef DBG_START_STOP
-        printf("[%d] Synced with other slave processes...\n", m_rank);
-    #endif
-
     masterStopwatch.stop();
 //    float masterTime = masterStopwatch.getMsec();
     for(auto& cti : computeThreads){
@@ -57,7 +48,7 @@ void DesFramework::slaveProcess() {
 //            float resourceTime = cti.masterStopwatch.getMsec();
 //            float finishIdleTime = masterTime - resourceTime;
 //            cti.idleTime += finishIdleTime;
-            printf("[%d] Resource %d utilization: %.02f%%, total idle time: %.02f%% (%.02fms) (%s)\n", m_rank,
+            log("Resource %d utilization: %.02f%%, total idle time: %.02f%% (%.02fms) (%s)",
                     cti.getId(),                                // cti.id,
                     cti.getUtilization(),                       // cti.averageUtilization,
                     cti.getIdleTime() / cti.getTotalTime(),     // (cti.idleTime / masterTime) * 100,

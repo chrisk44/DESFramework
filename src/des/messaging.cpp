@@ -82,7 +82,7 @@ int DesFramework::receiveListResults(std::vector<DATA_TYPE>& dst, size_t maxCoun
     return count;
 }
 
-void DesFramework::syncWithSlaves() {
+void DesFramework::sync() {
     // MPI_Barrier(MPI_COMM_WORLD);
     int a = 0;
     MPI_Bcast(&a, 1, MPI_INT, 0, MPI_COMM_WORLD);

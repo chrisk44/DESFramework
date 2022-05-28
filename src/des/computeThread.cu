@@ -75,14 +75,14 @@ float ComputeThread::getUtilization() const {
 }
 
 void ComputeThread::log(const char *text, ...) {
-    static thread_local char buf[65536];
+    static thread_local char buf[LOG_BUFFER_SIZE];
 
     va_list args;
     va_start(args, text);
     vsnprintf(buf, sizeof(buf), text, args);
     va_end(args);
 
-    printf("[%d] Compute thread %d: %s", m_rank, getId(), buf);
+    printf("[%d]       Compute thread %d: %s\n", m_rank, getId(), buf);
 }
 
 void ComputeThread::initDevices() {
@@ -97,10 +97,10 @@ void ComputeThread::initDevices() {
             if(result == NVML_SUCCESS){
                 m_nvml.available = true;
             }else{
-                log("[E] Failed to get device handle for gpu %d: %s\n", m_id, nvmlErrorString(result));
+                log("[E] Failed to get device handle for gpu %d: %s", m_id, nvmlErrorString(result));
             }
         } else {
-            log("[E] Failed to initialize NVML: %s\n", nvmlErrorString(result));
+            log("[E] Failed to initialize NVML: %s", nvmlErrorString(result));
             m_nvml.available = false;
         }
 
@@ -120,7 +120,7 @@ void ComputeThread::initDevices() {
             }
 
             if (result != NVML_SUCCESS && result != NVML_ERROR_NOT_FOUND) {
-                log("[E] Failed to get initial utilization samples for device: %s\n", nvmlErrorString(result));
+                log("[E] Failed to get initial utilization samples for device: %s", nvmlErrorString(result));
                 m_nvml.available = false;
             }
         }
@@ -155,10 +155,10 @@ void ComputeThread::initDevices() {
 
         #ifdef DBG_START_STOP
             if(m_config.printProgress){
-                log("useSharedMemoryForData = %d\n", m_gpuRuntime.useSharedMemoryForData);
-                log("useConstantMemoryForData = %d\n", m_gpuRuntime.useConstantMemoryForData);
-                log("availableSharedMemory = %d bytes\n", m_gpuRuntime.availableSharedMemory);
-                log("maxSharedPoints = %d\n", m_gpuRuntime.maxSharedPoints);
+                log("useSharedMemoryForData = %d", m_gpuRuntime.useSharedMemoryForData);
+                log("useConstantMemoryForData = %d", m_gpuRuntime.useConstantMemoryForData);
+                log("availableSharedMemory = %d bytes", m_gpuRuntime.availableSharedMemory);
+                log("maxSharedPoints = %d", m_gpuRuntime.maxSharedPoints);
             }
         #endif
 
@@ -178,15 +178,15 @@ void ComputeThread::initDevices() {
         }
 
         #ifdef DBG_MEMORY
-            log("deviceResults: %p\n", (void*) m_gpuRuntime.deviceResults);
-            log("deviceListIndexPtr: %p\n", (void*) m_gpuRuntime.deviceListIndexPtr);
-            log("deviceDataPtr: %p\n", (void*) m_gpuRuntime.deviceDataPtr);
+            log("deviceResults: %p", (void*) m_gpuRuntime.deviceResults);
+            log("deviceListIndexPtr: %p", (void*) m_gpuRuntime.deviceListIndexPtr);
+            log("deviceDataPtr: %p", (void*) m_gpuRuntime.deviceDataPtr);
         #endif
 
         // Copy limits, idxSteps, and constant data to device
         #ifdef DBG_MEMORY
-            log("Copying limits at constant memory with offset %d\n", 0);
-            log("Copying idxSteps at constant memory with offset %lu\n", m_config.model.D * sizeof(Limit));
+            log("Copying limits at constant memory with offset %d", 0);
+            log("Copying idxSteps at constant memory with offset %lu", m_config.model.D * sizeof(Limit));
         #endif
         cudaMemcpyToSymbolWrapper(
             m_config.limits.data(), m_config.model.D * sizeof(Limit), 0);
@@ -202,7 +202,7 @@ void ComputeThread::initDevices() {
             // If we can use constant memory, copy it there
             if(m_gpuRuntime.useConstantMemoryForData){
                 #ifdef DBG_MEMORY
-                    log("Copying data at constant memory with offset %lu\n", m_config.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
+                    log("Copying data at constant memory with offset %lu", m_config.model.D * (sizeof(Limit) + sizeof(unsigned long long)));
                 #endif
                 cudaMemcpyToSymbolWrapper(
                     m_config.model.dataPtr, m_config.model.dataSize,
@@ -290,7 +290,7 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, RESULT_TYPE* results, in
         int numOfBlocks = (gpuThreads + blockSize - 1) / blockSize;
 
         #ifdef DBG_QUEUE
-            log("Queueing %lu elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%lu\n", elementsPerStream, i, gpuThreads, numOfBlocks, blockSize, skip);
+            log("Queueing %lu elements in stream %d (%d gpuThreads, %d blocks, %d block size), with skip=%lu", elementsPerStream, i, gpuThreads, numOfBlocks, blockSize, skip);
         #endif
 
         // Note: Point at the start of deviceResults, because the offset (because of computeBatchSize) is calculated in the kernel
@@ -347,7 +347,7 @@ void ComputeThread::start(WorkDispatcher workDispatcher, RESULT_TYPE* localResul
     #endif
 
     #ifdef DBG_START_STOP
-        log("Woke up\n");
+        log("Woke up");
     #endif
 
     size_t numOfCalculatedElements = 0;
@@ -373,11 +373,11 @@ void ComputeThread::start(WorkDispatcher workDispatcher, RESULT_TYPE* localResul
         #endif
 
         #ifdef DBG_DATA
-            log("Got %lu elements starting from %lu\n", work.numOfElements, work.startPoint);
+            log("Got %lu elements starting from %lu", work.numOfElements, work.startPoint);
             fflush(stdout);
         #else
             #ifdef DBG_START_STOP
-                log("Running for %lu elements...\n", work.numOfElements);
+                log("Running for %lu elements...", work.numOfElements);
                 fflush(stdout);
             #endif
         #endif
@@ -412,16 +412,17 @@ void ComputeThread::start(WorkDispatcher workDispatcher, RESULT_TYPE* localResul
 
         #ifdef DBG_RESULTS_RAW
             if(m_config.resultSaveType == SAVE_TYPE_ALL){
-                log("Results are: ");
+                std::string str;
                 for (unsigned long i = 0; i < work.numOfElements; i++) {
-                    printf("%f ", ((DATA_TYPE *)localResults)[i]);
+                    char tmp[64];
+                    sprintf(tmp, "%f ", ((DATA_TYPE *)localResults)[i]);
                 }
-                printf("\n");
+                log("Results are: %s", str.c_str());
             }
         #endif
 
         #ifdef DBG_START_STOP
-            log("Finished calculation\n");
+            log("Finished calculation");
         #endif
     }
 
@@ -446,7 +447,7 @@ void ComputeThread::start(WorkDispatcher workDispatcher, RESULT_TYPE* localResul
             unsigned int tmpSamples;
             nvmlReturn_t result = nvmlDeviceGetSamples(m_nvml.gpuHandle, NVML_GPU_UTILIZATION_SAMPLES, m_nvml.lastSeenTimeStamp, &sampleValType, &tmpSamples, NULL);
             if (result != NVML_SUCCESS && result != NVML_ERROR_NOT_FOUND) {
-                log("[E1] Failed to get utilization samples for device: %s\n", nvmlErrorString(result));
+                log("[E1] Failed to get utilization samples for device: %s", nvmlErrorString(result));
             }else if(result == NVML_SUCCESS){
 
                 // Make sure we have enough allocated memory for the new samples
@@ -461,21 +462,21 @@ void ComputeThread::start(WorkDispatcher workDispatcher, RESULT_TYPE* localResul
                         m_nvml.totalUtilization += m_nvml.samples[i].sampleValue.uiVal;
                     }
                 }else if(result != NVML_ERROR_NOT_FOUND){
-                    log("[E2] Failed to get utilization samples for device: %s\n", nvmlErrorString(result));
+                    log("[E2] Failed to get utilization samples for device: %s", nvmlErrorString(result));
                 }
             }
         }
         }
 
     #ifdef DBG_TIME
-        log("Benchmark:\n");
-        log("Time for assignments: %f ms\n", time_assign);
-        log("Time for allocations: %f ms\n", time_allocation);
-        log("Time for calcs: %f ms\n", time_calc);
+        log("Benchmark:");
+        log("Time for assignments: %f ms", time_assign);
+        log("Time for allocations: %f ms", time_allocation);
+        log("Time for calcs: %f ms", time_calc);
     #endif
 
     #ifdef DBG_START_STOP
-        log("Finished job\n");
+        log("Finished job");
     #endif
 }
 
@@ -495,7 +496,7 @@ void ComputeThread::finalize() {
         if(m_nvml.initialized){
             nvmlReturn_t result = nvmlShutdown();
             if (result != NVML_SUCCESS)
-                log("[E] Failed to shutdown NVML: %s\n", nvmlErrorString(result));
+                log("[E] Failed to shutdown NVML: %s", nvmlErrorString(result));
         }
     }
 }

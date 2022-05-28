@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <string>
 
 #define cce() {                                          \
@@ -19,6 +20,10 @@
 // Memory parameters
 #ifndef MEM_GPU_SPARE_BYTES
     #define MEM_GPU_SPARE_BYTES 100*1024*1024
+#endif
+
+#ifndef LOG_BUFFER_SIZE
+    #define LOG_BUFFER_SIZE 65536
 #endif
 
 #ifndef RESULT_TYPE
@@ -51,3 +56,13 @@
 #define TAG_EXITING 5
 #define TAG_RESULTS_DATA 6
 #define TAG_RESULTS_COUNT 7
+
+static const std::map<int, std::string> TAG_NAMES {
+    { 1, "Ready" },
+    { 2, "Data" },
+    { 3, "Results" },
+    { 4, "Max data count" },
+    { 5, "Exiting" },
+    { 6, "Results (data)" },
+    { 7, "Results (count)" },
+};

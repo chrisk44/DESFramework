@@ -111,7 +111,7 @@ public:
 
     static void receiveAllResults(RESULT_TYPE* dst, size_t count, int mpiSource);
     static int receiveListResults(std::vector<DATA_TYPE>& dst, size_t maxCount, unsigned int D,  int mpiSource);
-    static void syncWithSlaves();
+    static void sync();
 
     static void sendReadyRequest(unsigned long maxBatchSize);
     static AssignedWork receiveWorkFromMaster();
@@ -124,6 +124,8 @@ private:
     void getPointFromIndex(unsigned long index, DATA_TYPE* result) const;
 
     void slaveProcess();
+
+    void log(const char* text, ...);
 };
 
 }

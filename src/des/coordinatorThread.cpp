@@ -19,14 +19,14 @@ CoordinatorThread::~CoordinatorThread()
 {}
 
 void CoordinatorThread::log(const char *text, ...) {
-    static thread_local char buf[65536];
+    static thread_local char buf[LOG_BUFFER_SIZE];
 
     va_list args;
     va_start(args, text);
     vsnprintf(buf, sizeof(buf), text, args);
     va_end(args);
 
-    printf("[%d] Coordinator: %s\n", m_rank, buf);
+    printf("[%d]     Coordinator: %s\n", m_rank, buf);
 }
 
 AssignedWork CoordinatorThread::getWork(ComputeThreadID threadID)
@@ -76,9 +76,9 @@ void CoordinatorThread::run(std::vector<ComputeThread>& threads){
 		float time_data, time_assign, time_start, time_wait, time_scores, time_results;
     #endif
 
-	#ifdef DBG_START_STOP
+    #ifdef DBG_DATA
         log("Max batch size: %lu", m_maxBatchSize);
-	#endif
+    #endif
 
 	while(true){
 		// Send READY signal to master

@@ -3,6 +3,7 @@
 #include <sys/mman.h>
 #include <errno.h>
 #include <mpi.h>
+#include <stdarg.h>
 
 #include "desf.h"
 
@@ -74,14 +75,14 @@ DesFramework::DesFramework(const DesConfig& config)
 
     #ifdef DBG_DATA
         for(unsigned int i=0; i < m_config.model.D; i++){
-            printf("Dimension %u: Low=%lf, High=%lf, Step=%lf, N=%u, m_idxSteps=%llu\n", i, m_config.limits[i].lowerLimit, m_config.limits[i].upperLimit, m_config.limits[i].step, m_config.limits[i].N, m_idxSteps[i]);
+            log("Dimension %u: Low=%lf, High=%lf, Step=%lf, N=%u, m_idxSteps=%llu", i, m_config.limits[i].lowerLimit, m_config.limits[i].upperLimit, m_config.limits[i].step, m_config.limits[i].N, m_idxSteps[i]);
         }
     #endif
 
     #ifdef DBG_MEMORY
-        printf("CPU  : Forward model is @ %p, objective is @ %p\n", m_config.cpu.forwardModel, m_config.cpu.objective);
+        log("CPU  : Forward model is @ %p, objective is @ %p", m_config.cpu.forwardModel, m_config.cpu.objective);
         for(const auto& pair : m_config.gpu)
-            printf("GPU %d: Forward model is @ %p, objective is @ %p\n", pair.first, pair.second.forwardModel, pair.second.objective);
+            log("GPU %d: Forward model is @ %p, objective is @ %p", pair.first, pair.second.forwardModel, pair.second.objective);
     #endif
 
     m_totalReceived = 0;
@@ -113,7 +114,7 @@ DesFramework::DesFramework(const DesConfig& config)
 					}
 
 					#ifdef DBG_MEMORY
-                        printf("[Init] finalResults: %p\n", m_finalResults);
+                        log("finalResults: %p", m_finalResults);
 					#endif
 				}
             }// else listResults will be dynamically allocated when needed
@@ -139,33 +140,41 @@ DesFramework::~DesFramework() {
 }
 
 void DesFramework::run() {
+    if(m_config.printProgress) log("Starting");
     if(m_rank == 0){
-        if(m_config.printProgress) printf("[%d] Master process starting\n", m_rank);
         masterProcess();
-        if(m_config.printProgress) printf("[%d] Master process finished\n", m_rank);
     }else{
-        if(m_config.printProgress) printf("[%d] Slave process starting\n", m_rank);
         slaveProcess();
-        if(m_config.printProgress) printf("[%d] Slave process finished\n", m_rank);
     }
+
+    // Synchronize all processes
+    #ifdef DBG_START_STOP
+        log("Waiting in barrier...");
+    #endif
+    sync();
+    #ifdef DBG_START_STOP
+        log("Passed the barrier");
+    #endif
+
+    if(m_config.printProgress) log("Finished");
 }
 
 const RESULT_TYPE* DesFramework::getResults() const {
     if(m_rank != 0)
-        throw std::runtime_error("Error: Results can only be fetched by the master process. Are you the master process?\n");
+        throw std::runtime_error("Error: Results can only be fetched by the master process. Are you the master process?");
 
     if(m_config.resultSaveType != SAVE_TYPE_ALL)
-        throw std::runtime_error("Error: Can't get all results when resultSaveType is not SAVE_TYPE_ALL\n");
+        throw std::runtime_error("Error: Can't get all results when resultSaveType is not SAVE_TYPE_ALL");
 
     return m_finalResults;
 }
 
 const std::vector<std::vector<DATA_TYPE>>& DesFramework::getList() const {
     if(m_rank != 0)
-        throw std::runtime_error("Error: Results can only be fetched by the master process. Are you the master process?\n");
+        throw std::runtime_error("Error: Results can only be fetched by the master process. Are you the master process?");
 
     if(m_config.resultSaveType != SAVE_TYPE_LIST)
-        throw std::runtime_error("Error: Can't get list results when resultSaveType is not SAVE_TYPE_LIST\n");
+        throw std::runtime_error("Error: Can't get list results when resultSaveType is not SAVE_TYPE_LIST");
 
     return m_listResults;
 }
@@ -175,7 +184,7 @@ void DesFramework::getIndicesFromPoint(DATA_TYPE* point, unsigned long* dst) con
 
     for (i = 0; i < m_config.model.D; i++) {
         if (point[i] < m_config.limits[i].lowerLimit || point[i] >= m_config.limits[i].upperLimit)
-            throw std::invalid_argument("Result query for out-of-bounds point\n");
+            throw std::invalid_argument("Result query for out-of-bounds point");
 
 		// Calculate the steps for dimension i
         dst[i] = (int) round(abs(m_config.limits[i].lowerLimit - point[i]) / m_config.limits[i].step);		// TODO: 1.9999997 will round to 2, verify correctness
@@ -215,6 +224,18 @@ void DesFramework::getPointFromIndex(unsigned long index, DATA_TYPE* result) con
 
 int DesFramework::getRank() const {
     return m_rank;
+}
+
+void DesFramework::log(const char *text, ...) {
+    static thread_local char buf[LOG_BUFFER_SIZE];
+
+    va_list args;
+    va_start(args, text);
+    vsnprintf(buf, sizeof(buf), text, args);
+    va_end(args);
+
+    std::string label = m_rank == 0 ? "Master" : "  Slave";
+    printf("[%d] %s: %s\n", m_rank, label.c_str(), buf);
 }
 
 }
