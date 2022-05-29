@@ -12,7 +12,6 @@ void cpu_kernel(desf::validationFunc_t validationFunc, desf::toBool_t toBool,
     unsigned long currentBatchStart = startingPointLinearIndex;
     unsigned long globalLast = startingPointLinearIndex + numOfElements - 1;
 
-    omp_set_nested(1);		// We are already in a parallel region since slaveProcess()
     #pragma omp parallel shared(currentBatchStart)
     {
         DATA_TYPE point[D];

@@ -13,7 +13,6 @@ add_executable(${PROJECT_NAME} main.cu)
 
 target_link_libraries(${PROJECT_NAME} DES Mogi Okada)
 
-target_link_libraries(${PROJECT_NAME} OpenMP::OpenMP_CXX)
 target_link_libraries(${PROJECT_NAME} ${MPI_LIBRARIES})
 target_link_libraries(${PROJECT_NAME} ${CUDA_LIBRARIES})
 target_link_libraries(${PROJECT_NAME} nvidia-ml)

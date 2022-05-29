@@ -19,10 +19,10 @@ target_compile_options(GpuKernel PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
 
 add_library(CpuKernel cpuKernel.h cpuKernel.cpp)
 target_link_libraries(CpuKernel OpenMP::OpenMP_CXX)
+target_compile_options(CpuKernel PRIVATE "${OpenMP_CXX_FLAGS}")
 
 add_library(ComputeThread computeThread.h computeThread.cu)
 target_link_libraries(ComputeThread Stopwatch)
-target_link_libraries(ComputeThread OpenMP::OpenMP_CXX)
 target_link_libraries(ComputeThread ${CUDA_LIBRARIES})
 target_link_libraries(ComputeThread nvidia-ml)
 
