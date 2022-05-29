@@ -30,6 +30,9 @@ unsigned long getMaxGPUBytesForGpu(int id){
     cudaSetDevice(id);
     cudaMemGetInfo(&freeMem, &totalMem);
 
+    if(freeMem <= MEM_GPU_SPARE_BYTES)
+        return 0;
+
     return (unsigned long) (freeMem - MEM_GPU_SPARE_BYTES);
 }
 
