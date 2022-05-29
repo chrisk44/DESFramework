@@ -3,8 +3,11 @@
 #include "cpuKernel.h"
 
 // CPU kernel to run the computation
-void cpu_kernel(desf::validationFunc_t validationFunc, desf::toBool_t toBool, void* results, const desf::Limit* limits, unsigned int D, unsigned long numOfElements, void* dataPtr, int* listIndexPtr,
-    const unsigned long long* idxSteps, unsigned long startingPointLinearIndex, bool dynamicScheduling, int batchSize) {
+void cpu_kernel(desf::validationFunc_t validationFunc, desf::toBool_t toBool,
+                unsigned int D, const desf::Limit* limits, const unsigned long long* idxSteps,
+                unsigned long startingPointLinearIndex, unsigned long numOfElements,
+                RESULT_TYPE* allResults, std::function<void(size_t)> addListResult,
+                void* dataPtr, bool dynamicScheduling, int batchSize) {
 
     unsigned long currentBatchStart = startingPointLinearIndex;
     unsigned long globalLast = startingPointLinearIndex + numOfElements - 1;
@@ -57,17 +60,16 @@ void cpu_kernel(desf::validationFunc_t validationFunc, desf::toBool_t toBool, vo
             processed = 0;
             while(processed < localNumOfElements){
                 // Evaluate point
-                if(listIndexPtr == nullptr){
+                if(allResults != nullptr){
                     // We are running as SAVE_TYPE_ALL
                     // Run the validation function and save the result to the global memory
-                    ((RESULT_TYPE*) results)[start + processed] = validationFunc(point, dataPtr);
+                    allResults[start + processed] = validationFunc(point, dataPtr);
                 }else{
                     // We are running as SAVE_TYPE_LIST
                     // Run the validation function and pass its result to toBool
                     if(toBool(validationFunc(point, dataPtr))){
                         // Append element to the list
-                        carry = __sync_fetch_and_add(listIndexPtr, 1);
-                        ((size_t *)results)[carry] = start + processed;
+                        addListResult(start + processed);
                     }
                 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <assert.h>
 #include <functional>
 #include <string>
 #include <semaphore.h>
@@ -24,6 +25,73 @@ enum WorkerThreadType {
 
 typedef std::function<AssignedWork(ComputeThreadID)> WorkDispatcher;
 
+class ComputeEnvironment {
+public:
+    ComputeEnvironment() {}
+
+    void setup(WorkDispatcher dispatcher, size_t numOfResults, size_t indexOffset) {
+        m_saveType = ResultSaveType::SAVE_TYPE_ALL;
+        m_allResults = std::vector<RESULT_TYPE>(numOfResults);
+        m_allResultsIndexOffset = indexOffset;
+        m_dispatcher = dispatcher;
+    }
+
+    void setup(WorkDispatcher dispatcher) {  // This is unsafe but it is supposed to be used only when no threads are running
+        m_saveType = ResultSaveType::SAVE_TYPE_LIST;
+        m_dispatcher = dispatcher;
+        m_listResults.clear();
+    }
+
+    inline void setResult(size_t index, RESULT_TYPE result) {
+        assert(m_saveType == ResultSaveType::SAVE_TYPE_ALL);
+        *getAddrForIndex(index) = result;
+    }
+
+    inline RESULT_TYPE* getAddrForIndex(size_t index) {
+        assert(m_saveType == ResultSaveType::SAVE_TYPE_ALL);
+        return &m_allResults[index - m_allResultsIndexOffset];
+    }
+
+    inline void addResult(size_t index) {
+        assert(m_saveType == ResultSaveType::SAVE_TYPE_LIST);
+
+        std::lock_guard<decltype(m_listResultsMutex)> lock(m_listResultsMutex);
+        m_listResults.push_back(index);
+    }
+
+    inline size_t* getAddrToAddIndices(size_t numOfElements) {
+        assert(m_saveType == ResultSaveType::SAVE_TYPE_LIST);
+
+        std::lock_guard<decltype(m_listResultsMutex)> lock(m_listResultsMutex);
+        m_listResults.resize(m_listResults.size() + numOfElements);
+        return &m_listResults.data()[m_listResults.size() - numOfElements];
+    }
+
+    inline size_t* getListResults(size_t* count) {  // This is unsafe but it is supposed to be used only when no threads are running
+        if(count) *count = m_listResults.size();
+        return m_listResults.data();
+    }
+
+    inline ResultSaveType getSaveType() {
+        return m_saveType;
+    }
+
+    inline AssignedWork getWork(ComputeThreadID id) {
+        return m_dispatcher(id);
+    }
+
+private:
+    ResultSaveType m_saveType;
+
+    std::vector<RESULT_TYPE> m_allResults;
+    size_t m_allResultsIndexOffset;
+
+    std::vector<size_t> m_listResults;
+    std::mutex m_listResultsMutex;
+
+    WorkDispatcher m_dispatcher;
+};
+
 class DesFramework;
 
 class ComputeThread {
@@ -41,7 +109,7 @@ public:
 
     ~ComputeThread();
 
-    void dispatch(WorkDispatcher workDispatcher, void* results, size_t indexOffset, int* listIndex);
+    void dispatch(ComputeEnvironment& computeEnvironment);
     RESULT_TYPE* waitForResults();
     std::vector<std::vector<size_t>> waitForListResults();
     void wait();
@@ -67,11 +135,11 @@ public:
 private:
     void initDevices();
     void prepareForElements(size_t numOfElements);
-    void doWorkCpu(const AssignedWork& work, void* results, int* listIndex, float* t_calc, float* t_memcpy);
-    void doWorkGpu(const AssignedWork& work, void* results, int* listIndex, float* t_calc, float* t_memcpy);
+    void doWorkCpu(const AssignedWork& work, ComputeEnvironment& env, float* t_calc, float* t_memcpy);
+    void doWorkGpu(const AssignedWork& work, ComputeEnvironment& env, float* t_calc, float* t_memcpy);
     void finalize();
 
-    void start(WorkDispatcher workDispatcher, void* localResults, size_t indexOffset, int* listIndex);
+    void start(ComputeEnvironment& computeEnvironment);
 
     void log(const char* text, ...);
 

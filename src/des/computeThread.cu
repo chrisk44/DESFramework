@@ -44,14 +44,14 @@ ComputeThread::~ComputeThread() {
     finalize();
 }
 
-void ComputeThread::dispatch(WorkDispatcher workDispatcher, void* results, size_t indexOffset, int* listIndex) {
+void ComputeThread::dispatch(ComputeEnvironment& computeEnvironment) {
     if(m_thread.joinable()) throw std::runtime_error("Compute thread is already running or was not joined");
 
     m_idleStopwatch.stop();
     m_lastIdleTime = m_idleStopwatch.getMsec();
     m_idleTime += m_lastIdleTime;
-    m_thread = std::thread([this, workDispatcher, results, indexOffset, listIndex](){
-        start(workDispatcher, results, indexOffset, listIndex);
+    m_thread = std::thread([this, &computeEnvironment](){
+        start(computeEnvironment);
         m_idleStopwatch.start();
     });
 }
@@ -129,6 +129,9 @@ void ComputeThread::initDevices() {
         cudaSetDevice(m_id);
 
         m_gpuRuntime.maxBytes = getMaxGPUBytesForGpu(m_id);
+        if(m_gpuRuntime.maxBytes == 0)
+            throw std::runtime_error("No memory available on GPU " + std::to_string(m_id));
+
         #ifdef DBG_MEMORY
             log("Max memory is %lu bytes", m_gpuRuntime.maxBytes);
         #endif
@@ -262,18 +265,19 @@ void ComputeThread::prepareForElements(size_t numOfElements) {
     }
 }
 
-void ComputeThread::doWorkCpu(const AssignedWork &work, void* results, int* listIndex, float* t_calc, float* t_memcpy) {
+void ComputeThread::doWorkCpu(const AssignedWork &work, ComputeEnvironment& env, float* t_calc, float* t_memcpy) {
     Stopwatch sw;
     sw.start();
     cpu_kernel(m_config.cpu.forwardModel,
                m_config.cpu.objective,
-               results,
-               m_config.limits.data(),
                m_config.model.D,
+               m_config.limits.data(),
+               m_indexSteps.data(),
+               work.startPoint,
                work.numOfElements,
+               env.getSaveType() == SAVE_TYPE_ALL ? env.getAddrForIndex(work.startPoint) : nullptr,
+               [&env](size_t index){ env.addResult(index); },
                m_config.model.dataPtr,
-               listIndex,
-               m_indexSteps.data(), work.startPoint,
                m_config.cpu.dynamicScheduling,
                m_config.cpu.computeBatchSize);
     sw.stop();
@@ -281,7 +285,7 @@ void ComputeThread::doWorkCpu(const AssignedWork &work, void* results, int* list
     if(t_memcpy) *t_memcpy = 0;
 }
 
-void ComputeThread::doWorkGpu(const AssignedWork &work, void* results, int* listIndex, float* t_calc, float* t_memcpy) {
+void ComputeThread::doWorkGpu(const AssignedWork &work, ComputeEnvironment& env, float* t_calc, float* t_memcpy) {
     if(t_memcpy) *t_memcpy = 0;
 
     Stopwatch sw;
@@ -302,6 +306,8 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, void* results, int* list
         elementsPerStream = work.numOfElements;
         onlyOne = true;
     }
+
+    RESULT_TYPE* allResults = env.getSaveType() == SAVE_TYPE_ALL ? env.getAddrForIndex(work.startPoint) : nullptr;
 
     // Queue the chunks to the streams
     for(int i=0; i<m_gpuConfig.streams; i++){
@@ -335,7 +341,7 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, void* results, int* list
 
         // Queue the memcpy in stream[i] only if we are saving as SAVE_TYPE_ALL (otherwise the results will be fetched at the end of the current computation)
         if(m_config.resultSaveType == SAVE_TYPE_ALL){
-            cudaMemcpyAsync(&((RESULT_TYPE*) results)[skip], &((RESULT_TYPE*) m_gpuRuntime.deviceResults)[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, m_gpuRuntime.streams[i]);
+            cudaMemcpyAsync(&allResults[skip], &((RESULT_TYPE*) m_gpuRuntime.deviceResults)[skip], elementsPerStream*sizeof(RESULT_TYPE), cudaMemcpyDeviceToHost, m_gpuRuntime.streams[i]);
         }
 
         // Increase skip
@@ -360,19 +366,22 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, void* results, int* list
 
         int gpuListIndex;
         // Get the current list index from the GPU
-        cudaMemcpy(&gpuListIndex, m_gpuRuntime.deviceListIndexPtr, sizeof(int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&gpuListIndex, m_gpuRuntime.deviceListIndexPtr, sizeof(int), cudaMemcpyDeviceToHost); cce();
 
-        // Increment the global list index counter
-        int globalListIndexOld = __sync_fetch_and_add(listIndex, gpuListIndex);
+        // Get address to save the results to
+        if(gpuListIndex > 0) {
+            size_t* dest = env.getAddrToAddIndices(gpuListIndex);
+
+            // Get the results from the GPU
+            cudaMemcpy(dest, m_gpuRuntime.deviceResults, gpuListIndex * sizeof(size_t), cudaMemcpyDeviceToHost); cce();
+        }
 
         sw.stop();
         if(t_memcpy) *t_memcpy += sw.getMsec();
-        // Get the results from the GPU
-        cudaMemcpy(&((size_t*) results)[globalListIndexOld], m_gpuRuntime.deviceResults, gpuListIndex * sizeof(size_t), cudaMemcpyDeviceToHost);
     }
 }
 
-void ComputeThread::start(WorkDispatcher workDispatcher, void* localResults, size_t indexOffset, int* listIndex)
+void ComputeThread::start(ComputeEnvironment& env)
 {
     Stopwatch activeStopwatch;
     activeStopwatch.start();
@@ -396,7 +405,7 @@ void ComputeThread::start(WorkDispatcher workDispatcher, void* localResults, siz
         Stopwatch syncStopwatch;
         syncStopwatch.start();
 
-        AssignedWork work = workDispatcher(getId());
+        AssignedWork work = env.getWork(getId());
 
         syncStopwatch.stop();
         m_idleTime += syncStopwatch.getMsec();
@@ -430,15 +439,6 @@ void ComputeThread::start(WorkDispatcher workDispatcher, void* localResults, siz
             time_allocation += sw.getMsec();
         #endif
 
-        // Calculate the starting address of the results:
-        // If we are saving a list, then we use the given address and use the listIndex pointer to coordinate
-        void* results = localResults;
-        // If we are saving all of the results, then the address is pointing to the first element of the work
-        //     that has been assigned to the coordinator, so WE need to start writing at
-        //     (work.startPoint - indexOffset)
-        if(m_config.resultSaveType == SAVE_TYPE_ALL) {
-            results = &((RESULT_TYPE*) localResults)[work.startPoint - indexOffset];
-        }
         /*****************************************************************
         ******************** Calculate the results ***********************
         ******************************************************************/
@@ -449,24 +449,34 @@ void ComputeThread::start(WorkDispatcher workDispatcher, void* localResults, siz
             t_memcpy = &time_memcpy;
         #endif
         if (m_type == WorkerThreadType::GPU) {
-            doWorkGpu(work, results, listIndex, t_calc, t_memcpy);
+            doWorkGpu(work, env, t_calc, t_memcpy);
         } else {
-            doWorkCpu(work, results, listIndex, t_calc, t_memcpy);
+            doWorkCpu(work, env, t_calc, t_memcpy);
         }
 
         numOfCalculatedElements += work.numOfElements;
 
         #ifdef DBG_RESULTS_RAW
+            size_t listCount;
+            size_t* listResults = m_config.resultSaveType == SAVE_TYPE_LIST ? env.getListResults(&listCount) : nullptr;
+
             std::string str;
-            for (unsigned long i = 0; i < work.numOfElements; i++) {
-                char tmp[64];
-                if(m_config.resultSaveType == SAVE_TYPE_ALL){
-                    sprintf(tmp, "%f ", ((RESULT_TYPE*) localResults)[i]);
-                } else {
-                    sprintf(tmp, "%lu ", ((size_t*) localResults)[i]);
+            str += "[ ";
+            if(m_config.resultSaveType == SAVE_TYPE_ALL){
+                for(unsigned long i=0; i<work.numOfElements; i++){
+                    char tmp[64];
+                    sprintf(tmp, "%f ", *env.getAddrForIndex(work.startPoint + 1));
+                    str += tmp;
+                }
+            }else{
+                for(unsigned long i=0; i<listCount; i++){
+                    char tmp[64];
+                    sprintf(tmp, "%lu ", listResults[i]);
+                    str += tmp;
                 }
             }
-            log("Results are: %s", str.c_str());
+            str += "]";
+            log("Results: %s", str.c_str());
         #endif
 
         #ifdef DBG_START_STOP

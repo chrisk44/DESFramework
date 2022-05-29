@@ -70,9 +70,10 @@ void CoordinatorThread::run(){
         log("Time to send max batch size: %f ms", sw.getMsec());
     #endif
 
+    ComputeEnvironment env;
 	while(true){
         #ifdef DBG_TIME
-            float time_data, time_alloc, time_start, time_wait, time_scores, time_results;
+            float time_data, time_env, time_start, time_wait, time_scores, time_results;
             std::atomic_long time_assign;   // nanoseconds
             sw.start();
         #endif
@@ -119,43 +120,17 @@ void CoordinatorThread::run(){
 		if(work.numOfElements == 0)
 			break;
 
-		// Make sure we have enough allocated memory for localResults
-        size_t neededBytes;
         if(m_config.resultSaveType == SAVE_TYPE_ALL) {
-            neededBytes = work.numOfElements * sizeof(RESULT_TYPE);
+            env.setup(workDispatcher, work.numOfElements, work.startPoint);
         } else {
-            neededBytes = work.numOfElements * sizeof(DATA_TYPE);
-            if(m_config.output.overrideMemoryRestrictions) {
-                #ifdef DBG_MEMORY
-                    log("Limiting needed memory from %lu bytes to %lu bytes", neededBytes, getMaxCPUBytes());
-                #endif
-                neededBytes = std::min(neededBytes, getMaxCPUBytes());
-            }
+            env.setup(workDispatcher);
         }
-        if(neededBytes > m_results.capacity()){
-            #ifdef DBG_MEMORY
-                log("Allocating more memory for results: %lu -> %lu MB", m_results.size()/(1024*1024), neededBytes/(1024*1024));
-            #endif
-
-            m_results.resize(neededBytes);
-            if(m_results.size() < neededBytes){
-                fatal("Can't allocate memory for results");
-			}
-		}
 
 		#ifdef DBG_TIME
 			sw.stop();
-            time_alloc = sw.getMsec();
+            time_env = sw.getMsec();
 			sw.start();
         #endif
-
-        m_globalFirst      = work.startPoint;
-        m_globalLast       = work.startPoint + work.numOfElements - 1;
-        m_globalBatchStart = work.startPoint;
-
-		#ifdef DBG_DATA
-            log("Got job with globalFirst = %lu, globalLast = %lu", m_globalFirst, m_globalLast);
-		#endif
 
         m_config.intraNodeScheduler->setWork(work);
 
@@ -165,13 +140,10 @@ void CoordinatorThread::run(){
 			sw.start();
 		#endif
 
-		// Reset the global listIndex counter
-        m_listIndex = 0;
-
 		// Start all the worker threads
         for(auto& cti : m_threads){
+            cti.dispatch(env);
             m_config.intraNodeScheduler->onNodeStarted(cti.getId());
-            cti.dispatch(workDispatcher, m_results.data(), work.startPoint, &m_listIndex);
 		}
 
 		#ifdef DBG_TIME
@@ -210,27 +182,32 @@ void CoordinatorThread::run(){
 
         #ifdef DBG_RESULTS
             if(m_config.resultSaveType == SAVE_TYPE_LIST){
-                log("Found %u results", m_listIndex / m_config.model.D);
+                size_t count;
+                env.getListResults(&count);
+                log("Found %u results", count);
             }
         #endif
         #ifdef DBG_RESULTS_RAW
+            size_t listCount;
+            size_t* listResults = m_config.resultSaveType == SAVE_TYPE_LIST ? env.getListResults(&listCount) : nullptr;
+
             std::string str;
             str += "[ ";
-            for(unsigned long i=0; i<work.numOfElements; i++){
-                char tmp[64];
-                if(m_config.resultSaveType == SAVE_TYPE_ALL){
-                    sprintf(tmp, "%f ", ((RESULT_TYPE*) m_results.data())[i]);
-                }else{
-                    sprintf(tmp, "%lu ", ((size_t *) m_results.data())[i]);
+            if(m_config.resultSaveType == SAVE_TYPE_ALL){
+                for(unsigned long i=0; i<work.numOfElements; i++){
+                    char tmp[64];
+                    sprintf(tmp, "%f ", *env.getAddrForIndex(work.startPoint + 1));
+                    str += tmp;
                 }
-                str += tmp;
+            }else{
+                for(unsigned long i=0; i<listCount; i++){
+                    char tmp[64];
+                    sprintf(tmp, "%lu ", listResults[i]);
+                    str += tmp;
+                }
             }
             str += "]";
-            if(m_config.resultSaveType == SAVE_TYPE_ALL){
-                log("Results: %s", str.c_str());
-            } else {
-                log("Results (m_listIndex = %d): %s", m_listIndex, str.c_str());
-            }
+            log("Results: %s", str.c_str());
 		#endif
 
         #ifdef DBG_TIME
@@ -261,9 +238,11 @@ void CoordinatorThread::run(){
 		#endif
 
         if(m_config.resultSaveType == SAVE_TYPE_ALL){
-            DesFramework::sendResults((RESULT_TYPE*) m_results.data(), work.numOfElements);
+            DesFramework::sendResults(env.getAddrForIndex(0), work.numOfElements);
         }else{
-            DesFramework::sendListResults((size_t*) m_results.data(), m_listIndex);
+            size_t count;
+            size_t* addr = env.getListResults(&count);
+            DesFramework::sendListResults(addr, count);
 		}
 
 		#ifdef DBG_TIME
@@ -272,7 +251,7 @@ void CoordinatorThread::run(){
 
             log("Benchmark:");
             log("Time for receiving data: %f ms", time_data);
-            log("Time for allocating memory: %f ms", time_alloc);
+            log("Time to setup environment: %f ms", time_env);
             log("Time for assignments: %f ms", time_assign.load() / 1000.f);
             log("Time for starting compute threads: %f ms", time_start);
             log("Time for all threads to finish: %f ms", time_wait);

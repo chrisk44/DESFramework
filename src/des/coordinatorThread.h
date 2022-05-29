@@ -29,12 +29,6 @@ private:
     unsigned long m_maxBatchSize;
     unsigned long m_maxCpuBatchSize;
 
-    int m_listIndex;
-    unsigned long m_currentBatchStart;
-    std::vector<char> m_results;
-    unsigned long m_globalFirst;
-    unsigned long m_globalLast;
-    std::atomic_size_t m_globalBatchStart;
 };
 
 
