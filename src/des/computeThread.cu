@@ -262,7 +262,9 @@ void ComputeThread::prepareForElements(size_t numOfElements) {
     }
 }
 
-void ComputeThread::doWorkCpu(const AssignedWork &work, void* results, int* listIndex) {
+void ComputeThread::doWorkCpu(const AssignedWork &work, void* results, int* listIndex, float* t_calc, float* t_memcpy) {
+    Stopwatch sw;
+    sw.start();
     cpu_kernel(m_config.cpu.forwardModel,
                m_config.cpu.objective,
                results,
@@ -274,11 +276,23 @@ void ComputeThread::doWorkCpu(const AssignedWork &work, void* results, int* list
                m_indexSteps.data(), work.startPoint,
                m_config.cpu.dynamicScheduling,
                m_config.cpu.computeBatchSize);
+    sw.stop();
+    if(t_calc) *t_calc = sw.getMsec();
+    if(t_memcpy) *t_memcpy = 0;
 }
 
-void ComputeThread::doWorkGpu(const AssignedWork &work, void* results, int* listIndex) {
+void ComputeThread::doWorkGpu(const AssignedWork &work, void* results, int* listIndex, float* t_calc, float* t_memcpy) {
+    if(t_memcpy) *t_memcpy = 0;
+
+    Stopwatch sw;
+
+    sw.start();
     // Initialize the list index counter
     cudaMemset(m_gpuRuntime.deviceListIndexPtr, 0, sizeof(int));
+    sw.stop();
+    if(t_memcpy) *t_memcpy += sw.getMsec();
+
+    sw.start();
 
     // Divide the chunk to smaller chunks to scatter accross streams
     unsigned long elementsPerStream = work.numOfElements / m_gpuConfig.streams;
@@ -337,8 +351,13 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, void* results, int* list
         cce();
     }
 
+    sw.stop();
+    if(t_calc) *t_calc = sw.getMsec();
+
     // If we are saving as SAVE_TYPE_LIST, fetch the results
     if(m_config.resultSaveType == SAVE_TYPE_LIST){
+        sw.start();
+
         int gpuListIndex;
         // Get the current list index from the GPU
         cudaMemcpy(&gpuListIndex, m_gpuRuntime.deviceListIndexPtr, sizeof(int), cudaMemcpyDeviceToHost);
@@ -346,6 +365,8 @@ void ComputeThread::doWorkGpu(const AssignedWork &work, void* results, int* list
         // Increment the global list index counter
         int globalListIndexOld = __sync_fetch_and_add(listIndex, gpuListIndex);
 
+        sw.stop();
+        if(t_memcpy) *t_memcpy += sw.getMsec();
         // Get the results from the GPU
         cudaMemcpy(&((size_t*) results)[globalListIndexOld], m_gpuRuntime.deviceResults, gpuListIndex * sizeof(size_t), cudaMemcpyDeviceToHost);
     }
@@ -358,7 +379,7 @@ void ComputeThread::start(WorkDispatcher workDispatcher, void* localResults, siz
 
     #ifdef DBG_TIME
         Stopwatch sw;
-        float time_assign=0, time_allocation=0, time_calc=0;
+        float time_assign=0, time_allocation=0, time_calc=0, time_memcpy=0;
         sw.start();
     #endif
 
@@ -380,13 +401,13 @@ void ComputeThread::start(WorkDispatcher workDispatcher, void* localResults, siz
         syncStopwatch.stop();
         m_idleTime += syncStopwatch.getMsec();
 
-        if(work.numOfElements == 0)
-            break;
-
         #ifdef DBG_TIME
             sw.stop();
             time_assign += sw.getMsec();
         #endif
+
+        if(work.numOfElements == 0)
+            break;
 
         #ifdef DBG_DATA
             log("Got %lu elements starting from %lu", work.numOfElements, work.startPoint);
@@ -407,7 +428,6 @@ void ComputeThread::start(WorkDispatcher workDispatcher, void* localResults, siz
         #ifdef DBG_TIME
             sw.stop();
             time_allocation += sw.getMsec();
-            sw.start();
         #endif
 
         // Calculate the starting address of the results:
@@ -422,18 +442,19 @@ void ComputeThread::start(WorkDispatcher workDispatcher, void* localResults, siz
         /*****************************************************************
         ******************** Calculate the results ***********************
         ******************************************************************/
+        float *t_calc = nullptr;
+        float *t_memcpy = nullptr;
+        #ifdef DBG_TIME
+            t_calc = &time_calc;
+            t_memcpy = &time_memcpy;
+        #endif
         if (m_type == WorkerThreadType::GPU) {
-            doWorkGpu(work, results, listIndex);
+            doWorkGpu(work, results, listIndex, t_calc, t_memcpy);
         } else {
-            doWorkCpu(work, results, listIndex);
+            doWorkCpu(work, results, listIndex, t_calc, t_memcpy);
         }
 
         numOfCalculatedElements += work.numOfElements;
-
-        #ifdef DBG_TIME
-            sw.stop();
-            time_calc += sw.getMsec();
-        #endif
 
         #ifdef DBG_RESULTS_RAW
             std::string str;
@@ -500,6 +521,7 @@ void ComputeThread::start(WorkDispatcher workDispatcher, void* localResults, siz
         log("Time for assignments: %f ms", time_assign);
         log("Time for allocations: %f ms", time_allocation);
         log("Time for calcs: %f ms", time_calc);
+        log("Time for memcpy: %f ms", time_memcpy);
     #endif
 
     #ifdef DBG_START_STOP

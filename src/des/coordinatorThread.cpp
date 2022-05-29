@@ -14,6 +14,11 @@ CoordinatorThread::CoordinatorThread(const DesConfig& config, std::vector<Comput
       m_maxBatchSize(calculateMaxBatchSize(config)),
       m_maxCpuBatchSize(calculateMaxCpuBatchSize(config))
 {
+    #ifdef DBG_TIME
+        Stopwatch sw;
+        sw.start();
+    #endif
+
     MPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
 
     std::vector<ComputeThreadID> threadIds;
@@ -23,6 +28,11 @@ CoordinatorThread::CoordinatorThread(const DesConfig& config, std::vector<Comput
         maxBatchSizes[thread.getId()] = thread.getType() == CPU ? m_maxCpuBatchSize : thread.getGpuMaxBatchSize();
     }
     m_config.intraNodeScheduler->init(m_config, threadIds, maxBatchSizes);
+
+    #ifdef DBG_TIME
+        sw.stop();
+        log("Time for initialization: %f ms", sw.getMsec());
+    #endif
 }
 
 CoordinatorThread::~CoordinatorThread()
@@ -42,34 +52,51 @@ void CoordinatorThread::log(const char *text, ...) {
 }
 
 void CoordinatorThread::run(){
-    WorkDispatcher workDispatcher = [&](ComputeThreadID id){
-        auto work = m_config.intraNodeScheduler->getNextBatch(id);
-        #ifdef DBG_DATA
-            log("Assigning batch with %lu elements starting from %lu to %d", work.numOfElements, work.startPoint, id);
-        #endif
-        return work;
-    };
-
-	#ifdef DBG_TIME
-		Stopwatch sw;
-		float time_data, time_assign, time_start, time_wait, time_scores, time_results;
-    #endif
-
     #ifdef DBG_DATA
         log("Max batch size: %lu", m_maxBatchSize);
     #elif defined(DBG_MPI_STEPS)
         log("Sending max batch size = %lu", m_maxBatchSize);
     #endif
+
+    #ifdef DBG_TIME
+        Stopwatch sw;
+        sw.start();
+    #endif
+
     DesFramework::sendMaxBatchSize(m_maxBatchSize);
 
+    #ifdef DBG_TIME
+        sw.stop();
+        log("Time to send max batch size: %f ms", sw.getMsec());
+    #endif
+
 	while(true){
+        #ifdef DBG_TIME
+            float time_data, time_alloc, time_start, time_wait, time_scores, time_results;
+            std::atomic_long time_assign;   // nanoseconds
+            sw.start();
+        #endif
+
+        WorkDispatcher workDispatcher = [&](ComputeThreadID id){
+            #ifdef DBG_TIME
+                Stopwatch tempSw;
+                tempSw.start();
+            #endif
+            auto work = m_config.intraNodeScheduler->getNextBatch(id);
+            #ifdef DBG_TIME
+                tempSw.stop();
+                time_assign.fetch_add(tempSw.getNsec());
+            #endif
+            #ifdef DBG_DATA
+                log("Assigning batch with %lu elements starting from %lu to %d", work.numOfElements, work.startPoint, id);
+            #endif
+            return work;
+        };
+
 		// Send READY signal to master
 		#ifdef DBG_MPI_STEPS
             log("Sending READY...");
-		#endif
-		#ifdef DBG_TIME
-			sw.start();
-		#endif
+        #endif
 
         // Get a batch of data from master
         DesFramework::sendReadyRequest();
@@ -81,6 +108,12 @@ void CoordinatorThread::run(){
 		#ifdef DBG_MPI_STEPS
             log("Received %lu elements", work.numOfElements);
 		#endif
+
+        #ifdef DBG_TIME
+            sw.stop();
+            time_data = sw.getMsec();
+            sw.start();
+        #endif
 
 		// If no elements, break
 		if(work.numOfElements == 0)
@@ -112,7 +145,7 @@ void CoordinatorThread::run(){
 
 		#ifdef DBG_TIME
 			sw.stop();
-			time_data = sw.getMsec();
+            time_alloc = sw.getMsec();
 			sw.start();
         #endif
 
@@ -128,7 +161,7 @@ void CoordinatorThread::run(){
 
 		#ifdef DBG_TIME
 			sw.stop();
-			time_assign = sw.getMsec();
+            time_assign.store(sw.getNsec());
 			sw.start();
 		#endif
 
@@ -239,11 +272,12 @@ void CoordinatorThread::run(){
 
             log("Benchmark:");
             log("Time for receiving data: %f ms", time_data);
-            log("Time for assign: %f ms", time_assign);
-            log("Time for start: %f ms", time_start);
-            log("Time for wait: %f ms", time_wait);
-            log("Time for scores: %f ms", time_scores);
-            log("Time for results: %f ms", time_results);
+            log("Time for allocating memory: %f ms", time_alloc);
+            log("Time for assignments: %f ms", time_assign.load() / 1000.f);
+            log("Time for starting compute threads: %f ms", time_start);
+            log("Time for all threads to finish: %f ms", time_wait);
+            log("Time for scheduler to be updated: %f ms", time_scores);
+            log("Time for sending results: %f ms", time_results);
 		#endif
     }
 }

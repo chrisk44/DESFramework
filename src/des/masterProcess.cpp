@@ -20,6 +20,7 @@ void DesFramework::masterProcess() {
 
     #ifdef DBG_TIME
         Stopwatch sw;
+        sw.start();
     #endif
 
     std::vector<int> slaveProcessIds;
@@ -32,7 +33,19 @@ void DesFramework::masterProcess() {
         slaveProcessIds.push_back(slaveProcessInfo[i].id);
     }
 
+    #ifdef DBG_TIME
+        sw.stop();
+        log("Time to initialize slave process objects: %f ms", sw.getMsec());
+        sw.start();
+    #endif
+
     auto maxBatchSizes = receiveMaxBatchSizes();
+
+    #ifdef DBG_TIME
+        sw.stop();
+        log("Time to receive max batch sizes: %f ms", sw.getMsec());
+        sw.start();
+    #endif
 
 #ifdef DBG_DATA
     log("Received %lu max batch sizes:\n", maxBatchSizes.size());
@@ -62,13 +75,24 @@ void DesFramework::masterProcess() {
             log("Received tag '%s' from %d", TAG_NAMES.at(request).c_str(), mpiSource);
         #endif
 
+        #ifdef DBG_TIME
+            sw.start();
+        #endif
+
         switch(request){
-            case TAG_READY:
+            case TAG_READY: {
                 #ifdef DBG_TIME
+                    Stopwatch sw;
                     sw.start();
                 #endif
 
                 pinfo.work = m_config.interNodeScheduler->getNextBatch(pinfo.id);
+
+                #ifdef DBG_TIME
+                    sw.stop();
+                    log("Benchmark: Time for scheduler to assign work: %f ms", sw.getMsec());
+                    sw.start();
+                #endif
 
                 #ifdef DBG_MPI_STEPS
                     log("Sending %lu elements to %d with index %lu", pinfo.work.numOfElements, mpiSource, pinfo.work.startPoint);
@@ -80,23 +104,25 @@ void DesFramework::masterProcess() {
                 // Send the batch to the slave process
                 sendBatch(pinfo.work, mpiSource);
 
-                m_config.interNodeScheduler->onNodeStarted(pinfo.id);
-
-                // Start stopwatch for process
-                pinfo.stopwatch.start();
-
                 #ifdef DBG_TIME
                     sw.stop();
-                    log("Benchmark: Time for TAG_READY: %f ms", sw.getMsec());
-                #endif
-
-                break;
-
-            case TAG_RESULTS: {
-                #ifdef DBG_TIME
+                    log("Benchmark: Time to send batch: %f ms", sw.getMsec());
                     sw.start();
                 #endif
 
+                m_config.interNodeScheduler->onNodeStarted(pinfo.id);
+
+                #ifdef DBG_TIME
+                    sw.stop();
+                    log("Benchmark: Time for scheduler's onNodeStarted(): %f ms", sw.getMsec());
+                #endif
+
+                // Start stopwatch for process
+                pinfo.stopwatch.start();
+                break;
+            }
+
+            case TAG_RESULTS: {
                 // Receive the results
                 if(m_config.resultSaveType == SAVE_TYPE_ALL){
                     receiveAllResults(&((RESULT_TYPE*) m_finalResults)[pinfo.work.startPoint], pinfo.work.numOfElements, mpiSource);
@@ -170,7 +196,17 @@ void DesFramework::masterProcess() {
                 pinfo.elementsCalculated += pinfo.work.numOfElements;
                 pinfo.stopwatch.stop();
 
+                #ifdef DBG_TIME
+                    Stopwatch sw;
+                    sw.start();
+                #endif
+
                 m_config.interNodeScheduler->onNodeFinished(pinfo.id, pinfo.work.numOfElements, pinfo.stopwatch.getMsec());
+
+                #ifdef DBG_TIME
+                    sw.stop();
+                    log("Benchmark: Time for scheduler's onNodeFinished(): %f ms", sw.getMsec());
+                #endif
 
                 // Print benchmark results
                 if (m_config.benchmark && m_config.printProgress) {
@@ -179,12 +215,6 @@ void DesFramework::masterProcess() {
 
                 // Reset pinfo
                 pinfo.work.numOfElements = 0;
-
-                #ifdef DBG_TIME
-                    sw.stop();
-                    log("Benchmark: Time for TAG_RESULTS: %f ms", sw.getMsec());
-                #endif
-
                 break;
             }
 
@@ -200,9 +230,13 @@ void DesFramework::masterProcess() {
                 pinfo.finished = true;
 
                 finished++;
-
                 break;
         }
+
+        #ifdef DBG_TIME
+            sw.stop();
+            log("Benchmark: Time for tag '%s': %f ms", TAG_NAMES.at(request).c_str(), sw.getMsec());
+        #endif
     }
 
     if(m_totalReceived != m_totalElements)

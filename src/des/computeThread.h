@@ -67,8 +67,8 @@ public:
 private:
     void initDevices();
     void prepareForElements(size_t numOfElements);
-    void doWorkCpu(const AssignedWork& work, void* results, int* listIndex);
-    void doWorkGpu(const AssignedWork& work, void* results, int* listIndex);
+    void doWorkCpu(const AssignedWork& work, void* results, int* listIndex, float* t_calc, float* t_memcpy);
+    void doWorkGpu(const AssignedWork& work, void* results, int* listIndex, float* t_calc, float* t_memcpy);
     void finalize();
 
     void start(WorkDispatcher workDispatcher, void* localResults, size_t indexOffset, int* listIndex);

@@ -31,6 +31,11 @@ void DesFramework::slaveProcess() {
     for(int i=0; i<numOfCpus; i++) computeThreads.emplace_back(-i-1, "CPU" + std::to_string(i), WorkerThreadType::CPU, getConfig(), getIndexSteps());
     for(int i=0; i<numOfGpus; i++) computeThreads.emplace_back(i,  "GPU" + std::to_string(i), WorkerThreadType::GPU, getConfig(), getIndexSteps());
 
+    #ifdef DBG_TIME
+        masterStopwatch.stop();
+        log("Time to create compute threads: %f ms", masterStopwatch.getMsec());
+    #endif
+
     #ifdef DBG_START_STOP
         log("Created %lu compute threads", computeThreads.size());
     #endif
