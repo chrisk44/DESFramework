@@ -48,7 +48,7 @@ void CoordinatorThread::log(const char *text, ...) {
     vsnprintf(buf, sizeof(buf), text, args);
     va_end(args);
 
-    printf("[%d]     Coordinator: %s\n", m_rank, buf);
+    printf("%s [%d]     Coordinator: %s\n", getTimeString().c_str(), m_rank, buf);
 }
 
 void CoordinatorThread::run(){

@@ -10,6 +10,7 @@
 #include "des/scheduler/hrdlsScheduler.h"
 #include "des/scheduler/hrslsScheduler.h"
 #include "des/scheduler/uniformScheduler.h"
+#include "des/utilities.h"
 
 /*
  * Each one of these contain a __host__ __device__ doValidate[MO][123] function
@@ -274,6 +275,8 @@ void parseArgs(int argc, char** argv){
 }
 
 int main(int argc, char** argv){
+    desf::initTime();
+
     const std::string modelNames[4] = {
         "mogi1",
         "mogi2",

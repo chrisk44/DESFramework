@@ -28,8 +28,8 @@ void DesFramework::slaveProcess() {
     }
 
     std::vector<ComputeThread> computeThreads;
-    for(int i=0; i<numOfCpus; i++) computeThreads.emplace_back(-i-1, "CPU" + std::to_string(i), WorkerThreadType::CPU, getConfig(), getIndexSteps());
-    for(int i=0; i<numOfGpus; i++) computeThreads.emplace_back(i,  "GPU" + std::to_string(i), WorkerThreadType::GPU, getConfig(), getIndexSteps());
+    for(int i=0; i<numOfCpus; i++) computeThreads.emplace_back(-i-1, "CPU." + std::to_string(m_rank) + "." + std::to_string(i), WorkerThreadType::CPU, getConfig(), getIndexSteps());
+    for(int i=0; i<numOfGpus; i++) computeThreads.emplace_back(i,  "GPU." + std::to_string(m_rank) + "." + std::to_string(i), WorkerThreadType::GPU, getConfig(), getIndexSteps());
 
     #ifdef DBG_TIME
         masterStopwatch.stop();

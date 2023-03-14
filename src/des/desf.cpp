@@ -6,6 +6,7 @@
 #include <stdarg.h>
 
 #include "desf.h"
+#include "utilities.h"
 
 namespace desf {
 
@@ -236,7 +237,7 @@ void DesFramework::log(const char *text, ...) {
     va_end(args);
 
     std::string label = m_rank == 0 ? "Master" : "  Slave";
-    printf("[%d] %s: %s\n", m_rank, label.c_str(), buf);
+    printf("%s [%d] %s: %s\n", getTimeString().c_str(), m_rank, label.c_str(), buf);
 }
 
 }

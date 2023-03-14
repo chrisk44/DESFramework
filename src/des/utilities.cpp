@@ -59,6 +59,19 @@ int getCpuStats(float* uptime, float* idleTime){
     }
 }
 
+std::chrono::milliseconds startTime;
+
+void initTime() {
+    using namespace std::chrono;
+    startTime = duration_cast<milliseconds>(system_clock::now().time_since_epoch());
+}
+
+std::string getTimeString() {
+    using namespace std::chrono;
+    milliseconds t = duration_cast<milliseconds>(system_clock::now().time_since_epoch()) - startTime;
+    return std::to_string(t.count());
+}
+
 #define RECV_SLEEP_US 100     // Time in micro-seconds to sleep between checking for data in MPI_Recv
 void MMPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status* status){
     // MPI_Recv(buf, count, datatype, source, tag, comm, status);

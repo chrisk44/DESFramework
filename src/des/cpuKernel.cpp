@@ -12,7 +12,7 @@ void cpu_kernel(desf::validationFunc_t validationFunc, desf::toBool_t toBool,
     unsigned long currentBatchStart = startingPointLinearIndex;
     unsigned long globalLast = startingPointLinearIndex + numOfElements - 1;
 
-    #pragma omp parallel shared(currentBatchStart)
+    #pragma omp parallel shared(currentBatchStart) num_threads(1)
     {
         DATA_TYPE point[D];
         unsigned long* currentIndex = new unsigned long[D];

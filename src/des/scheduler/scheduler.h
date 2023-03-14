@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "../types.h"
+#include "../utilities.h"
 
 namespace desf {
 
@@ -104,7 +105,7 @@ protected:
         va_end(args);
 
         std::string spaces = m_rank == 0 ? "" : "    ";
-        printf("[%d] %sScheduler: %s\n", m_rank, spaces.c_str(), buf);
+        printf("%s [%d] %sScheduler: %s\n", getTimeString().c_str(), m_rank, spaces.c_str(), buf);
     }
 
 private:

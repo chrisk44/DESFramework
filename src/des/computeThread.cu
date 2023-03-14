@@ -82,7 +82,7 @@ void ComputeThread::log(const char *text, ...) {
     vsnprintf(buf, sizeof(buf), text, args);
     va_end(args);
 
-    printf("[%d]       Compute thread %d: %s\n", m_rank, getId(), buf);
+    printf("%s [%d]       Compute thread %d: %s\n", getTimeString().c_str(), m_rank, getId(), buf);
 }
 
 void ComputeThread::initDevices() {
@@ -268,18 +268,20 @@ void ComputeThread::prepareForElements(size_t numOfElements) {
 void ComputeThread::doWorkCpu(const AssignedWork &work, ComputeEnvironment& env, float* t_calc, float* t_memcpy) {
     Stopwatch sw;
     sw.start();
-    cpu_kernel(m_config.cpu.forwardModel,
-               m_config.cpu.objective,
-               m_config.model.D,
-               m_config.limits.data(),
-               m_indexSteps.data(),
-               work.startPoint,
-               work.numOfElements,
-               env.getSaveType() == SAVE_TYPE_ALL ? env.getAddrForIndex(work.startPoint) : nullptr,
-               [&env](size_t index){ env.addResult(index); },
-               m_config.model.dataPtr,
-               m_config.cpu.dynamicScheduling,
-               m_config.cpu.computeBatchSize);
+//    cpu_kernel(m_config.cpu.forwardModel,
+//               m_config.cpu.objective,
+//               m_config.model.D,
+//               m_config.limits.data(),
+//               m_indexSteps.data(),
+//               work.startPoint,
+//               work.numOfElements,
+//               env.getSaveType() == SAVE_TYPE_ALL ? env.getAddrForIndex(work.startPoint) : nullptr,
+//               [&env](size_t index){ env.addResult(index); },
+//               m_config.model.dataPtr,
+//               m_config.cpu.dynamicScheduling,
+//               m_config.cpu.computeBatchSize);
+
+    usleep(m_rank * work.numOfElements);
     sw.stop();
     if(t_calc) *t_calc = sw.getMsec();
     if(t_memcpy) *t_memcpy = 0;
